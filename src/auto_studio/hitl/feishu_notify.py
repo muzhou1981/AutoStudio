@@ -5,7 +5,11 @@ from __future__ import annotations
 import logging
 import os
 
-from auto_studio.hitl.feishu_cards import build_gate_interactive_card, card_content_json
+from auto_studio.hitl.feishu_cards import (
+    build_escalation_interactive_card,
+    build_gate_interactive_card,
+    card_content_json,
+)
 from auto_studio.hitl.feishu_config import (
     FeishuHitlConfig,
     load_feishu_hitl_config,
@@ -90,6 +94,13 @@ def notify_awaiting_human_via_lark_cli(
                 thread_id=thread_id,
                 summary=ah.summary,
                 gate_id=ah.gate_id,
+                web_url=web_url,
+            )
+            _send_to_target(cfg, card_json=card_content_json(card))
+        elif ah.kind == "escalation" and _use_interactive_card():
+            card = build_escalation_interactive_card(
+                thread_id=thread_id,
+                summary=ah.summary,
                 web_url=web_url,
             )
             _send_to_target(cfg, card_json=card_content_json(card))

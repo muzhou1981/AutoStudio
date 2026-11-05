@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from auto_studio.hitl.feishu_inbound import (
     FeishuInboundError,
+    card_action_toast_response,
     extract_event_payload,
     parse_card_action_trigger,
     url_verification_response,
@@ -74,17 +75,29 @@ async def feishu_webhook(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     try:
-        st = svc.submit_from_feishu_card(
-            thread_id=action["thread_id"],
-            gate_decision=action["gate_decision"],  # type: ignore[arg-type]
-            human_reply=action.get("human_reply") or "",
-        )
+        if action.get("hitl_action") == "escalation":
+            st = svc.submit_from_feishu_card(
+                thread_id=action["thread_id"],
+                escalation_choice=action["escalation_choice"],  # type: ignore[arg-type]
+                human_reply=action.get("human_reply") or "",
+            )
+        else:
+            st = svc.submit_from_feishu_card(
+                thread_id=action["thread_id"],
+                gate_decision=action["gate_decision"],  # type: ignore[arg-type]
+                human_reply=action.get("human_reply") or "",
+            )
     except HitlError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
 
     project_id = str(st.values.get("project_id") or "")
     notify_awaiting_human_via_lark_cli(svc, st.thread_id, project_id)
-    return {"ok": True, "phase": st.phase, "thread_id": st.thread_id}
+    return {
+        **card_action_toast_response("已提交，工厂续跑中"),
+        "ok": True,
+        "phase": st.phase,
+        "thread_id": st.thread_id,
+    }
 
 
 @router.post("/api/webhooks/feishu/card-action")
@@ -108,7 +121,7 @@ def feishu_card_action_test(body: CardActionBody) -> dict[str, Any]:
 def api_open_hitl(thread_id: str, body: OpenHitlBody) -> dict:
     svc = _service()
     try:
-        svc.open_hitl(
+        st = svc.open_hitl(
             thread_id,
             kind=body.kind,  # type: ignore[arg-type]
             questions=body.questions,
@@ -116,4 +129,6 @@ def api_open_hitl(thread_id: str, body: OpenHitlBody) -> dict:
         )
     except HitlError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    project_id = str(st.values.get("project_id") or "")
+    notify_awaiting_human_via_lark_cli(svc, thread_id, project_id)
     return svc.status_dict(thread_id)

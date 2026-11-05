@@ -46,16 +46,33 @@ def parse_card_action_trigger(event: dict[str, Any]) -> dict[str, str]:
             )
     data = _parse_action_value(action_value)
     thread_id = str(data.get("thread_id") or "").strip()
-    gate_decision = str(data.get("gate_decision") or "").strip()
     if not thread_id:
         raise FeishuInboundError("卡片回调缺少 thread_id")
+    hitl_action = str(data.get("hitl_action") or "gate").strip().lower()
+    if hitl_action == "escalation":
+        choice = str(data.get("escalation_choice") or "").strip()
+        if choice not in ("continue", "pause", "abort"):
+            raise FeishuInboundError("升级卡片缺少 escalation_choice")
+        return {
+            "thread_id": thread_id,
+            "hitl_action": "escalation",
+            "escalation_choice": choice,
+            "human_reply": str(data.get("human_reply") or "").strip(),
+        }
+    gate_decision = str(data.get("gate_decision") or "").strip()
     if gate_decision not in ("approved", "rejected"):
         raise FeishuInboundError("卡片回调缺少 gate_decision")
     return {
         "thread_id": thread_id,
+        "hitl_action": "gate",
         "gate_decision": gate_decision,
         "human_reply": str(data.get("human_reply") or "").strip(),
     }
+
+
+def card_action_toast_response(content: str = "已提交") -> dict[str, Any]:
+    """飞书 card.action.trigger 同步响应（Toast）。"""
+    return {"toast": {"type": "info", "content": content}}
 
 
 def extract_event_payload(body: dict[str, Any]) -> dict[str, Any]:

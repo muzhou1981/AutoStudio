@@ -11,6 +11,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from auto_studio.hitl.constants import GATE_NODES, gate_summary
 from auto_studio.hitl.hitl_audit import audit_patch
+from auto_studio.hitl.pm_clarification import merge_clarification_reply
 
 RunPhase = Literal["running", "awaiting_human", "completed", "rejected"]
 HitlKind = Literal["gate", "pm_clarification", "escalation"]
@@ -211,15 +212,24 @@ class GraphRunService:
         if awaiting.kind == "pm_clarification":
             if not human_reply.strip():
                 raise HitlError("pm_clarification 须填写 human_reply")
+            spec = str(st.values.get("requirement_spec") or "")
+            merged_spec = merge_clarification_reply(
+                spec,
+                human_reply,
+                questions=awaiting.questions,
+            )
             patch = {
+                "requirement_spec": merged_spec,
                 "human_reply": human_reply,
+                "hitl_clarification_resolved": True,
                 **self._clear_pending_patch(),
                 **audit,
             }
             self._graph.update_state(cfg, patch)
             snap = self._graph.get_state(cfg)
-            if snap.next:
-                self._graph.invoke(None, cfg)
+            if not snap.next:
+                self._graph.update_state(cfg, None, as_node="tester_testability")
+            self._graph.invoke(None, cfg)
             return self.status(thread_id)
 
         if awaiting.kind == "escalation":
@@ -239,8 +249,9 @@ class GraphRunService:
             self._graph.update_state(cfg, patch)
             if choice == "continue":
                 snap = self._graph.get_state(cfg)
-                if snap.next:
-                    self._graph.invoke(None, cfg)
+                if not snap.next:
+                    self._graph.update_state(cfg, None, as_node="developer")
+                self._graph.invoke(None, cfg)
             return self.status(thread_id)
 
         raise HitlError(f"未知 kind={awaiting.kind!r}")
@@ -249,9 +260,19 @@ class GraphRunService:
         self,
         *,
         thread_id: str,
-        gate_decision: Literal["approved", "rejected"],
+        gate_decision: Literal["approved", "rejected"] | None = None,
         human_reply: str = "",
+        escalation_choice: EscalationChoice | None = None,
     ) -> RunStatus:
+        if escalation_choice is not None:
+            return self.submit_hitl(
+                thread_id,
+                human_reply=human_reply,
+                escalation_choice=escalation_choice,
+                channel="feishu",
+            )
+        if gate_decision not in ("approved", "rejected"):
+            raise HitlError("gate 卡片回调缺少 gate_decision")
         return self.submit_hitl(
             thread_id,
             gate_decision=gate_decision,

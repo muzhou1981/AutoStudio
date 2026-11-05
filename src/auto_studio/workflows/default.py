@@ -95,6 +95,7 @@ class FactoryState(TypedDict, total=False):
     hitl_pending_since: str
     hitl_audit_log: str
     escalation_choice: str
+    hitl_clarification_resolved: bool
 
 
 def _touch_artifact(state: FactoryState, key: str, role: str, note: str) -> dict:
@@ -146,14 +147,53 @@ def project_manager_draft(state: FactoryState) -> dict:
     return {"requirement_spec": body}
 
 
+def pm_clarification_check(state: FactoryState) -> dict:
+    """若 requirement_spec 含待澄清项，写入 HITL 并暂停在 hitl_pause。"""
+    from datetime import UTC, datetime
+
+    from auto_studio.hitl.pm_clarification import extract_pm_questions
+
+    if state.get("hitl_clarification_resolved"):
+        return {}
+    spec = state.get("requirement_spec") or ""
+    questions = extract_pm_questions(spec)
+    if not questions:
+        return {"hitl_clarification_resolved": True}
+    if state.get("hitl_pending_kind") == "pm_clarification":
+        return {}
+    return {
+        "hitl_pending_kind": "pm_clarification",
+        "hitl_questions": questions,
+        "hitl_summary": "需求说明中有待澄清项，请答复后工厂继续。",
+        "hitl_pending_since": datetime.now(UTC).isoformat(),
+    }
+
+
+def hitl_pause(state: FactoryState) -> dict:
+    """图内暂停点：awaiting_human 由 hitl_pending_kind 推断。"""
+    return {}
+
+
+def route_after_pm_clarification(state: FactoryState) -> str:
+    if state.get("hitl_pending_kind") == "pm_clarification":
+        return "hitl_pause"
+    return "tester_testability"
+
+
 @skip_if_disabled("tester_testability")
 def tester_testability(state: FactoryState) -> dict:
-    return _touch_artifact(
-        state,
-        "testability_review",
-        "tester",
-        "可测试性评审（关卡前）",
+    from auto_studio.backends.runner import invoke_role
+
+    spec = state.get("requirement_spec") or ""
+    body = invoke_role(
+        role_name="tester",
+        user_prompt=(
+            f"需求说明：\n{spec[:8000]}\n\n"
+            "请产出 `testability_review` 正文（Markdown），指出可测试性风险与建议。"
+        ),
+        stub_note="可测试性评审（关卡前）",
     )
+    return {"testability_review": body}
 
 
 def gate_requirement_confirm(state: FactoryState) -> dict:
@@ -217,20 +257,36 @@ def finance_budget_rough(state: FactoryState) -> dict:
 
 @skip_if_disabled("project_manager_scope")
 def project_manager_scope(state: FactoryState) -> dict:
-    return _touch_artifact(
+    existing = (state.get("requirement_spec") or "").rstrip()
+    note = _touch_artifact(
         state,
         "requirement_spec",
         "project_manager",
         "需求说明（范围已与粗估预算对齐，待架构）",
-    )
+    )["requirement_spec"]
+    body = f"{existing}\n\n---\n\n{note}" if existing else note
+    return {"requirement_spec": body}
 
 
 @skip_if_disabled("architect")
 def architect(state: FactoryState) -> dict:
-    return {
-        **_touch_artifact(state, "architecture_design", "architect", "架构设计"),
-        **_touch_artifact(state, "task_plan", "architect", "任务计划"),
-    }
+    from auto_studio.backends.runner import invoke_role
+
+    spec = state.get("requirement_spec") or ""
+    arch = invoke_role(
+        role_name="architect",
+        user_prompt=f"需求说明：\n{spec[:8000]}\n\n请产出 `architecture_design` 正文。",
+        stub_note="架构设计",
+    )
+    plan = invoke_role(
+        role_name="architect",
+        user_prompt=(
+            f"架构设计：\n{arch[:6000]}\n\n"
+            "请产出 `task_plan` 正文（任务拆分与依赖）。"
+        ),
+        stub_note="任务计划",
+    )
+    return {"architecture_design": arch, "task_plan": plan}
 
 
 @skip_if_disabled("finance_budget_final")
@@ -248,11 +304,19 @@ def gate_architecture_review(state: FactoryState) -> dict:
 
 @skip_if_disabled("developer")
 def developer(state: FactoryState) -> dict:
+    from auto_studio.backends.runner import invoke_role
+
     retries = state.get("dev_retry_count", 0)
-    return {
-        **_touch_artifact(state, "code_change", "developer", f"代码变更 attempt={retries + 1}"),
-        "dev_retry_count": retries + 1,
-    }
+    task = state.get("task_plan") or ""
+    body = invoke_role(
+        role_name="developer",
+        user_prompt=(
+            f"任务计划：\n{task[:8000]}\n\n"
+            f"请产出本轮 `code_change` 说明（attempt={retries + 1}）。"
+        ),
+        stub_note=f"代码变更 attempt={retries + 1}",
+    )
+    return {"code_change": body, "dev_retry_count": retries + 1}
 
 
 @skip_if_disabled("code_reviewer")
@@ -325,8 +389,15 @@ def process_owner_retro(state: FactoryState) -> dict:
 
 
 def escalate_dev_retry(state: FactoryState) -> dict:
+    from datetime import UTC, datetime
+
+    summary = "开发回退次数已达上限，请选择：继续 / 暂停 / 终止。"
     return {
-        "change_request": "[stub:escalation] 开发回退次数已达上限，需人类决策",
+        "change_request": summary,
+        "hitl_pending_kind": "escalation",
+        "hitl_summary": summary,
+        "hitl_questions": [],
+        "hitl_pending_since": datetime.now(UTC).isoformat(),
     }
 
 
@@ -407,12 +478,20 @@ def build_graph() -> StateGraph:
         "config_manager_closeout": config_manager_closeout,
         "process_owner_retro": process_owner_retro,
         "escalate_dev_retry": escalate_dev_retry,
+        "pm_clarification_check": pm_clarification_check,
+        "hitl_pause": hitl_pause,
     }
     for name, fn in nodes.items():
         builder.add_node(name, fn)
 
     builder.add_edge(START, "project_manager_draft")
-    builder.add_edge("project_manager_draft", "tester_testability")
+    builder.add_edge("project_manager_draft", "pm_clarification_check")
+    builder.add_conditional_edges(
+        "pm_clarification_check",
+        route_after_pm_clarification,
+        {"hitl_pause": "hitl_pause", "tester_testability": "tester_testability"},
+    )
+    builder.add_edge("hitl_pause", END)
     builder.add_edge("tester_testability", "gate_requirement_confirm")
     builder.add_conditional_edges(
         "gate_requirement_confirm",
