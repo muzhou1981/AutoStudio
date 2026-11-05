@@ -13,14 +13,14 @@ if TYPE_CHECKING:
 
 class CursorBackend:
     def __init__(self) -> None:
-        from cursor_sdk import Client
+        from cursor_sdk._client import _default_client
         from cursor_sdk.types import LocalAgentOptions
 
         api_key = os.environ.get("CURSOR_API_KEY", "").strip()
         if not api_key:
             raise RuntimeError("缺少 CURSOR_API_KEY")
         self._api_key = api_key
-        self._client = Client()
+        self._client = _default_client()
         self._local = LocalAgentOptions(cwd=os.fspath(factory_root()))
         self._agents: dict[str, object] = {}
 
@@ -67,16 +67,16 @@ def _cursor_backend_enabled() -> bool:
 def try_cursor_backend() -> AgentBackend | None:
     if not _cursor_backend_enabled():
         return None
-    cursor_errors: tuple[type[BaseException], ...] = (RuntimeError, OSError)
+    bridge_errors: tuple[type[BaseException], ...] = (RuntimeError, OSError)
     try:
-        from cursor_sdk.errors import CursorSDKError
+        from cursor_sdk.errors import ConfigurationError
 
-        cursor_errors = (RuntimeError, OSError, CursorSDKError)
+        bridge_errors = (RuntimeError, OSError, ConfigurationError)
     except ImportError:
         pass
     try:
         return CursorBackend()
-    except cursor_errors:
+    except bridge_errors:
         return None
     except ImportError:
         return None
