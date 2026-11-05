@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
+
+_THREAD_IN_TEXT = re.compile(
+    r"(?:^|\s)(?:RUN:|run:)([0-9a-fA-F-]{36})(?:\s|$)",
+)
 
 
 class FeishuInboundError(ValueError):
@@ -73,6 +78,51 @@ def parse_card_action_trigger(event: dict[str, Any]) -> dict[str, str]:
 def card_action_toast_response(content: str = "已提交") -> dict[str, Any]:
     """飞书 card.action.trigger 同步响应（Toast）。"""
     return {"toast": {"type": "info", "content": content}}
+
+
+def event_type_from_body(body: dict[str, Any]) -> str:
+    if "header" in body and isinstance(body["header"], dict):
+        et = body["header"].get("event_type")
+        if et:
+            return str(et)
+    return str(body.get("type") or body.get("event_type") or "")
+
+
+def parse_thread_id_from_text(text: str) -> str | None:
+    m = _THREAD_IN_TEXT.search(text.strip())
+    return m.group(1) if m else None
+
+
+def parse_im_message_receive(body: dict[str, Any]) -> dict[str, str] | None:
+    """解析 im.message.receive_v1 文本消息。"""
+    if event_type_from_body(body) != "im.message.receive_v1":
+        return None
+    event = body.get("event") if "event" in body else body
+    if not isinstance(event, dict):
+        return None
+    message = event.get("message") or {}
+    if str(message.get("message_type") or "") != "text":
+        return None
+    raw_content = message.get("content") or "{}"
+    try:
+        content = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(content, dict):
+        return None
+    text = str(content.get("text") or "").strip()
+    if not text:
+        return None
+    chat_id = str(message.get("chat_id") or event.get("chat_id") or "").strip()
+    sender = event.get("sender") or {}
+    sender_id = sender.get("sender_id") or {}
+    open_id = str(sender_id.get("open_id") or "").strip()
+    return {"text": text, "chat_id": chat_id, "open_id": open_id}
+
+
+def normalize_im_hitl_reply(text: str) -> str:
+    """去掉 RUN:uuid 前缀后的澄清正文。"""
+    return _THREAD_IN_TEXT.sub(" ", text).strip()
 
 
 def extract_event_payload(body: dict[str, Any]) -> dict[str, Any]:

@@ -13,6 +13,7 @@
 ```bash
 auto-studio-web   # 另开终端
 auto-studio-feishu-bridge --webhook http://127.0.0.1:8765/api/webhooks/feishu
+# 默认同时转发 card.action.trigger 与 im.message.receive_v1（PM 澄清文本答复）
 ```
 
 等价 shell 管道见 ADR 0004；环境变量 `AUTO_STUDIO_FEISHU_WEBHOOK` 可覆盖默认 URL。

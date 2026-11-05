@@ -10,11 +10,16 @@ from pydantic import BaseModel, Field
 from auto_studio.hitl.feishu_inbound import (
     FeishuInboundError,
     card_action_toast_response,
+    event_type_from_body,
     extract_event_payload,
+    normalize_im_hitl_reply,
     parse_card_action_trigger,
+    parse_im_message_receive,
+    parse_thread_id_from_text,
     url_verification_response,
 )
 from auto_studio.hitl.feishu_notify import notify_awaiting_human_via_lark_cli
+from auto_studio.hitl.feishu_session import resolve_thread_id
 from auto_studio.hitl.service import GraphRunService, HitlError
 
 router = APIRouter(tags=["feishu"])
@@ -45,6 +50,65 @@ def _service() -> GraphRunService:
     return _run_service
 
 
+def _handle_im_message(body: dict) -> dict:
+    im = parse_im_message_receive(body)
+    if im is None:
+        return {"ok": True, "ignored": "not_text_im"}
+    text = im["text"]
+    thread_id = parse_thread_id_from_text(text) or resolve_thread_id(
+        chat_id=im.get("chat_id") or "",
+        open_id=im.get("open_id") or "",
+    )
+    if not thread_id:
+        return {"ok": True, "ignored": "no_thread_binding"}
+    svc = _service()
+    try:
+        st = svc.status(thread_id)
+    except HitlError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    if st.phase != "awaiting_human" or st.awaiting_human is None:
+        return {"ok": True, "ignored": "not_awaiting_human"}
+    ah = st.awaiting_human
+    reply = normalize_im_hitl_reply(text)
+    try:
+        if ah.kind == "pm_clarification":
+            st = svc.submit_hitl(thread_id, human_reply=reply, channel="feishu")
+        elif ah.kind == "gate":
+            decision = None
+            if reply in ("批准", "通过", "approved", "LGTM", "ok"):
+                decision = "approved"
+            elif reply in ("驳回", "拒绝", "rejected"):
+                decision = "rejected"
+            if decision is None:
+                return {"ok": True, "ignored": "gate_needs_decision_keyword"}
+            st = svc.submit_hitl(
+                thread_id,
+                gate_decision=decision,
+                human_reply=reply,
+                channel="feishu",
+            )
+        elif ah.kind == "escalation":
+            choice = reply.strip().lower()
+            if choice not in ("continue", "pause", "abort"):
+                mapping = {"继续": "continue", "暂停": "pause", "终止": "abort", "abort": "abort"}
+                choice = mapping.get(reply, "")
+            if choice not in ("continue", "pause", "abort"):
+                return {"ok": True, "ignored": "escalation_needs_choice"}
+            st = svc.submit_hitl(
+                thread_id,
+                escalation_choice=choice,  # type: ignore[arg-type]
+                human_reply=reply,
+                channel="feishu",
+            )
+        else:
+            return {"ok": True, "ignored": ah.kind}
+    except HitlError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    project_id = str(st.values.get("project_id") or "")
+    notify_awaiting_human_via_lark_cli(svc, st.thread_id, project_id)
+    return {"ok": True, "phase": st.phase, "thread_id": st.thread_id}
+
+
 @router.post("/api/webhooks/feishu")
 async def feishu_webhook(request: Request) -> dict[str, Any]:
     try:
@@ -58,13 +122,19 @@ async def feishu_webhook(request: Request) -> dict[str, Any]:
     if challenge:
         return challenge
 
+    event_type = event_type_from_body(body)
+    if event_type == "im.message.receive_v1":
+        return _handle_im_message(body)
+
     event = extract_event_payload(body)
-    event_type = str(
-        event.get("type")
-        or body.get("header", {}).get("event_type")
-        or body.get("type")
-        or ""
-    )
+    if event_type != "card.action.trigger":
+        event_type = str(
+            event.get("type")
+            or body.get("header", {}).get("event_type")
+            or body.get("type")
+            or event_type
+            or ""
+        )
     if event_type != "card.action.trigger":
         return {"ok": True, "ignored": event_type or "unknown"}
 

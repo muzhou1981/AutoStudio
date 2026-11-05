@@ -120,6 +120,48 @@ def build_gate_interactive_card(
     }
 
 
+def build_pm_clarification_interactive_card(
+    *,
+    thread_id: str,
+    summary: str,
+    questions: list[str],
+    web_url: str,
+) -> dict[str, Any]:
+    title = "软件工厂 · 需求澄清"
+    q_md = "\n".join(f"- {q}" for q in questions) if questions else "（见 Web）"
+    body_md = (summary or "请答复以下问题，工厂方可继续。") + "\n\n" + q_md
+    return {
+        "schema": "2.0",
+        "config": {"update_multi": True, "width_mode": "default"},
+        "header": {
+            "title": {"tag": "plain_text", "content": title},
+            "template": "wathet",
+        },
+        "body": {
+            "direction": "vertical",
+            "padding": "12px 12px 20px 12px",
+            "elements": [
+                {"tag": "markdown", "content": body_md, "text_align": "left"},
+                {
+                    "tag": "markdown",
+                    "content": (
+                        f"Run：`{thread_id}`\n\n"
+                        "在 Web 填写澄清，或在本会话回复文字（可省略 RUN: 前缀）。"
+                    ),
+                    "text_align": "left",
+                },
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "在 Web 中答复"},
+                    "type": "primary_filled",
+                    "width": "fill",
+                    "behaviors": [{"type": "open_url", "default_url": web_url}],
+                },
+            ],
+        },
+    }
+
+
 def build_escalation_interactive_card(
     *,
     thread_id: str,

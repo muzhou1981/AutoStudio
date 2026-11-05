@@ -681,16 +681,27 @@
 
           <hr class="main-divider" />
 
-          <p class="section-title">人工关卡</p>
+          <p class="section-title" id="hitlSectionTitle">人工待办</p>
           <div class="gate-card" id="banner" hidden role="status">
-            <h3 id="bannerText">等待人工批复</h3>
+            <h3 id="bannerText">等待人工处理</h3>
             <div class="gate-id" id="bannerGate"></div>
-            <label for="decision">决定</label>
-            <select id="decision">
-              <option value="approved">批准 — 继续流程</option>
-              <option value="rejected">驳回 — 终止本轮</option>
-            </select>
-            <label for="reply">附言 <span class="hint">human_reply</span></label>
+            <ul id="questionList" hidden class="status-empty" style="margin:0 0 0.75rem 1rem;"></ul>
+            <div id="fieldGateDecision">
+              <label for="decision">关卡决定</label>
+              <select id="decision">
+                <option value="approved">批准 — 继续流程</option>
+                <option value="rejected">驳回 — 终止本轮</option>
+              </select>
+            </div>
+            <div id="fieldEscalation" hidden>
+              <label for="escalationChoice">升级决策</label>
+              <select id="escalationChoice">
+                <option value="continue">继续 — 再跑开发</option>
+                <option value="pause">暂停 — 保留现场</option>
+                <option value="abort">终止 — 结束本轮</option>
+              </select>
+            </div>
+            <label for="reply" id="replyLabel">附言 <span class="hint">human_reply</span></label>
             <textarea id="reply" rows="3" placeholder="补充范围说明或驳回原因…"></textarea>
             <div class="row-actions">
               <button type="button" class="btn-primary" id="btnSubmit" disabled>提交并续跑</button>
@@ -727,6 +738,7 @@
 
   <script>
     const $ = (id) => document.getElementById(id);
+    let awaitingKind = null;
     const PHASE_LABELS = {
       idle: "未启动",
       running: "运行中",
@@ -789,6 +801,12 @@
       if (ah) {
         rows.push(["待办类型", ah.kind, false]);
         rows.push(["关卡", ah.gate_id || "—", true]);
+        if (ah.questions && ah.questions.length) {
+          rows.push(["待澄清", ah.questions.join("；"), false]);
+        }
+        if (ah.summary) {
+          rows.push(["摘要", ah.summary, false]);
+        }
       }
       const vals = data.values || {};
       if (vals.baseline_log) {
@@ -805,6 +823,32 @@
 
     function escapeHtml(s) {
       return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function applyHitlFormMode(ah) {
+      awaitingKind = ah ? ah.kind : null;
+      const qList = $("questionList");
+      $("fieldGateDecision").hidden = !ah || ah.kind !== "gate";
+      $("fieldEscalation").hidden = !ah || ah.kind !== "escalation";
+      if (ah && ah.kind === "pm_clarification") {
+        $("replyLabel").innerHTML = '澄清答复 <span class="hint">human_reply（必填）</span>';
+        $("reply").placeholder = "逐条回答待澄清问题…";
+        if (ah.questions && ah.questions.length) {
+          qList.hidden = false;
+          qList.innerHTML = ah.questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("");
+        } else {
+          qList.hidden = true;
+          qList.innerHTML = "";
+        }
+      } else if (ah && ah.kind === "escalation") {
+        $("replyLabel").innerHTML = '说明 <span class="hint">human_reply（可选）</span>';
+        $("reply").placeholder = "补充决策理由…";
+        qList.hidden = true;
+      } else {
+        $("replyLabel").innerHTML = '附言 <span class="hint">human_reply</span>';
+        $("reply").placeholder = "补充范围说明或驳回原因…";
+        qList.hidden = true;
+      }
     }
 
     async function refresh() {
@@ -832,14 +876,16 @@
         renderHumanStatus(data);
         const ah = data.awaiting_human;
         $("btnSubmit").disabled = data.phase !== "awaiting_human";
-        if (ah && ah.kind === "gate") {
+        if (ah) {
           $("banner").hidden = false;
           $("gateIdleHint").hidden = true;
-          $("bannerText").textContent = ah.summary;
-          $("bannerGate").textContent = ah.gate_id;
+          $("bannerText").textContent = ah.summary || "等待人工处理";
+          $("bannerGate").textContent = ah.gate_id || ah.kind;
+          applyHitlFormMode(ah);
         } else {
           $("banner").hidden = true;
           $("gateIdleHint").hidden = false;
+          applyHitlFormMode(null);
         }
       } finally {
         setLoading($("btnRefresh"), false);
@@ -887,14 +933,16 @@
       const btn = $("btnSubmit");
       setLoading(btn, true);
       try {
+        const payload = { human_reply: $("reply").value, channel: "web" };
+        if (awaitingKind === "gate") {
+          payload.gate_decision = $("decision").value;
+        } else if (awaitingKind === "escalation") {
+          payload.escalation_choice = $("escalationChoice").value;
+        }
         const r = await fetch("/api/runs/" + encodeURIComponent(tid) + "/hitl", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            gate_decision: $("decision").value,
-            human_reply: $("reply").value,
-            channel: "web",
-          }),
+          body: JSON.stringify(payload),
         });
         const data = await r.json();
         $("out").textContent = JSON.stringify(data, null, 2);

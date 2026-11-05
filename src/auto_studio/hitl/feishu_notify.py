@@ -8,6 +8,7 @@ import os
 from auto_studio.hitl.feishu_cards import (
     build_escalation_interactive_card,
     build_gate_interactive_card,
+    build_pm_clarification_interactive_card,
     card_content_json,
 )
 from auto_studio.hitl.feishu_config import (
@@ -15,6 +16,7 @@ from auto_studio.hitl.feishu_config import (
     load_feishu_hitl_config,
     resolve_public_base_url,
 )
+from auto_studio.hitl.feishu_session import register_awaiting_thread
 from auto_studio.hitl.lark_cli_client import (
     LarkCliError,
     auth_summary,
@@ -104,6 +106,14 @@ def notify_awaiting_human_via_lark_cli(
                 web_url=web_url,
             )
             _send_to_target(cfg, card_json=card_content_json(card))
+        elif ah.kind == "pm_clarification" and _use_interactive_card():
+            card = build_pm_clarification_interactive_card(
+                thread_id=thread_id,
+                summary=ah.summary,
+                questions=ah.questions,
+                web_url=web_url,
+            )
+            _send_to_target(cfg, card_json=card_content_json(card))
         else:
             msg = format_gate_message(
                 thread_id=thread_id,
@@ -117,4 +127,9 @@ def notify_awaiting_human_via_lark_cli(
     except LarkCliError as e:
         logger.warning("飞书通知发送失败：%s", e)
         return False
+    register_awaiting_thread(
+        thread_id=thread_id,
+        chat_id=cfg.notify_chat_id,
+        open_id=cfg.notify_open_id,
+    )
     return True

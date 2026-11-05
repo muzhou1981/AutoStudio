@@ -321,31 +321,58 @@ def developer(state: FactoryState) -> dict:
 
 @skip_if_disabled("code_reviewer")
 def code_reviewer(state: FactoryState) -> dict:
-    # 默认走通过路径；在 Studio 中把 review_status 设为 fail 可测回退
+    from auto_studio.backends.runner import invoke_role
+
     status: ReviewStatus = state.get("review_status") or "pass"
-    return {
-        **_touch_artifact(state, "review_report", "code_reviewer", f"评审结论 status={status}"),
-        "review_status": status,
-    }
+    change = state.get("code_change") or ""
+    body = invoke_role(
+        role_name="code_reviewer",
+        user_prompt=(
+            f"代码变更说明：\n{change[:8000]}\n\n"
+            f"请产出 `review_report`（当前预设结论 status={status}）。"
+        ),
+        stub_note=f"评审结论 status={status}",
+    )
+    return {"review_report": body, "review_status": status}
 
 
 @skip_if_disabled("tester_execute")
 def tester_execute(state: FactoryState) -> dict:
+    from auto_studio.backends.runner import invoke_role
+
     status: TestStatus = state.get("test_status") or "pass"
-    return {
-        **_touch_artifact(state, "test_cases", "tester", "测试用例"),
-        **_touch_artifact(state, "test_report", "tester", f"测试报告 status={status}"),
-        "test_status": status,
-    }
+    spec = state.get("requirement_spec") or ""
+    cases = invoke_role(
+        role_name="tester",
+        user_prompt=f"需求说明：\n{spec[:6000]}\n\n请产出 `test_cases` 正文。",
+        stub_note="测试用例",
+    )
+    report = invoke_role(
+        role_name="tester",
+        user_prompt=(
+            f"测试用例：\n{cases[:6000]}\n\n"
+            f"请产出 `test_report`（预设 status={status}）。"
+        ),
+        stub_note=f"测试报告 status={status}",
+    )
+    return {"test_cases": cases, "test_report": report, "test_status": status}
 
 
 @skip_if_disabled("qa")
 def qa(state: FactoryState) -> dict:
+    from auto_studio.backends.runner import invoke_role
+
     status: QaStatus = state.get("qa_status") or "pass"
-    return {
-        **_touch_artifact(state, "qa_report", "qa", f"QA 报告 status={status}"),
-        "qa_status": status,
-    }
+    report_in = state.get("test_report") or ""
+    body = invoke_role(
+        role_name="qa",
+        user_prompt=(
+            f"测试报告：\n{report_in[:8000]}\n\n"
+            f"请产出 `qa_report`（预设 status={status}）。"
+        ),
+        stub_note=f"QA 报告 status={status}",
+    )
+    return {"qa_report": body, "qa_status": status}
 
 
 @skip_if_disabled("finance_cost_snapshot")
