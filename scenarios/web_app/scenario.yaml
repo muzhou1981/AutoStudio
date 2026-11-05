@@ -1,0 +1,16 @@
+scenario_key: web_app
+title: Web 应用
+description: 需求确认后启用 UX → UI → 美工设计链。
+
+workflow:
+  graph_id: default
+  profile_id: web_app_v1
+  skip_nodes: []
+  features:
+    design_track: true
+  gates:
+    gate_requirement_confirm: true
+    gate_architecture_review: true
+    gate_final_delivery: true
+  limits:
+    max_dev_retries: 3

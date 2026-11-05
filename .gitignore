@@ -1,5 +1,8 @@
 .env
 .venv/
+.vscode/
+tools/lark_cli/api.txt
+tools/lark_cli/oauth-qrcode.png
 __pycache__/
 .langgraph_api/
 runs/*

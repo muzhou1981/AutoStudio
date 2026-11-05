@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>auto_studio · 配置</title>
+  <script>
+    (function () {
+      var key = "auto_studio_hitl_theme";
+      var theme = localStorage.getItem(key);
+      if (theme !== "light" && theme !== "dark") {
+        theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/shared.css" />
+</head>
+<body>
+  <div class="app-frame">
+    <header class="app-bar">
+      <div class="app-bar-inner">
+        <nav class="app-nav" aria-label="主导航">
+          <a href="/">HITL</a>
+          <a href="/config" class="is-active">配置</a>
+        </nav>
+        <h1>项目与场景配置</h1>
+      </div>
+    </header>
+
+    <div class="config-shell">
+      <section class="panel">
+        <h2>项目（L2）</h2>
+        <label for="projectPick">选择项目</label>
+        <select id="projectPick"></select>
+        <div class="row-actions">
+          <button type="button" class="btn-secondary" id="btnNewProject">新建项目</button>
+          <button type="button" class="btn-primary" id="btnSaveProject">保存 project.yaml</button>
+        </div>
+        <label for="projectYaml">project.yaml</label>
+        <textarea id="projectYaml" rows="16" spellcheck="false"></textarea>
+        <p class="inline-error" id="projectError" hidden role="alert"></p>
+      </section>
+
+      <section class="panel">
+        <h2>场景（L1，只读）</h2>
+        <label for="scenarioPick">选择场景</label>
+        <select id="scenarioPick"></select>
+        <label for="scenarioYaml">scenario.yaml</label>
+        <textarea id="scenarioYaml" rows="12" readonly spellcheck="false"></textarea>
+
+        <h2 style="margin-top:1.25rem">合并预览</h2>
+        <pre id="effectiveOut" class="mono-block">选择项目或场景后点击「刷新预览」。</pre>
+        <button type="button" class="btn-secondary" id="btnEffective">刷新预览</button>
+
+        <h2 style="margin-top:1.25rem">API Key / 环境</h2>
+        <ul id="settingsList" class="settings-list"></ul>
+        <p class="hint-block" id="larkCliStatus"></p>
+        <p class="hint-block" id="settingsNote"></p>
+      </section>
+    </div>
+  </div>
+  <button type="button" class="theme-toggle" id="themeToggle" aria-label="切换主题">夜晚</button>
+  <script src="/static/config.js"></script>
+</body>
+</html>

@@ -47,6 +47,89 @@
 
 引擎在运行时把场景配置中的工具与领域原则叠加到角色定义上。角色定义本身不声明具体工具与领域知识，以便同一角色在不同场景复用。场景配置由配置管理员维护。
 
+### 场景、项目与单次运行（配置栈）
+
+针对**具体目标项目**，模板与流程可在工厂默认之上**覆盖或裁剪**，合并优先级为：**单次 Run 输入 > 项目 `projects/<id>/project.yaml` > 场景 `scenarios/<key>/` > 工厂默认**。模板通过 **`template_path` 决议**（项目 → 场景 templates → `templates/artifacts/`）与可选 **`omit_sections`** 裁剪；流程通过 **Workflow Profile**（`skip_nodes`、`features.design_track`、关卡开关等）作用于同一张 Python 图，而非默认每项目一份独立图文件。配置管理员在 **`config_plan`** 中登记本轮生效路径与裁剪项。
+
+详见 [ADR 0002：场景配置、项目配置与流程/模板裁剪](decisions/0002-scenario-project-config-and-cropping.md)。
+
+### 设计链（UX / UI / 美工）
+
+默认流程在 **需求确认关卡之后** 的主链路 **不包含** 体验/界面/美工节点，直接进入预算粗估与架构。仅当满足下列之一时才走 ``ux_designer → ui_designer → visual_designer``：
+
+1. 运行输入显式设置 ``design_track_enabled: true``；
+2. 合并后的 Workflow Profile 中 ``workflow.features.design_track: true``（见 ``scenarios/<key>/scenario.yaml``，例如 ``web_app``）。
+
+未指定场景、未知 ``scenario_key`` 或 ``design_track_enabled: false`` 时均 **跳过** 设计链。引擎在跳过时不应调度 UX/UI/美工 Agent。
+
+## 人类通信（HITL）
+
+人类与工厂的 **业务对话** 仅经 **项目经理** 语义呈现；引擎在关卡暂停、澄清或升级时进入 `awaiting_human`，由人类通过下列 **一期** 通道提交批复或答复后 Resume Run：
+
+| 通道 | 职责 |
+|------|------|
+| Web | 全功能：待办、产物摘要、关卡、长文本澄清 |
+| 飞书 | 即时通知、卡片按钮、短文本回复 → HITL API |
+
+微信系（含企业微信）**一期不做**。角色之间仍只通过 **产物** 协作，不使用飞书机器人群聊。通道差异、审计规则与状态字段见 [ADR 0003：项目经理人类触达](decisions/0003-pm-human-hitl-and-im-channels.md)。
+
+### Web HITL API（一期）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/` | 最小待办 UI |
+| POST | `/api/runs` | 启动 Run（`human_request`、可选 `scenario_key` / `project_id`） |
+| GET | `/api/runs/{thread_id}` | 状态、`phase`、`awaiting_human`、state 摘要 |
+| POST | `/api/runs/{thread_id}/hitl` | 提交 `gate_decision` + `human_reply`，续跑至下一 interrupt 或结束 |
+
+启动本地 Web：`auto-studio-web` 或 `python -m auto_studio.web.app`（默认 `127.0.0.1:8765`）。飞书 **入站**（卡片/消息 → HITL）仍待接；**出站**通知见 [ADR 0004](decisions/0004-feishu-hitl-via-lark-cli.md)。
+
+#### 飞书接到 auto_studio（推荐：官方 lark-cli）
+
+适用：**公司租户未开开放平台**，用 **个人开发者账号** 创建应用。
+
+1. **本机 lark-cli**  
+   - `lark-cli config init --new`，按提示绑定个人应用的 App ID / Secret。  
+   - 验证：`lark-cli auth status --json --verify`  
+   - 发消息测试：`lark-cli im +messages-send --as bot --chat-id oc_xxx --text "ping"`
+
+2. **仓库 `.env`**  
+   - `AUTO_STUDIO_LARK_BACKEND=lark_cli`（默认）  
+   - `AUTO_STUDIO_PUBLIC_BASE_URL`：Web HITL 链接前缀（通知正文中的跳转）  
+   - **不必** 填写 `LARK_APP_SECRET`（除非改用 `env_bot` 后端）
+
+3. **项目 YAML**（`/config` 可编辑）  
+
+   ```yaml
+   hitl:
+     feishu:
+       notify_chat_id: oc_xxx
+   ```
+
+4. **行为**  
+   - Run 进入 `awaiting_human` 时，auto_studio 调用 `lark-cli im +messages-send --as bot` 推送 PM 文本 + Web 链接。  
+   - 人类在 Web 提交 `gate_decision`；与飞书入站回调等价的路径后续再接。
+
+5. **备选 `env_bot`**  
+   - 企业已开开放平台且希望在 `.env` 存凭据时：设 `AUTO_STUDIO_LARK_BACKEND=env_bot` 并填写 `LARK_APP_ID` / `LARK_APP_SECRET`（直连发送待实现时可仍用 lark-cli）。
+
+6. **身份边界**  
+   - PM 对外须为 **Bot 应用身份**（lark-cli `--as bot`），**不要** 用 lark-tools 员工 Cookie `send` 冒充项目经理。
+
+### Web 配置（一期）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/config` | 配置 UI |
+| GET | `/api/config/scenarios` | 场景列表（L1） |
+| GET | `/api/config/scenarios/{key}` | 场景 YAML（只读） |
+| GET/PUT | `/api/config/projects/{id}` | 项目 YAML 读/写 |
+| POST | `/api/config/projects` | 新建项目目录 |
+| GET | `/api/config/effective` | 合并后 profile 预览 |
+| GET | `/api/config/settings` | `.env` 密钥是否已配置（不回传明文） |
+
 ## 人工关卡
+
+流程在需求确认、架构评审、最终交付等节点 **interrupt** 等待人类；批复须写 `baseline_log` 并与 Web 或飞书 HITL 提交对齐。PM 在关卡前的 **澄清** 使用同一套待办机制，不限于三处固定关卡。
 
 ## 复盘与进化

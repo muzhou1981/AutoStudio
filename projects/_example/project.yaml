@@ -1,0 +1,8 @@
+project_id: _example
+title: 示例项目（文档与联调）
+description: 绑定 npu_operator 场景；可在本文件覆盖 workflow 或 artifacts。
+scenario_key: npu_operator
+workflow:
+  profile_id: example_overlay_v1
+  limits:
+    max_dev_retries: 5

@@ -1,0 +1,24 @@
+scenario_key: npu_operator
+title: NPU 算子开发
+description: 默认跳过 UX/UI/美工；产物模板走工厂 L0，可在项目级覆盖 template_path。
+
+artifacts_optional:
+  - ux_spec
+  - ui_spec
+  - visual_assets
+
+workflow:
+  graph_id: default
+  profile_id: npu_operator_v1
+  skip_nodes:
+    - ux_designer
+    - ui_designer
+    - visual_designer
+  features:
+    design_track: false
+  gates:
+    gate_requirement_confirm: true
+    gate_architecture_review: true
+    gate_final_delivery: true
+  limits:
+    max_dev_retries: 3

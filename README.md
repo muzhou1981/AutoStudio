@@ -38,3 +38,12 @@ langgraph dev
 ```
 
 `langgraph dev` 需要 `src/auto_studio/workflows/default.py` 中定义 `graph`。
+
+### Web HITL（人工关卡）
+
+```bash
+uv pip install -e ".[dev]"
+auto-studio-web
+```
+
+浏览器打开 `http://127.0.0.1:8765/`：启动 Run、在 `gate_*` 关卡批准/驳回并续跑。REST 见 [`docs/architecture.md`](docs/architecture.md)「Web HITL API」。

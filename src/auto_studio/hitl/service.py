@@ -1,0 +1,191 @@
+"""LangGraph Run 与 HITL 提交（Web / 飞书共用）。"""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any, Literal
+
+from langgraph.graph.state import CompiledStateGraph
+
+from auto_studio.hitl.constants import GATE_NODES, gate_summary
+
+RunPhase = Literal["running", "awaiting_human", "completed", "rejected"]
+
+
+@dataclass
+class AwaitingHuman:
+    kind: Literal["gate", "pm_clarification", "escalation"]
+    since: str
+    gate_id: str | None = None
+    questions: list[str] = field(default_factory=list)
+    summary: str = ""
+
+
+@dataclass
+class RunStatus:
+    thread_id: str
+    phase: RunPhase
+    next_nodes: tuple[str, ...]
+    awaiting_human: AwaitingHuman | None
+    values: dict[str, Any]
+
+
+class HitlError(ValueError):
+    """HITL 状态或提交不合法。"""
+
+
+class GraphRunService:
+    """对单一已编译图提供启动、查询与 HITL 续跑。"""
+
+    def __init__(self, compiled_graph: CompiledStateGraph) -> None:
+        self._graph = compiled_graph
+
+    @staticmethod
+    def new_thread_id() -> str:
+        return str(uuid.uuid4())
+
+    def _config(self, thread_id: str) -> dict[str, Any]:
+        return {"configurable": {"thread_id": thread_id}}
+
+    def _snapshot_values(self, thread_id: str) -> dict[str, Any]:
+        snap = self._graph.get_state(self._config(thread_id))
+        return dict(snap.values or {})
+
+    @staticmethod
+    def _infer_awaiting(next_nodes: tuple[str, ...]) -> AwaitingHuman | None:
+        if not next_nodes:
+            return None
+        head = next_nodes[0]
+        if head in GATE_NODES:
+            return AwaitingHuman(
+                kind="gate",
+                since=datetime.now(UTC).isoformat(),
+                gate_id=head,
+                summary=gate_summary(head),
+            )
+        return None
+
+    @staticmethod
+    def _phase(
+        next_nodes: tuple[str, ...],
+        values: dict[str, Any],
+        awaiting: AwaitingHuman | None,
+    ) -> RunPhase:
+        if awaiting is not None:
+            return "awaiting_human"
+        if values.get("last_gate_decision") == "rejected" and not next_nodes:
+            return "rejected"
+        if not next_nodes:
+            return "completed"
+        return "running"
+
+    def status(self, thread_id: str) -> RunStatus:
+        cfg = self._config(thread_id)
+        snap = self._graph.get_state(cfg)
+        if not snap.values and not snap.next:
+            raise HitlError(f"未知 thread_id={thread_id!r}")
+        next_nodes = tuple(snap.next or ())
+        values = dict(snap.values or {})
+        awaiting = self._infer_awaiting(next_nodes)
+        phase = self._phase(next_nodes, values, awaiting)
+        return RunStatus(
+            thread_id=thread_id,
+            phase=phase,
+            next_nodes=next_nodes,
+            awaiting_human=awaiting,
+            values=values,
+        )
+
+    def start(
+        self,
+        *,
+        human_request: str,
+        scenario_key: str = "",
+        project_id: str = "",
+        thread_id: str | None = None,
+    ) -> RunStatus:
+        tid = thread_id or self.new_thread_id()
+        cfg = self._config(tid)
+        initial: dict[str, Any] = {
+            "human_request": human_request,
+            "scenario_key": scenario_key,
+            "project_id": project_id,
+        }
+        self._graph.invoke(initial, cfg)
+        return self.status(tid)
+
+    def advance_until_blocked(self, thread_id: str) -> RunStatus:
+        """在无 HITL 待办时继续执行直至下一 interrupt 或结束。"""
+        cfg = self._config(thread_id)
+        while True:
+            snap = self._graph.get_state(cfg)
+            next_nodes = tuple(snap.next or ())
+            if not next_nodes:
+                break
+            if next_nodes[0] in GATE_NODES:
+                break
+            self._graph.invoke(None, cfg)
+        return self.status(thread_id)
+
+    def submit_hitl(
+        self,
+        thread_id: str,
+        *,
+        gate_decision: Literal["approved", "rejected"] | None = None,
+        human_reply: str = "",
+        channel: str = "web",
+    ) -> RunStatus:
+        st = self.status(thread_id)
+        if st.phase != "awaiting_human" or st.awaiting_human is None:
+            raise HitlError("当前 Run 不在 awaiting_human，无法提交 HITL")
+        awaiting = st.awaiting_human
+        cfg = self._config(thread_id)
+
+        if awaiting.kind == "gate":
+            if gate_decision not in ("approved", "rejected"):
+                raise HitlError("gate 待办须提供 gate_decision: approved | rejected")
+            patch: dict[str, Any] = {
+                "gate_decision": gate_decision,
+                "human_reply": human_reply,
+            }
+            self._graph.update_state(cfg, patch)
+            self._graph.invoke(None, cfg)
+            return self.status(thread_id)
+
+        raise HitlError(f"暂不支持 kind={awaiting.kind!r} 的 HITL 提交")
+
+    def status_dict(self, thread_id: str) -> dict[str, Any]:
+        st = self.status(thread_id)
+        ah = st.awaiting_human
+        return {
+            "thread_id": st.thread_id,
+            "phase": st.phase,
+            "next_nodes": list(st.next_nodes),
+            "awaiting_human": (
+                {
+                    "kind": ah.kind,
+                    "since": ah.since,
+                    "gate_id": ah.gate_id,
+                    "questions": ah.questions,
+                    "summary": ah.summary,
+                }
+                if ah
+                else None
+            ),
+            "values": _public_values(st.values),
+        }
+
+
+def _public_values(values: dict[str, Any]) -> dict[str, Any]:
+    """API 返回的 state 摘要（省略过长字段）。"""
+    out: dict[str, Any] = {}
+    for key, val in values.items():
+        if val is None:
+            continue
+        if isinstance(val, str) and len(val) > 2000:
+            out[key] = val[:2000] + "…"
+        else:
+            out[key] = val
+    return out

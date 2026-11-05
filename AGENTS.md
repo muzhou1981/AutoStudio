@@ -12,6 +12,5 @@
 
 - 本目录上下文自包含：新的需求、计划、决策写入 `docs/`，不依赖会话记忆。
 - `roles/` 下的角色定义与 `src/auto_studio/workflows/default.py` 由人工编写；未经明确要求，Agent 不得创建或改写。
-- 引用 `agents/skills` 下的技能时只按路径引用，不复制，也不让 `agents/skills` 反向依赖本目录。
 - 重要技术决策新增一篇 `docs/decisions/NNNN-<slug>.md`。
 - 改动 `src/` 后运行 `pytest` 与 `ruff check`。
