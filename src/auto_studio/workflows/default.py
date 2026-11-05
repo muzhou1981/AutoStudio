@@ -89,6 +89,12 @@ class FactoryState(TypedDict, total=False):
     gate_decision: GateDecision
     human_reply: str
     last_gate_decision: GateDecision
+    hitl_pending_kind: str
+    hitl_questions: list[str]
+    hitl_summary: str
+    hitl_pending_since: str
+    hitl_audit_log: str
+    escalation_choice: str
 
 
 def _touch_artifact(state: FactoryState, key: str, role: str, note: str) -> dict:

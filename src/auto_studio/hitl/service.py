@@ -10,13 +10,16 @@ from typing import Any, Literal
 from langgraph.graph.state import CompiledStateGraph
 
 from auto_studio.hitl.constants import GATE_NODES, gate_summary
+from auto_studio.hitl.hitl_audit import audit_patch
 
 RunPhase = Literal["running", "awaiting_human", "completed", "rejected"]
+HitlKind = Literal["gate", "pm_clarification", "escalation"]
+EscalationChoice = Literal["continue", "pause", "abort"]
 
 
 @dataclass
 class AwaitingHuman:
-    kind: Literal["gate", "pm_clarification", "escalation"]
+    kind: HitlKind
     since: str
     gate_id: str | None = None
     questions: list[str] = field(default_factory=list)
@@ -49,12 +52,21 @@ class GraphRunService:
     def _config(self, thread_id: str) -> dict[str, Any]:
         return {"configurable": {"thread_id": thread_id}}
 
-    def _snapshot_values(self, thread_id: str) -> dict[str, Any]:
-        snap = self._graph.get_state(self._config(thread_id))
-        return dict(snap.values or {})
-
     @staticmethod
-    def _infer_awaiting(next_nodes: tuple[str, ...]) -> AwaitingHuman | None:
+    def _infer_awaiting(
+        next_nodes: tuple[str, ...],
+        values: dict[str, Any],
+    ) -> AwaitingHuman | None:
+        pending = str(values.get("hitl_pending_kind") or "").strip()
+        if pending in ("pm_clarification", "escalation"):
+            qs = values.get("hitl_questions") or []
+            questions = [str(q) for q in qs] if isinstance(qs, list) else []
+            return AwaitingHuman(
+                kind=pending,  # type: ignore[arg-type]
+                since=str(values.get("hitl_pending_since") or datetime.now(UTC).isoformat()),
+                questions=questions,
+                summary=str(values.get("hitl_summary") or ""),
+            )
         if not next_nodes:
             return None
         head = next_nodes[0]
@@ -88,7 +100,7 @@ class GraphRunService:
             raise HitlError(f"未知 thread_id={thread_id!r}")
         next_nodes = tuple(snap.next or ())
         values = dict(snap.values or {})
-        awaiting = self._infer_awaiting(next_nodes)
+        awaiting = self._infer_awaiting(next_nodes, values)
         phase = self._phase(next_nodes, values, awaiting)
         return RunStatus(
             thread_id=thread_id,
@@ -117,10 +129,12 @@ class GraphRunService:
         return self.status(tid)
 
     def advance_until_blocked(self, thread_id: str) -> RunStatus:
-        """在无 HITL 待办时继续执行直至下一 interrupt 或结束。"""
         cfg = self._config(thread_id)
         while True:
             snap = self._graph.get_state(cfg)
+            values = dict(snap.values or {})
+            if values.get("hitl_pending_kind"):
+                break
             next_nodes = tuple(snap.next or ())
             if not next_nodes:
                 break
@@ -129,6 +143,35 @@ class GraphRunService:
             self._graph.invoke(None, cfg)
         return self.status(thread_id)
 
+    def open_hitl(
+        self,
+        thread_id: str,
+        *,
+        kind: Literal["pm_clarification", "escalation"],
+        questions: list[str] | None = None,
+        summary: str = "",
+    ) -> RunStatus:
+        st = self.status(thread_id)
+        if st.phase == "completed" or st.phase == "rejected":
+            raise HitlError(f"Run 已结束（phase={st.phase}），无法打开 HITL")
+        cfg = self._config(thread_id)
+        patch: dict[str, Any] = {
+            "hitl_pending_kind": kind,
+            "hitl_questions": questions or [],
+            "hitl_summary": summary,
+            "hitl_pending_since": datetime.now(UTC).isoformat(),
+        }
+        self._graph.update_state(cfg, patch)
+        return self.status(thread_id)
+
+    def _clear_pending_patch(self) -> dict[str, Any]:
+        return {
+            "hitl_pending_kind": None,
+            "hitl_questions": [],
+            "hitl_summary": "",
+            "hitl_pending_since": None,
+        }
+
     def submit_hitl(
         self,
         thread_id: str,
@@ -136,12 +179,22 @@ class GraphRunService:
         gate_decision: Literal["approved", "rejected"] | None = None,
         human_reply: str = "",
         channel: str = "web",
+        escalation_choice: EscalationChoice | None = None,
     ) -> RunStatus:
         st = self.status(thread_id)
         if st.phase != "awaiting_human" or st.awaiting_human is None:
             raise HitlError("当前 Run 不在 awaiting_human，无法提交 HITL")
         awaiting = st.awaiting_human
         cfg = self._config(thread_id)
+        audit = audit_patch(
+            st.values,
+            channel=channel,
+            kind=awaiting.kind,
+            thread_id=thread_id,
+            summary=awaiting.summary,
+            gate_decision=gate_decision,
+            human_reply=human_reply,
+        )
 
         if awaiting.kind == "gate":
             if gate_decision not in ("approved", "rejected"):
@@ -149,12 +202,62 @@ class GraphRunService:
             patch: dict[str, Any] = {
                 "gate_decision": gate_decision,
                 "human_reply": human_reply,
+                **audit,
             }
             self._graph.update_state(cfg, patch)
             self._graph.invoke(None, cfg)
             return self.status(thread_id)
 
-        raise HitlError(f"暂不支持 kind={awaiting.kind!r} 的 HITL 提交")
+        if awaiting.kind == "pm_clarification":
+            if not human_reply.strip():
+                raise HitlError("pm_clarification 须填写 human_reply")
+            patch = {
+                "human_reply": human_reply,
+                **self._clear_pending_patch(),
+                **audit,
+            }
+            self._graph.update_state(cfg, patch)
+            snap = self._graph.get_state(cfg)
+            if snap.next:
+                self._graph.invoke(None, cfg)
+            return self.status(thread_id)
+
+        if awaiting.kind == "escalation":
+            choice = escalation_choice
+            if not choice and human_reply.strip() in ("continue", "pause", "abort"):
+                choice = human_reply.strip()  # type: ignore[assignment]
+            if choice not in ("continue", "pause", "abort"):
+                raise HitlError(
+                    "escalation 须提供 escalation_choice: continue | pause | abort"
+                )
+            patch = {
+                "human_reply": human_reply or choice,
+                "escalation_choice": choice,
+                **self._clear_pending_patch(),
+                **audit,
+            }
+            self._graph.update_state(cfg, patch)
+            if choice == "continue":
+                snap = self._graph.get_state(cfg)
+                if snap.next:
+                    self._graph.invoke(None, cfg)
+            return self.status(thread_id)
+
+        raise HitlError(f"未知 kind={awaiting.kind!r}")
+
+    def submit_from_feishu_card(
+        self,
+        *,
+        thread_id: str,
+        gate_decision: Literal["approved", "rejected"],
+        human_reply: str = "",
+    ) -> RunStatus:
+        return self.submit_hitl(
+            thread_id,
+            gate_decision=gate_decision,
+            human_reply=human_reply,
+            channel="feishu",
+        )
 
     def status_dict(self, thread_id: str) -> dict[str, Any]:
         st = self.status(thread_id)
@@ -179,7 +282,6 @@ class GraphRunService:
 
 
 def _public_values(values: dict[str, Any]) -> dict[str, Any]:
-    """API 返回的 state 摘要（省略过长字段）。"""
     out: dict[str, Any] = {}
     for key, val in values.items():
         if val is None:

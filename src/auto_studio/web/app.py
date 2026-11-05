@@ -14,13 +14,17 @@ from auto_studio.config.context import ConfigError
 from auto_studio.hitl.feishu_notify import notify_awaiting_human_via_lark_cli
 from auto_studio.hitl.service import GraphRunService, HitlError
 from auto_studio.web.config_routes import router as config_router
+from auto_studio.web.feishu_routes import bind_run_service
+from auto_studio.web.feishu_routes import router as feishu_router
 from auto_studio.workflows.default import graph
 
 app = FastAPI(title="auto_studio", version="0.1.0")
 app.include_router(config_router)
+app.include_router(feishu_router)
 _static_dir = Path(__file__).with_name("static")
 app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 _run_service = GraphRunService(graph)
+bind_run_service(_run_service)
 
 
 class StartRunBody(BaseModel):
@@ -34,6 +38,7 @@ class HitlSubmitBody(BaseModel):
     gate_decision: Literal["approved", "rejected"] | None = None
     human_reply: str = ""
     channel: str = "web"
+    escalation_choice: Literal["continue", "pause", "abort"] | None = None
 
 
 def _static_html(name: str) -> str:
@@ -81,6 +86,7 @@ def api_submit_hitl(thread_id: str, body: HitlSubmitBody) -> dict:
             gate_decision=body.gate_decision,
             human_reply=body.human_reply,
             channel=body.channel,
+            escalation_choice=body.escalation_choice,
         )
     except HitlError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e

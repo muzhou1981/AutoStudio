@@ -103,6 +103,24 @@ def auth_summary() -> LarkCliAuthSummary:
     )
 
 
+def send_interactive_as_bot(
+    *,
+    chat_id: str = "",
+    open_id: str = "",
+    content_json: str,
+) -> dict[str, Any]:
+    if not content_json.strip():
+        raise LarkCliError("卡片 JSON 为空")
+    args = ["im", "+messages-send", "--as", "bot", "--msg-type", "interactive", "--content", content_json]
+    if chat_id:
+        args.extend(["--chat-id", chat_id])
+    elif open_id:
+        args.extend(["--user-id", open_id])
+    else:
+        raise LarkCliError("须指定 chat_id 或 open_id")
+    return _parse_json_stdout(_run(args))
+
+
 def send_text_as_bot(*, chat_id: str = "", open_id: str = "", text: str) -> dict[str, Any]:
     if not text.strip():
         raise LarkCliError("消息正文为空")
