@@ -23,6 +23,14 @@ def test_load_feishu_hitl_from_example():
     assert cfg is None
 
 
+def test_load_feishu_hitl_from_env(tmp_path, monkeypatch):
+    monkeypatch.setattr("auto_studio.hitl.feishu_config.factory_root", lambda: tmp_path)
+    monkeypatch.setenv("AUTO_STUDIO_FEISHU_NOTIFY_OPEN_ID", "ou_test")
+    cfg = load_feishu_hitl_config("")
+    assert cfg is not None
+    assert cfg.notify_open_id == "ou_test"
+
+
 def test_format_gate_message():
     text = format_gate_message(
         thread_id="tid-1",

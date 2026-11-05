@@ -23,6 +23,9 @@ class CursorBackend:
         self._client = _default_client()
         self._local = LocalAgentOptions(cwd=os.fspath(factory_root()))
         self._agents: dict[str, object] = {}
+        self._model = (
+            os.environ.get("AUTO_STUDIO_CURSOR_MODEL", "").strip() or "composer-2"
+        )
 
     def _agent_for_role(self, role_name: str):
         from cursor_sdk.types import AgentOptions
@@ -31,6 +34,7 @@ class CursorBackend:
             opts = AgentOptions(
                 name=f"auto_studio:{role_name}",
                 local=self._local,
+                model=self._model,
             )
             self._agents[role_name] = self._client.create_agent(
                 opts,
@@ -75,8 +79,24 @@ def try_cursor_backend() -> AgentBackend | None:
     except ImportError:
         pass
     try:
-        return CursorBackend()
+        backend = CursorBackend()
     except bridge_errors:
         return None
     except ImportError:
         return None
+    if os.environ.get("AUTO_STUDIO_CURSOR_VERIFY", "1").strip().lower() in (
+        "0",
+        "false",
+        "no",
+    ):
+        return backend
+    try:
+        from cursor_sdk import Cursor
+        from cursor_sdk.errors import AuthenticationError
+
+        Cursor.me(client=backend._client, api_key=backend._api_key)
+    except AuthenticationError:
+        return None
+    except ImportError:
+        return backend
+    return backend

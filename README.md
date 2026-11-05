@@ -54,7 +54,9 @@ auto-studio-web
 
 ```bash
 export CURSOR_API_KEY=...
-python scripts/smoke_cursor_backend.py   # Bridge + 密钥连通性
+export AUTO_STUDIO_CURSOR_MODEL=composer-2   # 可选，默认 composer-2
+python scripts/smoke_cursor_backend.py       # Bridge + 密钥连通性
+python scripts/smoke_feishu_hitl.py          # 需另开 auto-studio-web
 auto-studio-web
 ```
 

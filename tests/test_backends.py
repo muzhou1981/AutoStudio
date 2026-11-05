@@ -17,6 +17,7 @@ def test_default_backend_is_stub_without_env(monkeypatch):
 def test_default_backend_uses_cursor_when_api_key(monkeypatch):
     monkeypatch.setenv("CURSOR_API_KEY", "test-key")
     monkeypatch.delenv("AUTO_STUDIO_BACKEND", raising=False)
+    monkeypatch.setenv("AUTO_STUDIO_CURSOR_VERIFY", "0")
 
     class _FakeCursor:
         def complete(self, **kwargs: object) -> str:
