@@ -22,6 +22,7 @@ dev = ["langgraph-cli[inmem]", "pytest>=8.0", "ruff>=0.5", "httpx>=0.27"]
 
 [project.scripts]
 auto-studio-web = "auto_studio.web.app:main"
+auto-studio-feishu-bridge = "auto_studio.hitl.feishu_bridge:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/auto_studio"]

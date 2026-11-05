@@ -6,3 +6,8 @@ workflow:
   profile_id: example_overlay_v1
   limits:
     max_dev_retries: 5
+# 飞书 HITL 出站（lark-cli Bot）；联调时可取消注释并填入 open_id / chat_id
+# hitl:
+#   feishu:
+#     notify_open_id: ou_c21a0f550ec2d8bdfedeaa716c8e6a94
+#     notify_chat_id: oc_e5bdab72d870c8b258ccf9a71324e064

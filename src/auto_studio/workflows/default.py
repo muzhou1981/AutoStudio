@@ -132,12 +132,18 @@ def resolve_design_track_enabled(state: FactoryState) -> bool:
 def project_manager_draft(state: FactoryState) -> dict:
     build_run_context_from_state(state)
     req = state.get("human_request", "")
-    return _touch_artifact(
-        state,
-        "requirement_spec",
-        "project_manager",
-        f"需求说明草稿（待可测试性评审与需求确认关卡） input_len={len(req)}",
+    from auto_studio.backends.runner import invoke_role
+
+    body = invoke_role(
+        role_name="project_manager",
+        user_prompt=(
+            f"人类原始需求：\n{req}\n\n"
+            "请按 role.md 产出 `requirement_spec` 正文（Markdown），"
+            "须含可检验验收标准 AC-*。"
+        ),
+        stub_note=f"需求说明草稿 input_len={len(req)}",
     )
+    return {"requirement_spec": body}
 
 
 @skip_if_disabled("tester_testability")
