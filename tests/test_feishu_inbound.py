@@ -1,5 +1,7 @@
 """飞书入站、卡片与 PM/升级 HITL 测试。"""
 
+import json
+
 from fastapi.testclient import TestClient
 
 from auto_studio.hitl.feishu_cards import build_gate_interactive_card
@@ -36,6 +38,35 @@ def test_gate_card_has_buttons():
     assert card["schema"] == "2.0"
     body = str(card)
     assert "approved" in body and "rejected" in body
+
+
+def test_feishu_main_webhook_card_trigger():
+    client = TestClient(app)
+    r = client.post(
+        "/api/runs",
+        json={"human_request": "webhook", "scenario_key": "npu_operator"},
+    )
+    tid = r.json()["thread_id"]
+    body = {
+        "header": {"event_type": "card.action.trigger"},
+        "event": {
+            "type": "card.action.trigger",
+            "action_value": json.dumps(
+                {
+                    "thread_id": tid,
+                    "hitl_action": "gate",
+                    "gate_decision": "approved",
+                }
+            ),
+        },
+    }
+    r2 = client.post("/api/webhooks/feishu", json=body)
+    assert r2.status_code == 200
+    data = r2.json()
+    assert data.get("ok") is True
+    assert data.get("toast")
+    r3 = client.get(f"/api/runs/{tid}")
+    assert r3.json()["awaiting_human"]["gate_id"] == "gate_architecture_review"
 
 
 def test_card_action_api_flow():
