@@ -15,7 +15,28 @@ def main() -> int:
 
     backend = get_default_backend()
     if isinstance(backend, StubBackend):
-        print("FAIL: 仍为 StubBackend（Bridge 未就绪或 Cursor 初始化失败）", file=sys.stderr)
+        try:
+            from cursor_sdk import Cursor
+            from cursor_sdk.errors import AuthenticationError, ConfigurationError
+
+            from auto_studio.backends.cursor_backend import CursorBackend
+
+            inst = CursorBackend()
+            Cursor.me(client=inst._client, api_key=inst._api_key)
+        except ConfigurationError as e:
+            print(f"FAIL: Cursor Bridge 未就绪: {e}", file=sys.stderr)
+            return 1
+        except AuthenticationError as e:
+            print(
+                "FAIL: CURSOR_API_KEY 无效（Cursor 设置 → Account → User API Keys 更新）",
+                file=sys.stderr,
+            )
+            print(f"detail: {e}", file=sys.stderr)
+            return 1
+        except ImportError as e:
+            print(f"FAIL: 未安装 cursor-sdk: {e}", file=sys.stderr)
+            return 1
+        print("FAIL: 仍为 StubBackend（未知原因）", file=sys.stderr)
         return 1
     print(f"OK: backend={type(backend).__name__}")
     try:

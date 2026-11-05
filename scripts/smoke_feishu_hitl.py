@@ -24,21 +24,39 @@ def _api_e2e(base: str) -> int:
         start = json.loads(resp.read().decode())
     tid = start["thread_id"]
     assert start.get("phase") == "awaiting_human", start
-    card = json.dumps(
-        {"thread_id": tid, "gate_decision": "approved", "human_reply": "smoke-ok"}
-    ).encode()
+    webhook = {
+        "header": {"event_type": "card.action.trigger"},
+        "event": {
+            "type": "card.action.trigger",
+            "action_value": json.dumps(
+                {
+                    "thread_id": tid,
+                    "hitl_action": "gate",
+                    "gate_decision": "approved",
+                }
+            ),
+        },
+    }
     req2 = urllib.request.Request(
-        f"{base.rstrip('/')}/api/webhooks/feishu/card-action",
-        data=card,
+        f"{base.rstrip('/')}/api/webhooks/feishu",
+        data=json.dumps(webhook).encode(),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
     with urllib.request.urlopen(req2, timeout=60) as resp:
+        wh = json.loads(resp.read().decode())
+    assert wh.get("ok") is True, wh
+    assert wh.get("toast"), wh
+    req3 = urllib.request.Request(
+        f"{base.rstrip('/')}/api/runs/{tid}",
+        method="GET",
+    )
+    with urllib.request.urlopen(req3, timeout=60) as resp:
         after = json.loads(resp.read().decode())
     assert after.get("phase") == "awaiting_human", after
     ah = after.get("awaiting_human") or {}
     assert ah.get("gate_id") == "gate_architecture_review", after
-    print(f"OK: api_e2e thread={tid} advanced to {ah.get('gate_id')}")
+    print(f"OK: feishu_webhook_inbound thread={tid} -> {ah.get('gate_id')}")
     return 0
 
 
