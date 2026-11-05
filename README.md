@@ -46,4 +46,24 @@ uv pip install -e ".[dev]"
 auto-studio-web
 ```
 
-浏览器打开 `http://127.0.0.1:8765/`：启动 Run、在 `gate_*` 关卡批准/驳回并续跑。REST 见 [`docs/architecture.md`](docs/architecture.md)「Web HITL API」。
+浏览器打开 `http://127.0.0.1:8765/`：启动 Run、在 `gate_*` 关卡批准/驳回并续跑；支持 PM 澄清与升级待办。REST 见 [`docs/architecture.md`](docs/architecture.md)「Web HITL API」。
+
+### Cursor SDK 后端
+
+图节点经 `invoke_role` 调用后端。未配置时走 **Stub**；设置 `CURSOR_API_KEY` 后默认启用 Cursor Local Agent（亦可显式 `AUTO_STUDIO_BACKEND=cursor`，强制 Stub 用 `AUTO_STUDIO_BACKEND=stub`）。
+
+```bash
+export CURSOR_API_KEY=...
+auto-studio-web
+```
+
+### 飞书 HITL（lark-cli）
+
+出站/入站见 [`tools/lark_cli/README.md`](tools/lark_cli/README.md) 与 ADR 0004。本地桥接：
+
+```bash
+auto-studio-web   # 终端 1
+auto-studio-feishu-bridge   # 终端 2：卡片 + IM 文本 → Webhook
+```
+
+项目 `project.yaml` 中配置 `hitl.feishu.notify_open_id` 或 `notify_chat_id`（示例见 `projects/_example/project.yaml`）。

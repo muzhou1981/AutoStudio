@@ -79,3 +79,39 @@ def test_hitl_ui_served() -> None:
     r = client.get("/")
     assert r.status_code == 200
     assert "Web HITL" in r.text
+
+
+def test_api_escalation_submit() -> None:
+    client = TestClient(app)
+    svc = GraphRunService(graph)
+    st = svc.start(human_request="esc", scenario_key="npu_operator")
+    tid = st.thread_id
+    svc.open_hitl(tid, kind="escalation", summary="预算预警")
+    r = client.post(
+        f"/api/runs/{tid}/hitl",
+        json={"escalation_choice": "pause", "human_reply": "先停", "channel": "web"},
+    )
+    assert r.status_code == 200
+
+
+def test_run_record_from_hitl_audit(svc: GraphRunService) -> None:
+    st = svc.start(human_request="audit", scenario_key="npu_operator")
+    tid = st.thread_id
+    for _ in range(12):
+        st = svc.status(tid)
+        if st.phase == "completed":
+            break
+        if (
+            st.phase == "awaiting_human"
+            and st.awaiting_human
+            and st.awaiting_human.kind == "gate"
+        ):
+            svc.submit_hitl(tid, gate_decision="approved", channel="web")
+            continue
+        if st.phase == "running":
+            svc._graph.invoke(None, svc._config(tid))
+            continue
+        break
+    st = svc.status(tid)
+    assert st.phase == "completed"
+    assert "hitl" in (st.values.get("run_record") or "").lower()

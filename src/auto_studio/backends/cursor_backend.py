@@ -54,10 +54,29 @@ class CursorBackend:
         return run.text().strip()
 
 
+def _cursor_backend_enabled() -> bool:
+    mode = os.environ.get("AUTO_STUDIO_BACKEND", "").strip().lower()
+    if mode == "stub":
+        return False
+    if mode == "cursor":
+        return True
+    # 需求默认 Cursor SDK：已配置 CURSOR_API_KEY 时自动启用
+    return bool(os.environ.get("CURSOR_API_KEY", "").strip())
+
+
 def try_cursor_backend() -> AgentBackend | None:
-    if os.environ.get("AUTO_STUDIO_BACKEND", "").strip().lower() != "cursor":
+    if not _cursor_backend_enabled():
         return None
+    cursor_errors: tuple[type[BaseException], ...] = (RuntimeError, OSError)
+    try:
+        from cursor_sdk.errors import CursorSDKError
+
+        cursor_errors = (RuntimeError, OSError, CursorSDKError)
+    except ImportError:
+        pass
     try:
         return CursorBackend()
-    except RuntimeError:
+    except cursor_errors:
+        return None
+    except ImportError:
         return None

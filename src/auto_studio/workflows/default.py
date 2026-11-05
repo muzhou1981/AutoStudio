@@ -203,32 +203,41 @@ def gate_requirement_confirm(state: FactoryState) -> dict:
 
 @skip_if_disabled("ux_designer")
 def ux_designer(state: FactoryState) -> dict:
-    return _touch_artifact(
-        state,
-        "ux_spec",
-        "ux_designer",
-        "体验设计说明（任务流与线框，待 UI）",
+    from auto_studio.backends.runner import invoke_role
+
+    spec = state.get("requirement_spec") or ""
+    body = invoke_role(
+        role_name="ux_designer",
+        user_prompt=f"需求说明：\n{spec[:8000]}\n\n请产出 `ux_spec` 正文。",
+        stub_note="体验设计说明（任务流与线框，待 UI）",
     )
+    return {"ux_spec": body}
 
 
 @skip_if_disabled("ui_designer")
 def ui_designer(state: FactoryState) -> dict:
-    return _touch_artifact(
-        state,
-        "ui_spec",
-        "ui_designer",
-        "界面与组件规格（待美工资源）",
+    from auto_studio.backends.runner import invoke_role
+
+    ux = state.get("ux_spec") or ""
+    body = invoke_role(
+        role_name="ui_designer",
+        user_prompt=f"UX 说明：\n{ux[:8000]}\n\n请产出 `ui_spec` 正文。",
+        stub_note="界面与组件规格（待美工资源）",
     )
+    return {"ui_spec": body}
 
 
 @skip_if_disabled("visual_designer")
 def visual_designer(state: FactoryState) -> dict:
-    return _touch_artifact(
-        state,
-        "visual_assets",
-        "visual_designer",
-        "视觉资源清单与文件（待架构/实现）",
+    from auto_studio.backends.runner import invoke_role
+
+    ui = state.get("ui_spec") or ""
+    body = invoke_role(
+        role_name="visual_designer",
+        user_prompt=f"UI 规格：\n{ui[:8000]}\n\n请产出 `visual_assets` 清单说明。",
+        stub_note="视觉资源清单与文件（待架构/实现）",
     )
+    return {"visual_assets": body}
 
 
 def config_manager_plan(state: FactoryState) -> dict:
@@ -249,10 +258,15 @@ def config_manager_plan(state: FactoryState) -> dict:
 
 @skip_if_disabled("finance_budget_rough")
 def finance_budget_rough(state: FactoryState) -> dict:
-    return {
-        **_touch_artifact(state, "budget_plan", "finance", "预算粗估（需求确认前）"),
-        "budget_phase": "rough",
-    }
+    from auto_studio.backends.runner import invoke_role
+
+    spec = state.get("requirement_spec") or ""
+    body = invoke_role(
+        role_name="finance",
+        user_prompt=f"需求说明：\n{spec[:8000]}\n\n请产出 `budget_plan` 粗估正文。",
+        stub_note="预算粗估（需求确认前）",
+    )
+    return {"budget_plan": body, "budget_phase": "rough"}
 
 
 @skip_if_disabled("project_manager_scope")
@@ -291,10 +305,15 @@ def architect(state: FactoryState) -> dict:
 
 @skip_if_disabled("finance_budget_final")
 def finance_budget_final(state: FactoryState) -> dict:
-    return {
-        **_touch_artifact(state, "budget_plan", "finance", "预算正式版（架构评审关卡）"),
-        "budget_phase": "final",
-    }
+    from auto_studio.backends.runner import invoke_role
+
+    arch = state.get("architecture_design") or ""
+    body = invoke_role(
+        role_name="finance",
+        user_prompt=f"架构设计：\n{arch[:8000]}\n\n请产出 `budget_plan` 正式版正文。",
+        stub_note="预算正式版（架构评审关卡）",
+    )
+    return {"budget_plan": body, "budget_phase": "final"}
 
 
 def gate_architecture_review(state: FactoryState) -> dict:
@@ -377,20 +396,32 @@ def qa(state: FactoryState) -> dict:
 
 @skip_if_disabled("finance_cost_snapshot")
 def finance_cost_snapshot(state: FactoryState) -> dict:
-    return {
-        **_touch_artifact(state, "cost_report", "finance", "成本快照（交付前）"),
-        "budget_phase": "snapshot",
-    }
+    from auto_studio.backends.runner import invoke_role
+
+    body = invoke_role(
+        role_name="finance",
+        user_prompt=(
+            "请根据本轮产物摘要产出 `cost_report` 成本快照（交付前）。\n"
+            f"qa_report 摘要：{(state.get('qa_report') or '')[:4000]}"
+        ),
+        stub_note="成本快照（交付前）",
+    )
+    return {"cost_report": body, "budget_phase": "snapshot"}
 
 
 @skip_if_disabled("project_manager_delivery")
 def project_manager_delivery(state: FactoryState) -> dict:
-    return _touch_artifact(
-        state,
-        "delivery_report",
-        "project_manager",
-        "交付报告（待最终交付关卡）",
+    from auto_studio.backends.runner import invoke_role
+
+    body = invoke_role(
+        role_name="project_manager",
+        user_prompt=(
+            "请产出 `delivery_report` 交付报告正文（待最终交付关卡）。\n"
+            f"测试/QA 摘要：{(state.get('test_report') or '')[:3000]}"
+        ),
+        stub_note="交付报告（待最终交付关卡）",
     )
+    return {"delivery_report": body}
 
 
 def gate_final_delivery(state: FactoryState) -> dict:
@@ -400,18 +431,44 @@ def gate_final_delivery(state: FactoryState) -> dict:
 
 @skip_if_disabled("config_manager_closeout")
 def config_manager_closeout(state: FactoryState) -> dict:
-    return {
-        **_touch_artifact(state, "config_baseline", "config_manager", "交付基线"),
-        **_touch_artifact(state, "config_retro", "config_manager", "模板与配置复盘"),
-    }
+    from auto_studio.backends.runner import invoke_role
+
+    baseline = invoke_role(
+        role_name="config_manager",
+        user_prompt=(
+            "请产出 `config_baseline` 交付基线说明。\n"
+            f"baseline_log：{(state.get('baseline_log') or '')[:6000]}"
+        ),
+        stub_note="交付基线",
+    )
+    retro = invoke_role(
+        role_name="config_manager",
+        user_prompt="请产出 `config_retro` 模板与配置复盘正文。",
+        stub_note="模板与配置复盘",
+    )
+    return {"config_baseline": baseline, "config_retro": retro}
 
 
 @skip_if_disabled("process_owner_retro")
 def process_owner_retro(state: FactoryState) -> dict:
+    from auto_studio.backends.runner import invoke_role
+
+    retro = invoke_role(
+        role_name="process_owner",
+        user_prompt="请产出 `retro_report`（Top3 问题与改进点）。",
+        stub_note="本轮复盘 Top3",
+    )
+    proposals = invoke_role(
+        role_name="process_owner",
+        user_prompt="请产出 `process_proposals` 流程与角色改进提案。",
+        stub_note="流程与角色改进提案",
+    )
+    audit = str(state.get("hitl_audit_log") or state.get("run_record") or "").strip()
+    run_record = audit or "[engine] 本轮无 HITL 审计条目"
     return {
-        **_touch_artifact(state, "retro_report", "process_owner", "本轮复盘 Top3"),
-        **_touch_artifact(state, "process_proposals", "process_owner", "流程与角色改进提案"),
-        "run_record": "[stub:engine] 运行记录占位",
+        "retro_report": retro,
+        "process_proposals": proposals,
+        "run_record": run_record,
     }
 
 
