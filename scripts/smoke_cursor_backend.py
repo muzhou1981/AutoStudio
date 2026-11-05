@@ -7,6 +7,12 @@ import sys
 
 
 def main() -> int:
+    from auto_studio.config.env_loader import apply_env_file
+
+    apply_env_file(
+        override=os.environ.get("AUTO_STUDIO_DOTENV_OVERRIDE", "1").strip().lower()
+        in ("1", "true", "yes")
+    )
     if not os.environ.get("CURSOR_API_KEY", "").strip():
         print("SKIP: 未设置 CURSOR_API_KEY", file=sys.stderr)
         return 2

@@ -11,6 +11,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from auto_studio.config.context import ConfigError
+from auto_studio.config.env_loader import apply_env_file
+
+apply_env_file()
 from auto_studio.hitl.feishu_notify import notify_awaiting_human_via_lark_cli
 from auto_studio.hitl.service import GraphRunService, HitlError
 from auto_studio.web.config_routes import router as config_router

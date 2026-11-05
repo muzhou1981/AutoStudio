@@ -90,6 +90,12 @@ def _live_notify(base: str) -> int:
 
 
 def main() -> int:
+    from auto_studio.config.env_loader import apply_env_file
+
+    apply_env_file(
+        override=os.environ.get("AUTO_STUDIO_DOTENV_OVERRIDE", "1").strip().lower()
+        in ("1", "true", "yes")
+    )
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--base",
