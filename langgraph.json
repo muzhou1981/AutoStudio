@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "default": "./src/auto_studio/workflows/default.py:graph"
+  },
+  "env": ".env"
+}

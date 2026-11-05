@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "auto-studio"
+version = "0.1.0"
+description = "AI 软件工厂：接收人类需求，经多角色 Agent 按工作流程协作，产出经过验证的软件"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+dependencies = ["langgraph"]
+
+[project.optional-dependencies]
+cursor = ["cursor-sdk"]
+dev = ["langgraph-cli[inmem]", "pytest>=8.0", "ruff>=0.5"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/auto_studio"]
