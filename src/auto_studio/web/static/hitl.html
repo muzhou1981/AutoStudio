@@ -76,9 +76,9 @@
                 <span>待办</span>
               </a>
               <label class="run-filter sidebar-sub">
-                <span>阶段</span>
-                <select id="runPhaseFilter" aria-label="按阶段筛选运行">
-                  <option value="">全部</option>
+                <span>Run列表</span>
+                <select id="runPhaseFilter" aria-label="按阶段筛选 Run 列表" autocomplete="off">
+                  <option value="all">全部</option>
                   <option value="running">运行中</option>
                   <option value="paused">已暂停</option>
                   <option value="awaiting_human">等待人工</option>
@@ -211,7 +211,7 @@
           <section class="config-pane-project" aria-labelledby="projectHeading">
             <div class="func-region" id="region-project">
             <p class="section-title" id="projectHeading">项目</p>
-            <p class="panel-lead">先选项目，再填标题、说明和工作区。整份 YAML 在这块末尾。</p>
+            <p class="panel-lead">先选项目，再填标题、说明、远程仓库和工作区。整份 YAML 在这块末尾。</p>
             <wa-select id="projectPick" label="选择项目" placeholder="选择项目"></wa-select>
             <div class="row-actions">
               <wa-button id="btnNewProject" appearance="outlined" variant="neutral">新建项目</wa-button>
@@ -227,6 +227,7 @@
             <div id="projectFields">
               <wa-input id="fieldTitle" label="标题"></wa-input>
               <wa-input id="fieldDescription" label="说明"></wa-input>
+              <wa-input id="fieldRemoteUrl" label="远程仓库" hint="git 远端地址，可空" placeholder="https://github.com/org/repo.git" spellcheck="false"></wa-input>
               <wa-input id="fieldWorkspace" label="工作区" hint="待开发项目的 git 目录，可空" placeholder="/path/to/repo" spellcheck="false"></wa-input>
               <p class="hint-block" id="workspaceHint"></p>
               <wa-input id="fieldProfile" label="流程配置名" hint="profile_id，可空" spellcheck="false"></wa-input>
@@ -531,15 +532,23 @@
       row.after(panel);
     }
 
+    const RUN_PHASE_FILTERS = new Set([
+      "running", "paused", "awaiting_human", "completed", "rejected", "stopped",
+    ]);
+    let runListSeq = 0;
+
     async function loadRunList() {
       const box = $("runList");
       if (!box) return;
-      const phase = $("runPhaseFilter") ? $("runPhaseFilter").value : "";
+      const raw = $("runPhaseFilter") ? $("runPhaseFilter").value : "all";
+      const phase = RUN_PHASE_FILTERS.has(raw) ? raw : "";
+      const seq = ++runListSeq;
       const q = new URLSearchParams();
       if (phase) q.set("phase", phase);
       try {
         const r = await fetch("/api/runs?" + q.toString());
         const data = await r.json();
+        if (seq !== runListSeq) return;
         box.replaceChildren();
         const runs = (r.ok && data.runs) || [];
         if (!runs.length) {

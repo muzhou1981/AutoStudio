@@ -86,6 +86,9 @@ def test_gate_timeout_waits_then_records_and_approval_still_advances(
 def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     text = TestClient(app).get("/").text
     assert 'id="runPhaseFilter"' in text
+    assert ">Run列表</span>" in text
+    assert 'value="all"' in text
+    assert "runListSeq" in text
     assert 'id="runList"' in text
     assert 'name.className = "run-name"' in text
     assert "PHASE_ICON" in text
@@ -148,7 +151,7 @@ def test_rail_markers_are_not_skipped() -> None:
     states = {cell["id"]: cell["state"] for cell in rail["cells"]}
     assert states["run_start"] == "done"
     assert states["run_end"] == "pending"
-    assert states["ux_designer"] == "skipped"
+    assert "ux_designer" not in states
     assert states["developer"] == "active"
 
 

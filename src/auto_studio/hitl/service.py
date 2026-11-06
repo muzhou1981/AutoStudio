@@ -721,11 +721,12 @@ def _rail_for(st: RunStatus) -> dict[str, Any]:
     if str(values.get("scenario_key") or "").strip() or str(values.get("project_id") or "").strip():
         try:
             ctx = build_run_context_from_state(values)
-            from auto_studio.config.workflow_nodes import FINANCE_NODES
+            from auto_studio.config.workflow_nodes import nodes_hidden_from_rail
 
-            skip = set(ctx.skip_nodes)
-            if not ctx.feature_finance():
-                skip.update(FINANCE_NODES)
+            skip = nodes_hidden_from_rail(
+                skip_nodes=ctx.skip_nodes,
+                finance_enabled=ctx.feature_finance(),
+            )
         except ConfigError:
             skip = None
     awaiting = None

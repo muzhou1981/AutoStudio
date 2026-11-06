@@ -64,7 +64,7 @@ def console_ui() -> str:
 
 @app.get("/api/rail")
 def api_rail(scenario_key: str = "", project_id: str = "") -> dict:
-    """启动前的轨道。已知场景时标出跳过的节点。"""
+    """启动前的轨道。已知场景时不列出未启用的节点。"""
     skip: set[str] | None = None
     if scenario_key.strip() or project_id.strip():
         try:
@@ -72,7 +72,12 @@ def api_rail(scenario_key: str = "", project_id: str = "") -> dict:
                 scenario_key=scenario_key.strip(),
                 project_id=project_id.strip(),
             )
-            skip = set(ctx.skip_nodes)
+            from auto_studio.config.workflow_nodes import nodes_hidden_from_rail
+
+            skip = nodes_hidden_from_rail(
+                skip_nodes=ctx.skip_nodes,
+                finance_enabled=ctx.feature_finance(),
+            )
         except ConfigError:
             skip = None
     return build_rail(phase="idle", next_nodes=[], awaiting=None, skip_nodes=skip)

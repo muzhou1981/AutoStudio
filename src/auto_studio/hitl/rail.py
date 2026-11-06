@@ -141,8 +141,8 @@ def build_rail(
     runnable = 0
     for index, (name, label) in enumerate(RAIL_NODES):
         if known_skip and name in skipped and name not in _RAIL_MARKERS:
-            state = "skipped"
-        elif phase == "stopped":
+            continue
+        if phase == "stopped":
             if current_index is None or index > current_index:
                 state = "pending"
             elif index < current_index:
@@ -171,8 +171,7 @@ def build_rail(
                 state = "active"
         else:
             state = "pending"
-        if state != "skipped":
-            runnable += 1
+        runnable += 1
         if state == "done":
             done += 1
         cells.append(

@@ -63,6 +63,7 @@ def api_get_project(project_id: str) -> dict:
 class ProjectFormBody(BaseModel):
     title: str = ""
     description: str = ""
+    remote_url: str = ""
     scenario_key: str = ""
     profile_id: str = ""
     max_dev_retries: int | None = None

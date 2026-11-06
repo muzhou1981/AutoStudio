@@ -29,7 +29,7 @@ def test_gate_waiting_marks_earlier_done_and_later_pending():
     assert rail["total"] == len(rail["cells"])
 
 
-def test_skip_nodes_stay_skipped_and_leave_the_count():
+def test_skip_nodes_are_omitted_and_leave_the_count():
     rail = build_rail(
         phase="awaiting_human",
         next_nodes=["gate_requirement_confirm"],
@@ -37,10 +37,10 @@ def test_skip_nodes_stay_skipped_and_leave_the_count():
         skip_nodes={"ux_designer", "ui_designer", "visual_designer"},
     )
     states = _states(rail)
-    assert states["ux_designer"] == "skipped"
-    assert states["ui_designer"] == "skipped"
-    assert states["visual_designer"] == "skipped"
-    assert rail["total"] == len(rail["cells"]) - 3
+    assert "ux_designer" not in states
+    assert "ui_designer" not in states
+    assert "visual_designer" not in states
+    assert rail["total"] == len(rail["cells"])
 
 
 def test_rollback_reopens_the_current_node_and_clears_later_done():
@@ -64,7 +64,7 @@ def test_completed_marks_every_runnable_node_done():
         skip_nodes={"ux_designer"},
     )
     states = _states(rail)
-    assert states["ux_designer"] == "skipped"
+    assert "ux_designer" not in states
     assert states["run_start"] == "done"
     assert states["process_owner_retro"] == "done"
     assert states["run_end"] == "finished"
@@ -145,7 +145,10 @@ def test_idle_rail_api_marks_design_track_skipped():
     states = _states(body)
     assert states["run_start"] == "initial"
     assert states["run_end"] == "pending"
-    assert states["ux_designer"] == "skipped"
+    assert "ux_designer" not in states
+    assert "ui_designer" not in states
+    assert "visual_designer" not in states
+    assert "finance_budget_rough" not in states
     assert states["developer"] == "pending"
     assert body["current"] == "run_start"
     assert body["done"] == 0
@@ -163,11 +166,13 @@ def test_started_run_rail_waits_at_requirement_gate():
     assert states["run_start"] == "done"
     assert states["gate_requirement_confirm"] == "waiting"
     assert states["project_manager_draft"] == "done"
-    assert states["ux_designer"] == "skipped"
-    assert states["finance_budget_rough"] == "skipped"
-    assert states["finance_budget_final"] == "skipped"
-    assert states["finance_cost_snapshot"] == "skipped"
-    assert rail["total"] == len(rail["cells"]) - 6
+    assert "ux_designer" not in states
+    assert "ui_designer" not in states
+    assert "visual_designer" not in states
+    assert "finance_budget_rough" not in states
+    assert "finance_budget_final" not in states
+    assert "finance_cost_snapshot" not in states
+    assert rail["total"] == len(rail["cells"])
 
 
 def test_idle_rail_is_all_pending_except_skips():
@@ -179,7 +184,7 @@ def test_idle_rail_is_all_pending_except_skips():
     )
     states = _states(rail)
     assert states["run_start"] == "initial"
-    assert states["ux_designer"] == "skipped"
+    assert "ux_designer" not in states
     assert states["developer"] == "pending"
     assert states["run_end"] == "pending"
     assert rail["done"] == 0

@@ -93,6 +93,7 @@ function fillProjectForm(data) {
   fillScenarioOptions($("fieldScenario"), window.__scenarios || [], data.scenario_key);
   $("fieldTitle").value = data.title || "";
   $("fieldDescription").value = data.description || "";
+  $("fieldRemoteUrl").value = data.remote_url || "";
   $("fieldProfile").value = data.profile_id || "";
   $("fieldRetries").value = data.max_dev_retries == null ? "" : String(data.max_dev_retries);
   $("fieldDesign").value = data.design_track_mode || "inherit";
@@ -114,7 +115,7 @@ function fillProjectForm(data) {
 }
 
 function clearProjectForm() {
-  for (const id of ["fieldTitle", "fieldDescription", "fieldProfile", "fieldRetries", "fieldChat", "fieldOpen", "fieldWorkspace"]) {
+  for (const id of ["fieldTitle", "fieldDescription", "fieldRemoteUrl", "fieldProfile", "fieldRetries", "fieldChat", "fieldOpen", "fieldWorkspace"]) {
     $(id).value = "";
   }
   $("workspaceHint").textContent = "";
@@ -294,6 +295,7 @@ function projectFormPayload() {
   return {
     title: $("fieldTitle").value.trim(),
     description: $("fieldDescription").value.trim(),
+    remote_url: $("fieldRemoteUrl").value.trim(),
     scenario_key: $("fieldScenario").value,
     profile_id: $("fieldProfile").value.trim(),
     max_dev_retries: retries === "" ? null : Number(retries),

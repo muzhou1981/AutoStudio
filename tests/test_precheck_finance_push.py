@@ -55,8 +55,9 @@ def test_finance_stays_off_the_default_path(svc: GraphRunService) -> None:
     assert st.awaiting_human.gate_id == "gate_architecture_review"
     assert not st.values.get("budget_plan")
     states = {cell["id"]: cell["state"] for cell in svc.status_dict(st.thread_id)["rail"]["cells"]}
-    assert states["finance_budget_rough"] == "skipped"
-    assert states["finance_budget_final"] == "skipped"
+    assert "finance_budget_rough" not in states
+    assert "finance_budget_final" not in states
+    assert "finance_cost_snapshot" not in states
 
 
 def test_status_events_push_the_waiting_round() -> None:

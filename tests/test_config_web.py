@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from auto_studio.config.context import ConfigError
 from auto_studio.config.registry import (
     apply_project_form,
     effective_config_summary,
@@ -117,6 +118,56 @@ def test_apply_project_form_preserves_extra(tmp_path):
     assert view["notify_chat_id"] == "oc_demo"
     assert view["skip_mode"] == "inherit"
     assert view["workspace"] == ""
+
+
+def test_project_remote_url_roundtrip_and_rejects_a_path(tmp_path):
+    (tmp_path / "scenarios" / "npu_operator").mkdir(parents=True)
+    (tmp_path / "scenarios" / "npu_operator" / "scenario.yaml").write_text(
+        "scenario_key: npu_operator\n",
+        encoding="utf-8",
+    )
+    save_project_yaml(
+        "webtest",
+        "project_id: webtest\ntitle: old\nscenario_key: npu_operator\n",
+        root=tmp_path,
+        create=True,
+    )
+    url = "https://github.com/org/repo.git"
+    text = apply_project_form(
+        "webtest",
+        {"title": "新标题", "scenario_key": "npu_operator", "remote_url": url},
+        root=tmp_path,
+    )
+    assert f"remote_url: {url}" in text
+    assert project_form_view("webtest", tmp_path)["remote_url"] == url
+    text = apply_project_form(
+        "webtest",
+        {"title": "新标题", "scenario_key": "npu_operator", "remote_url": "git@github.com:org/repo.git"},
+        root=tmp_path,
+    )
+    assert "git@github.com:org/repo.git" in text
+    with pytest.raises(ConfigError, match="git 地址"):
+        apply_project_form(
+            "webtest",
+            {"title": "新标题", "scenario_key": "npu_operator", "remote_url": "/tmp/repo"},
+            root=tmp_path,
+        )
+    cleared = apply_project_form(
+        "webtest",
+        {"title": "新标题", "scenario_key": "npu_operator", "remote_url": ""},
+        root=tmp_path,
+    )
+    assert "remote_url" not in cleared
+    assert project_form_view("webtest", tmp_path)["remote_url"] == ""
+
+
+def test_project_page_puts_remote_url_between_description_and_workspace():
+    page = TestClient(app).get("/project").text
+    description = page.index('id="fieldDescription"')
+    remote = page.index('id="fieldRemoteUrl"')
+    workspace = page.index('id="fieldWorkspace"')
+    assert description < remote < workspace
+    assert 'label="远程仓库"' in page
 
 
 def test_project_workspace_overrides_default_root(tmp_path, monkeypatch):

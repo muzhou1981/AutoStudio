@@ -8,6 +8,14 @@ FINANCE_NODES = frozenset(
     }
 )
 
+def nodes_hidden_from_rail(*, skip_nodes: set[str] | frozenset[str], finance_enabled: bool) -> set[str]:
+    """场景裁掉的节点，以及未打开的财务节点，不出现在轨道上。"""
+    hidden = set(skip_nodes)
+    if not finance_enabled:
+        hidden.update(FINANCE_NODES)
+    return hidden
+
+
 DEFAULT_GRAPH_NODES = frozenset(
     {
         "project_manager_draft",

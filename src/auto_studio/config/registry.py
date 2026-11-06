@@ -219,6 +219,7 @@ def project_form_view(project_id: str, root: Path | None = None) -> dict[str, An
         "project_id": project_id.strip(),
         "title": str(data.get("title") or ""),
         "description": str(data.get("description") or ""),
+        "remote_url": str(data.get("remote_url") or ""),
         "scenario_key": str(data.get("scenario_key") or ""),
         "profile_id": str(workflow.get("profile_id") or ""),
         "max_dev_retries": retries if isinstance(retries, int) else None,
@@ -233,6 +234,21 @@ def project_form_view(project_id: str, root: Path | None = None) -> dict[str, An
     }
 
 
+def remote_url_error(raw: str) -> str | None:
+    """空字符串表示不配置。返回给人看的错误，没有问题则返回 None。"""
+    text = raw.strip()
+    if not text:
+        return None
+    if any(ch.isspace() for ch in text):
+        return "远程仓库地址不能含空白。"
+    if text.startswith(("https://", "http://", "ssh://", "git://")):
+        return None
+    host = text.split("@", 1)[1] if text.startswith("git@") else ""
+    if host and ":" in host and not host.startswith(":") and not host.endswith(":"):
+        return None
+    return "远程仓库要填 git 地址，例如 https://github.com/org/repo.git。"
+
+
 def apply_project_form(
     project_id: str,
     fields: dict[str, Any],
@@ -243,6 +259,14 @@ def apply_project_form(
     data = _parse_project_yaml_text(get_project_yaml(project_id, root))
     data["title"] = str(fields.get("title") or "").strip()
     data["description"] = str(fields.get("description") or "").strip()
+    remote_url = str(fields.get("remote_url") or "").strip()
+    remote_error = remote_url_error(remote_url)
+    if remote_error:
+        raise ConfigError(remote_error)
+    if remote_url:
+        data["remote_url"] = remote_url
+    else:
+        data.pop("remote_url", None)
     data["scenario_key"] = str(fields.get("scenario_key") or "").strip()
 
     from auto_studio.workspace.layout import workspace_config_error
