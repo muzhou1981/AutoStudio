@@ -1,11 +1,16 @@
 """Web 配置 API 与 registry 测试。"""
 
+from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
 
 from auto_studio.config.registry import (
+    apply_project_form,
     effective_config_summary,
     list_projects,
     list_scenarios,
+    project_form_view,
     save_project_yaml,
 )
 from auto_studio.web.app import app
@@ -43,7 +48,10 @@ def test_config_api_settings():
 
 def test_config_page_and_static():
     client = TestClient(app)
-    assert client.get("/config").status_code == 200
+    page = client.get("/config")
+    assert page.status_code == 200
+    assert "原文 project.yaml" in page.text
+    assert "原文 JSON" in page.text
     assert client.get("/static/shared.css").status_code == 200
 
 
@@ -73,6 +81,89 @@ def test_save_project_tmp_roundtrip(tmp_path, monkeypatch):
     assert eff["max_dev_retries"] == 4
 
 
+def test_apply_project_form_preserves_extra(tmp_path):
+    (tmp_path / "scenarios" / "npu_operator").mkdir(parents=True)
+    (tmp_path / "scenarios" / "npu_operator" / "scenario.yaml").write_text(
+        "scenario_key: npu_operator\n",
+        encoding="utf-8",
+    )
+    save_project_yaml(
+        "webtest",
+        "project_id: webtest\ntitle: old\nscenario_key: npu_operator\nnote: keep-me\n",
+        root=tmp_path,
+        create=True,
+    )
+    text = apply_project_form(
+        "webtest",
+        {
+            "title": "新标题",
+            "description": "一行说明",
+            "scenario_key": "npu_operator",
+            "profile_id": "",
+            "max_dev_retries": 4,
+            "design_track_mode": "off",
+            "skip_mode": "inherit",
+            "skip_nodes": [],
+            "notify_chat_id": "oc_demo",
+            "notify_open_id": "",
+        },
+        root=tmp_path,
+    )
+    assert "keep-me" in text
+    view = project_form_view("webtest", tmp_path)
+    assert view["title"] == "新标题"
+    assert view["max_dev_retries"] == 4
+    assert view["design_track_mode"] == "off"
+    assert view["notify_chat_id"] == "oc_demo"
+    assert view["skip_mode"] == "inherit"
+    assert view["workspace"] == ""
+
+
+def test_project_workspace_overrides_default_root(tmp_path, monkeypatch):
+    from auto_studio.workspace.layout import resolve_target_root
+
+    monkeypatch.setattr("auto_studio.config.registry.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("auto_studio.workspace.layout.factory_root", lambda: tmp_path)
+    monkeypatch.setenv("AUTO_STUDIO_TARGET_ROOT", str(tmp_path / "from-env"))
+    (tmp_path / "scenarios" / "npu_operator").mkdir(parents=True)
+    (tmp_path / "scenarios" / "npu_operator" / "scenario.yaml").write_text(
+        "scenario_key: npu_operator\n",
+        encoding="utf-8",
+    )
+    repo = tmp_path / "app-repo"
+    repo.mkdir()
+    save_project_yaml(
+        "webtest",
+        "project_id: webtest\ntitle: old\nscenario_key: npu_operator\n",
+        root=tmp_path,
+        create=True,
+    )
+    text = apply_project_form(
+        "webtest",
+        {
+            "title": "新标题",
+            "scenario_key": "npu_operator",
+            "workspace": str(repo),
+        },
+        root=tmp_path,
+    )
+    assert f"workspace: {repo}" in text
+    view = project_form_view("webtest", tmp_path)
+    assert view["workspace"] == str(repo)
+    assert Path(view["workspace_resolved"]) == repo.resolve()
+    assert resolve_target_root("webtest") == repo.resolve()
+
+    occupied = tmp_path / "not-a-repo"
+    occupied.mkdir()
+    (occupied / "readme.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match="git 仓库"):
+        apply_project_form(
+            "webtest",
+            {"title": "新标题", "scenario_key": "npu_operator", "workspace": str(occupied)},
+            root=tmp_path,
+        )
+
+
 def test_config_api_put_example():
     client = TestClient(app)
     r0 = client.get("/api/config/projects/_example")
@@ -83,3 +174,99 @@ def test_config_api_put_example():
         json={"yaml": original},
     )
     assert r1.status_code == 200
+
+
+def test_web_sets_backend_and_masks_api_key(tmp_path, monkeypatch):
+    monkeypatch.setattr("auto_studio.config.registry.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("auto_studio.cli.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("auto_studio.config.env_loader.factory_root", lambda: tmp_path)
+    client = TestClient(app)
+    r = client.post(
+        "/api/config/settings",
+        json={"key": "AUTO_STUDIO_BACKEND", "value": "cursor"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["effective_backend"] == "cursor"
+    backend = next(k for k in body["keys"] if k["name"] == "AUTO_STUDIO_BACKEND")
+    assert backend["value_hint"] == "cursor"
+    r2 = client.post(
+        "/api/config/settings",
+        json={"key": "CURSOR_API_KEY", "value": "secret-value"},
+    )
+    assert r2.status_code == 200
+    text = r2.text
+    assert "secret-value" not in text
+    key = next(k for k in r2.json()["keys"] if k["name"] == "CURSOR_API_KEY")
+    assert key["configured"] is True
+    assert key["value_hint"] == "已设置"
+    assert "CURSOR_API_KEY=secret-value" in (tmp_path / ".env").read_text(encoding="utf-8")
+    bad = client.post("/api/config/settings", json={"key": "PATH", "value": "/tmp"})
+    assert bad.status_code == 400
+    (tmp_path / ".env").write_text("CURSOR_API_KEY=secret-value\n", encoding="utf-8")
+    implied = client.get("/api/config/settings")
+    assert implied.status_code == 200
+    assert implied.json()["effective_backend"] == "cursor"
+    assert "secret-value" not in implied.text
+    hint = next(k for k in implied.json()["keys"] if k["name"] == "AUTO_STUDIO_BACKEND")
+    assert "当前生效 cursor" in hint["value_hint"]
+
+
+def _ready_lark(monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_studio.hitl.lark_cli_client import LarkCliAuthSummary
+
+    monkeypatch.setattr(
+        "auto_studio.hitl.lark_cli_client.auth_summary",
+        lambda: LarkCliAuthSummary(True, True, True, "ok"),
+    )
+
+
+def test_probe_reports_connected_for_stub(monkeypatch, tmp_path):
+    _ready_lark(monkeypatch)
+    monkeypatch.setenv("AUTO_STUDIO_LARK_BACKEND", "lark_cli")
+    monkeypatch.setenv("AUTO_STUDIO_TARGET_ROOT", str(tmp_path))
+    client = TestClient(app)
+    probed = client.post("/api/config/settings/probe")
+    assert probed.status_code == 200
+    body = probed.json()
+    assert body["ok"] is True
+    assert body["summary"] == "已连通。"
+    names = {item["name"]: item["status"] for item in body["checks"]}
+    assert names["Agent"] == "ok"
+    assert names["默认工作区"] == "ok"
+    assert names["飞书"] == "ok"
+
+
+def test_probe_skips_missing_cursor_key_and_keeps_saved_value(monkeypatch):
+    from auto_studio.config.connectivity import probe_saved_settings
+
+    _ready_lark(monkeypatch)
+    monkeypatch.setenv("AUTO_STUDIO_BACKEND", "cursor")
+    monkeypatch.setenv("AUTO_STUDIO_LARK_BACKEND", "lark_cli")
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
+    body = probe_saved_settings()
+    assert body["ok"] is True
+    agent = next(item for item in body["checks"] if item["name"] == "Agent")
+    assert agent["status"] == "skip"
+    assert "未配置" in agent["detail"]
+
+
+def test_probe_cursor_failure_does_not_echo_the_key(monkeypatch):
+    import os
+
+    from auto_studio.config.connectivity import probe_saved_settings
+
+    _ready_lark(monkeypatch)
+    monkeypatch.setenv("AUTO_STUDIO_BACKEND", "cursor")
+    monkeypatch.setenv("AUTO_STUDIO_LARK_BACKEND", "lark_cli")
+    monkeypatch.setenv("CURSOR_API_KEY", "secret-value")
+
+    def fail_key(api_key, model):
+        return ("fail", "API Key 无效。到 Cursor 设置里更新 User API Key，再写入一次。")
+
+    monkeypatch.setattr("auto_studio.config.connectivity.probe_cursor_key", fail_key)
+    body = probe_saved_settings()
+    assert body["ok"] is False
+    assert body["summary"].startswith("连不上。")
+    assert "secret-value" not in body["summary"]
+    assert os.environ.get("CURSOR_API_KEY") == "secret-value"

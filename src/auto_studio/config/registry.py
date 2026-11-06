@@ -183,6 +183,146 @@ def save_project_yaml(
     build_run_context(scenario_key=scenario_key, project_id=pid, root=root)
 
 
+def project_workspace(project_id: str, root: Path | None = None) -> str:
+    """项目 YAML 里的待开发目录。未配置时返回空字符串。"""
+    try:
+        data = _parse_project_yaml_text(get_project_yaml(project_id, root))
+    except ConfigError:
+        return ""
+    return str(data.get("workspace") or "").strip()
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def project_form_view(project_id: str, root: Path | None = None) -> dict[str, Any]:
+    """项目表单：选择项和单行字段。原文 YAML 仍走 get_project_yaml。"""
+    from auto_studio.config.workflow_nodes import DEFAULT_GRAPH_NODES
+
+    data = _parse_project_yaml_text(get_project_yaml(project_id, root))
+    workflow = _mapping(data.get("workflow"))
+    features = _mapping(workflow.get("features"))
+    limits = _mapping(workflow.get("limits"))
+    feishu = _mapping(_mapping(data.get("hitl")).get("feishu"))
+    from auto_studio.workspace.layout import resolve_target_root
+
+    design = features.get("design_track")
+    if design is True:
+        design_track_mode = "on"
+    elif design is False:
+        design_track_mode = "off"
+    else:
+        design_track_mode = "inherit"
+    retries = limits.get("max_dev_retries")
+    return {
+        "project_id": project_id.strip(),
+        "title": str(data.get("title") or ""),
+        "description": str(data.get("description") or ""),
+        "scenario_key": str(data.get("scenario_key") or ""),
+        "profile_id": str(workflow.get("profile_id") or ""),
+        "max_dev_retries": retries if isinstance(retries, int) else None,
+        "design_track_mode": design_track_mode,
+        "skip_mode": "custom" if "skip_nodes" in workflow else "inherit",
+        "skip_nodes": [str(x) for x in (workflow.get("skip_nodes") or [])],
+        "notify_chat_id": str(feishu.get("notify_chat_id") or ""),
+        "notify_open_id": str(feishu.get("notify_open_id") or ""),
+        "workspace": str(data.get("workspace") or ""),
+        "workspace_resolved": str(resolve_target_root(project_id.strip())),
+        "nodes": sorted(DEFAULT_GRAPH_NODES),
+    }
+
+
+def apply_project_form(
+    project_id: str,
+    fields: dict[str, Any],
+    *,
+    root: Path | None = None,
+) -> str:
+    """把表单写回 project.yaml，保留表单未覆盖的键。"""
+    data = _parse_project_yaml_text(get_project_yaml(project_id, root))
+    data["title"] = str(fields.get("title") or "").strip()
+    data["description"] = str(fields.get("description") or "").strip()
+    data["scenario_key"] = str(fields.get("scenario_key") or "").strip()
+
+    from auto_studio.workspace.layout import workspace_config_error
+
+    workspace = str(fields.get("workspace") or "").strip()
+    workspace_error = workspace_config_error(workspace)
+    if workspace_error:
+        raise ValueError(workspace_error)
+    if workspace:
+        data["workspace"] = workspace
+    else:
+        data.pop("workspace", None)
+
+    workflow = _mapping(data.get("workflow"))
+    profile_id = str(fields.get("profile_id") or "").strip()
+    if profile_id:
+        workflow["profile_id"] = profile_id
+    else:
+        workflow.pop("profile_id", None)
+
+    limits = _mapping(workflow.get("limits"))
+    retries = fields.get("max_dev_retries")
+    if retries is None or retries == "":
+        limits.pop("max_dev_retries", None)
+    else:
+        limits["max_dev_retries"] = int(retries)
+    if limits:
+        workflow["limits"] = limits
+    else:
+        workflow.pop("limits", None)
+
+    features = _mapping(workflow.get("features"))
+    mode = str(fields.get("design_track_mode") or "inherit")
+    if mode == "on":
+        features["design_track"] = True
+    elif mode == "off":
+        features["design_track"] = False
+    else:
+        features.pop("design_track", None)
+    if features:
+        workflow["features"] = features
+    else:
+        workflow.pop("features", None)
+
+    if str(fields.get("skip_mode") or "inherit") == "custom":
+        workflow["skip_nodes"] = [str(x) for x in (fields.get("skip_nodes") or [])]
+    else:
+        workflow.pop("skip_nodes", None)
+
+    if workflow:
+        data["workflow"] = workflow
+    else:
+        data.pop("workflow", None)
+
+    hitl = _mapping(data.get("hitl"))
+    feishu = _mapping(hitl.get("feishu"))
+    chat_id = str(fields.get("notify_chat_id") or "").strip()
+    open_id = str(fields.get("notify_open_id") or "").strip()
+    if chat_id:
+        feishu["notify_chat_id"] = chat_id
+    else:
+        feishu.pop("notify_chat_id", None)
+    if open_id:
+        feishu["notify_open_id"] = open_id
+    else:
+        feishu.pop("notify_open_id", None)
+    if feishu:
+        hitl["feishu"] = feishu
+    else:
+        hitl.pop("feishu", None)
+    if hitl:
+        data["hitl"] = hitl
+    else:
+        data.pop("hitl", None)
+
+    text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+    save_project_yaml(project_id, text, root=root, create=False)
+    return text
+
+
 def effective_config_summary(
     *,
     scenario_key: str = "",
@@ -215,6 +355,11 @@ _SETTINGS_KEYS = (
     "LARK_VERIFICATION_TOKEN",
     "LARK_ENCRYPT_KEY",
     "AUTO_STUDIO_PUBLIC_BASE_URL",
+    "AUTO_STUDIO_FEISHU_NOTIFY_CHAT_ID",
+    "AUTO_STUDIO_FEISHU_NOTIFY_OPEN_ID",
+    "AUTO_STUDIO_BACKEND",
+    "AUTO_STUDIO_CURSOR_MODEL",
+    "AUTO_STUDIO_TARGET_ROOT",
 )
 
 
@@ -230,10 +375,34 @@ def settings_status(root: Path | None = None) -> dict[str, Any]:
             k, _, v = line.partition("=")
             env_vars[k.strip()] = v.strip()
 
+    explicit_backend = env_vars.get("AUTO_STUDIO_BACKEND", "").strip().lower()
+    if explicit_backend in {"stub", "cursor"}:
+        effective_backend = explicit_backend
+    elif env_vars.get("CURSOR_API_KEY", "").strip():
+        effective_backend = "cursor"
+    else:
+        effective_backend = "stub"
+
     keys = []
     for name in _SETTINGS_KEYS:
         val = env_vars.get(name, "")
-        if name == "LANGSMITH_TRACING":
+        if name == "AUTO_STUDIO_BACKEND":
+            hint = val or f"未设置（当前生效 {effective_backend}）"
+            keys.append({"name": name, "configured": bool(val), "value_hint": hint})
+        elif name == "AUTO_STUDIO_CURSOR_MODEL":
+            keys.append({
+                "name": name,
+                "configured": bool(val),
+                "value_hint": val or "Auto（default）",
+            })
+        elif name in {
+            "AUTO_STUDIO_TARGET_ROOT",
+            "AUTO_STUDIO_PUBLIC_BASE_URL",
+            "AUTO_STUDIO_FEISHU_NOTIFY_CHAT_ID",
+            "AUTO_STUDIO_FEISHU_NOTIFY_OPEN_ID",
+        }:
+            keys.append({"name": name, "configured": bool(val), "value_hint": val})
+        elif name == "LANGSMITH_TRACING":
             keys.append({"name": name, "configured": True, "value_hint": val or "false"})
         else:
             keys.append({"name": name, "configured": bool(val), "value_hint": "已设置" if val else ""})
@@ -265,6 +434,7 @@ def settings_status(root: Path | None = None) -> dict[str, Any]:
     return {
         "env_file": str(env_path),
         "env_exists": env_path.is_file(),
+        "effective_backend": effective_backend,
         "keys": keys,
         "lark_backend": backend,
         "lark_cli": {

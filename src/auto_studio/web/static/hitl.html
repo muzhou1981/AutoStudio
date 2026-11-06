@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="wa-theme-default wa-palette-default wa-brand-blue">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -13,729 +13,324 @@
         theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
       }
       document.documentElement.setAttribute("data-theme", theme);
+      document.documentElement.classList.toggle("wa-dark", theme === "dark");
+      document.documentElement.classList.toggle("wa-light", theme !== "dark");
+      document.documentElement.dataset.route =
+        location.pathname === "/config" ? "config" : location.pathname === "/project" ? "project" : "hitl";
+      if (location.pathname === "/config") document.title = "auto_studio · 配置";
+      if (location.pathname === "/project") document.title = "auto_studio · 项目配置";
+      if (location.pathname === "/" || location.pathname === "") document.title = "auto_studio · 运行";
     })();
   </script>
-  <style>
-    html {
-      --accent: #2563eb;
-      --accent-hover: #1d4ed8;
-      --success: #16a34a;
-      --danger: #dc2626;
-      --radius-sm: 6px;
-      --radius-md: 10px;
-      --font: ui-sans-serif, "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
-      --mono: ui-monospace, "SF Mono", "Cascadia Code", monospace;
-      --focus-border: rgba(37, 99, 235, 0.55);
-      --focus-ring: rgba(37, 99, 235, 0.2);
-      --layout-max: 100%;
-      --gutter: clamp(0.75rem, 1.5vw, 1.25rem);
-      --app-bar-h: 3.25rem;
-      --sidebar-w: 15.5rem;
-      --inspect-w: min(26rem, 32vw);
-      --rail-border: var(--border);
-    }
-
-    html[data-theme="light"] {
-      color-scheme: light;
-      --bg-base: #f4f4f5;
-      --bg-elevated: #ffffff;
-      --bg-input: #fafafa;
-      --border: rgba(0, 0, 0, 0.1);
-      --text-primary: #18181b;
-      --text-secondary: #52525b;
-      --text-muted: #71717a;
-      --warn-bg: rgba(234, 179, 8, 0.14);
-      --warn-border: rgba(202, 138, 4, 0.45);
-      --warn-fg: #713f12;
-      --error-fg: #991b1b;
-      --error-bg: rgba(239, 68, 68, 0.08);
-      --error-border: rgba(239, 68, 68, 0.35);
-      --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 4px 14px rgba(0, 0, 0, 0.06);
-      --surface-hover: rgba(0, 0, 0, 0.04);
-      --btn-primary-fg: #ffffff;
-      --spinner-track: rgba(255, 255, 255, 0.35);
-      --spinner-head: #ffffff;
-      --toggle-bg: #ffffff;
-      --toggle-fg: #18181b;
-      --toggle-border: rgba(0, 0, 0, 0.12);
-    }
-
-    html[data-theme="dark"] {
-      color-scheme: dark;
-      --bg-base: #18181b;
-      --bg-elevated: #1f1f23;
-      --bg-input: #27272a;
-      --border: rgba(255, 255, 255, 0.08);
-      --text-primary: rgba(255, 255, 255, 0.92);
-      --text-secondary: rgba(255, 255, 255, 0.62);
-      --text-muted: rgba(255, 255, 255, 0.42);
-      --warn-bg: rgba(234, 179, 8, 0.12);
-      --warn-border: rgba(234, 179, 8, 0.35);
-      --warn-fg: rgba(255, 255, 255, 0.9);
-      --error-fg: #fecaca;
-      --error-bg: rgba(239, 68, 68, 0.12);
-      --error-border: rgba(239, 68, 68, 0.3);
-      --shadow: 0 1px 2px rgba(0, 0, 0, 0.24), 0 4px 12px rgba(0, 0, 0, 0.18);
-      --surface-hover: rgba(255, 255, 255, 0.04);
-      --btn-primary-fg: #ffffff;
-      --spinner-track: rgba(255, 255, 255, 0.25);
-      --spinner-head: #ffffff;
-      --toggle-bg: #27272a;
-      --toggle-fg: rgba(255, 255, 255, 0.92);
-      --toggle-border: rgba(255, 255, 255, 0.12);
-    }
-
-    *, *::before, *::after { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: var(--font);
-      font-size: 15px;
-      line-height: 1.5;
-      color: var(--text-primary);
-      background: var(--bg-base);
-      -webkit-font-smoothing: antialiased;
-    }
-
-    .app-frame {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .app-bar {
-      position: sticky;
-      top: 0;
-      z-index: 15;
-      flex-shrink: 0;
-      border-bottom: 1px solid var(--border);
-      background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
-      backdrop-filter: blur(10px);
-    }
-
-    .app-bar-inner {
-      padding: 0.65rem var(--gutter);
-      min-height: var(--app-bar-h);
-      display: flex;
-      align-items: center;
-      justify-content: flex-start;
-      gap: 1rem;
-      flex-wrap: wrap;
-    }
-
-    .app-nav {
-      display: flex;
-      gap: 0.35rem;
-    }
-
-    .app-nav a {
-      font-size: 0.8125rem;
-      font-weight: 500;
-      color: var(--text-secondary);
-      text-decoration: none;
-      padding: 0.35rem 0.65rem;
-      border-radius: var(--radius-sm);
-    }
-
-    .app-nav a:hover {
-      background: var(--surface-hover);
-      color: var(--text-primary);
-    }
-
-    .app-nav a.is-active {
-      background: var(--bg-input);
-      color: var(--text-primary);
-      border: 1px solid var(--border);
-    }
-
-    .app-bar-meta { margin-left: auto; }
-
-    .app-bar-inner h1 {
-      margin: 0;
-      font-size: 0.9375rem;
-      font-weight: 600;
-      letter-spacing: -0.02em;
-    }
-
-    .app-bar-meta {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      font-family: var(--mono);
-    }
-
-    /* Codex 式：左导航 · 中操作 · 右检视（Claude Artifacts / Gemini Run settings） */
-    .app-shell {
-      flex: 1;
-      display: grid;
-      grid-template-columns: 1fr;
-      min-height: calc(100vh - var(--app-bar-h));
-    }
-
-    @media (min-width: 900px) {
-      .app-shell {
-        grid-template-columns: var(--sidebar-w) 1fr var(--inspect-w);
-      }
-    }
-
-    .sidebar {
-      display: none;
-      flex-direction: column;
-      gap: 0.75rem;
-      padding: var(--gutter);
-      border-right: 1px solid var(--rail-border);
-      background: var(--bg-elevated);
-    }
-
-    @media (min-width: 900px) {
-      .sidebar { display: flex; }
-    }
-
-    .sidebar-brand {
-      font-size: 0.6875rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-muted);
-    }
-
-    .sidebar-label {
-      display: block;
-      font-size: 0.6875rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-muted);
-      margin-bottom: 0.35rem;
-    }
-
-    .run-list-item {
-      font-size: 0.8125rem;
-      font-family: var(--mono);
-      color: var(--text-secondary);
-      padding: 0.5rem 0.6rem;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--border);
-      background: var(--bg-input);
-      word-break: break-all;
-    }
-
-    .run-list-item.is-active {
-      border-color: var(--focus-border);
-      color: var(--text-primary);
-    }
-
-    .sidebar-hint {
-      margin-top: auto;
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      line-height: 1.45;
-    }
-
-    .workspace-main {
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-      padding: var(--gutter);
-      padding-bottom: 2rem;
-      overflow: auto;
-    }
-
-    .workspace-inspect {
-      min-width: 0;
-      border-top: 1px solid var(--rail-border);
-      background: color-mix(in srgb, var(--bg-elevated) 96%, var(--bg-base));
-      display: flex;
-      flex-direction: column;
-      max-height: 42vh;
-      overflow: auto;
-    }
-
-    @media (min-width: 900px) {
-      .workspace-inspect {
-        border-top: none;
-        border-left: 1px solid var(--rail-border);
-        max-height: none;
-        position: sticky;
-        top: var(--app-bar-h);
-        height: calc(100vh - var(--app-bar-h));
-      }
-    }
-
-    .inspect-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 0.5rem;
-      padding: 0.75rem var(--gutter);
-      border-bottom: 1px solid var(--border);
-      flex-shrink: 0;
-    }
-
-    .inspect-head h2 {
-      margin: 0;
-      font-size: 0.6875rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-muted);
-    }
-
-    .inspect-body {
-      padding: var(--gutter);
-      flex: 1;
-      overflow: auto;
-    }
-
-    .composer-block {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 0;
-      max-width: 52rem;
-    }
-
-    .field-row {
-      display: grid;
-      gap: 0.75rem;
-    }
-
-    @media (min-width: 640px) {
-      .field-row { grid-template-columns: 1fr 1fr; }
-    }
-
-    .gate-card {
-      margin-top: 1.25rem;
-      padding: 1rem 1.1rem;
-      border-radius: var(--radius-md);
-      border: 1px solid var(--warn-border);
-      background: var(--warn-bg);
-      max-width: 52rem;
-    }
-
-    .gate-card[hidden] { display: none !important; }
-
-    .gate-card h3 {
-      margin: 0 0 0.35rem;
-      font-size: 0.9375rem;
-      font-weight: 600;
-      color: var(--warn-fg);
-    }
-
-    .gate-card .gate-id {
-      margin-bottom: 0.85rem;
-    }
-
-    .main-divider {
-      margin: 1.25rem 0;
-      border: none;
-      border-top: 1px solid var(--border);
-      max-width: 52rem;
-    }
-
-    .section-title {
-      margin: 0 0 0.65rem;
-      font-size: 0.8125rem;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .phase-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      padding: 0.35rem 0.65rem;
-      font-size: 0.75rem;
-      font-weight: 500;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: var(--bg-elevated);
-      color: var(--text-secondary);
-    }
-
-    .phase-pill[data-phase="awaiting_human"] {
-      border-color: var(--warn-border);
-      background: var(--warn-bg);
-      color: var(--warn-fg);
-    }
-
-    .phase-pill[data-phase="completed"] {
-      border-color: color-mix(in srgb, var(--success) 35%, transparent);
-      color: var(--success);
-    }
-
-    .phase-pill[data-phase="rejected"] {
-      border-color: color-mix(in srgb, var(--danger) 35%, transparent);
-      color: var(--danger);
-    }
-
-    .phase-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: currentColor;
-      opacity: 0.9;
-    }
-
-    .panel {
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      padding: 1rem 1.1rem;
-      box-shadow: var(--shadow);
-    }
-
-    .panel h2 {
-      margin: 0 0 0.85rem;
-      font-size: 0.6875rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-muted);
-    }
-
-    label {
-      display: block;
-      margin-top: 0.85rem;
-      font-size: 0.8125rem;
-      font-weight: 500;
-      color: var(--text-secondary);
-    }
-
-    label:first-of-type { margin-top: 0; }
-
-    .hint {
-      font-weight: 400;
-      color: var(--text-muted);
-    }
-
-    input, textarea, select {
-      width: 100%;
-      margin-top: 0.35rem;
-      padding: 0.55rem 0.65rem;
-      font: inherit;
-      color: var(--text-primary);
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      transition: border-color 0.15s ease, box-shadow 0.15s ease;
-    }
-
-    input:focus, textarea:focus, select:focus {
-      outline: none;
-      border-color: var(--focus-border);
-      box-shadow: 0 0 0 3px var(--focus-ring);
-    }
-
-    input[readonly] {
-      color: var(--text-muted);
-      font-family: var(--mono);
-      font-size: 0.8125rem;
-    }
-
-    textarea { resize: vertical; min-height: 4.5rem; }
-
-    .row-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-      margin-top: 1rem;
-    }
-
-    button {
-      font: inherit;
-      font-size: 0.8125rem;
-      font-weight: 500;
-      padding: 0.5rem 0.85rem;
-      border-radius: var(--radius-sm);
-      border: 1px solid transparent;
-      cursor: pointer;
-      transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
-    }
-
-    button:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-    }
-
-    .btn-primary {
-      background: var(--accent);
-      color: var(--btn-primary-fg);
-    }
-
-    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-
-    .btn-secondary {
-      background: transparent;
-      color: var(--text-primary);
-      border-color: var(--border);
-    }
-
-    .btn-secondary:hover:not(:disabled) {
-      background: var(--surface-hover);
-    }
-
-    .gate-banner {
-      margin-top: 1rem;
-      padding: 0.75rem 0.85rem;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--warn-border);
-      background: var(--warn-bg);
-      font-size: 0.875rem;
-      line-height: 1.45;
-    }
-
-    .gate-banner[hidden] { display: none !important; }
-
-    .gate-banner strong {
-      display: block;
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 0.25rem;
-    }
-
-    .gate-id {
-      font-family: var(--mono);
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      margin-top: 0.35rem;
-    }
-
-    .inline-error {
-      margin-top: 0.75rem;
-      padding: 0.5rem 0.65rem;
-      font-size: 0.8125rem;
-      color: var(--error-fg);
-      background: var(--error-bg);
-      border: 1px solid var(--error-border);
-      border-radius: var(--radius-sm);
-    }
-
-    .inline-error[hidden] { display: none !important; }
-
-    .status-empty {
-      color: var(--text-muted);
-      font-size: 0.875rem;
-      padding: 0.5rem 0;
-    }
-
-    .status-dl {
-      margin: 0;
-      display: grid;
-      gap: 0.65rem;
-    }
-
-    .status-row {
-      display: grid;
-      grid-template-columns: minmax(4.5rem, 6.5rem) 1fr;
-      gap: 0.65rem 1rem;
-      font-size: 0.8125rem;
-    }
-
-    @media (min-width: 900px) {
-      #req { min-height: 8rem; }
-      details.raw pre { max-height: min(18rem, 35vh); }
-    }
-
-    .sidebar-new {
-      width: 100%;
-      justify-content: center;
-    }
-
-    .status-row dt {
-      margin: 0;
-      color: var(--text-muted);
-    }
-
-    .status-row dd {
-      margin: 0;
-      word-break: break-all;
-    }
-
-    .status-row dd.mono { font-family: var(--mono); font-size: 0.75rem; }
-
-    details.raw {
-      margin-top: 1rem;
-      font-size: 0.75rem;
-    }
-
-    details.raw summary {
-      cursor: pointer;
-      color: var(--text-muted);
-      user-select: none;
-    }
-
-    details.raw pre {
-      margin: 0.5rem 0 0;
-      padding: 0.75rem;
-      max-height: 14rem;
-      overflow: auto;
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      font-family: var(--mono);
-      font-size: 0.6875rem;
-      line-height: 1.45;
-      color: var(--text-secondary);
-    }
-
-    .btn-loading {
-      position: relative;
-      color: transparent !important;
-    }
-
-    .btn-loading::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      margin: auto;
-      width: 1rem;
-      height: 1rem;
-      border: 2px solid var(--spinner-track);
-      border-top-color: var(--spinner-head);
-      border-radius: 50%;
-      animation: spin 0.65s linear infinite;
-    }
-
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    @media (prefers-reduced-motion: reduce) {
-      .btn-loading::after { animation: none; opacity: 0.85; }
-      * { transition-duration: 0.01ms !important; }
-    }
-
-    .theme-toggle {
-      position: fixed;
-      right: var(--gutter);
-      bottom: 1rem;
-      z-index: 20;
-      padding: 0.45rem 0.75rem;
-      font-size: 0.8125rem;
-      font-weight: 500;
-      color: var(--toggle-fg);
-      background: var(--toggle-bg);
-      border: 1px solid var(--toggle-border);
-      border-radius: 999px;
-      box-shadow: var(--shadow);
-      cursor: pointer;
-    }
-
-    .theme-toggle:hover {
-      background: var(--bg-elevated);
-      border-color: var(--focus-border);
-    }
-
-    .theme-toggle:focus-visible {
-      outline: none;
-      box-shadow: var(--shadow), 0 0 0 3px var(--focus-ring);
-    }
-  </style>
+  <link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css" />
+  <link rel="stylesheet" href="/static/vendor/webawesome/styles/utilities.css" />
+  <link rel="stylesheet" href="/static/shared.css" />
+  <link rel="stylesheet" href="/static/hitl.css" />
+  <script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
 </head>
 <body>
+  <a class="skip-link" href="#workspace">跳到操作区</a>
   <div class="app-frame">
-    <header class="app-bar">
-      <div class="app-bar-inner">
-        <nav class="app-nav" aria-label="主导航">
-          <a href="/" class="is-active">HITL</a>
-          <a href="/config">配置</a>
-        </nav>
-        <h1>auto_studio · Web HITL</h1>
-        <span class="app-bar-meta" id="appBarThread" title="">未绑定 Run</span>
-      </div>
-    </header>
-
     <div class="app-shell">
-      <aside class="sidebar" aria-label="Run 导航">
-        <span class="sidebar-brand">软件工厂</span>
-        <button type="button" class="btn-primary sidebar-new" id="btnSidebarNew">新建 Run</button>
-        <nav>
-          <span class="sidebar-label">当前 Run</span>
-          <div class="run-list-item" id="sidebarThread">尚无</div>
+      <aside class="sidebar" aria-label="主导航">
+        <nav class="app-side-nav" aria-label="页面">
+          <div class="side-group" data-route="project">
+            <a class="sidebar-link" href="/project">
+              <wa-icon name="file" library="system"></wa-icon>
+              <span>项目配置</span>
+            </a>
+            <div class="side-sub">
+              <div class="side-sub-inner">
+              <a class="sidebar-link sidebar-sub" href="/project#region-project">
+                <wa-icon name="file" library="system"></wa-icon>
+                <span>项目</span>
+              </a>
+              <a class="sidebar-link sidebar-sub" href="/project#region-scenario">
+                <wa-icon name="table-columns" library="system"></wa-icon>
+                <span>场景</span>
+              </a>
+              <a class="sidebar-link sidebar-sub" href="/project#region-notify">
+                <wa-icon name="user" library="system"></wa-icon>
+                <span>通知</span>
+              </a>
+              </div>
+            </div>
+          </div>
+          <div class="side-group is-current" data-route="hitl">
+            <a class="sidebar-link is-active" href="/">
+              <wa-icon name="play" library="system"></wa-icon>
+              <span>运行</span>
+            </a>
+            <div class="side-sub">
+              <div class="side-sub-inner">
+              <a class="sidebar-link sidebar-sub" id="btnSidebarNew" href="/#region-new">
+                <wa-icon name="plus" library="system"></wa-icon>
+                <span>新建 Run</span>
+              </a>
+              <a class="sidebar-link sidebar-sub" href="/#region-rail">
+                <wa-icon name="gauge" library="system"></wa-icon>
+                <span>流程</span>
+              </a>
+              <a class="sidebar-link sidebar-sub" href="/#region-todo">
+                <wa-icon name="check" library="system"></wa-icon>
+                <span>待办</span>
+              </a>
+              <div class="run-list-item sidebar-sub" id="sidebarThread">
+                <wa-icon name="circle" library="system"></wa-icon>
+                <span id="sidebarThreadLabel">尚未绑定</span>
+              </div>
+              </div>
+            </div>
+          </div>
+          <div class="side-group" data-route="config">
+            <a class="sidebar-link" href="/config">
+              <wa-icon name="gear" library="system"></wa-icon>
+              <span>配置</span>
+            </a>
+            <div class="side-sub">
+              <div class="side-sub-inner">
+              <a class="sidebar-link sidebar-sub" href="/config#region-agent">
+                <wa-icon name="play" library="system"></wa-icon>
+                <span>Agent</span>
+              </a>
+              <a class="sidebar-link sidebar-sub" href="/config#region-workspace">
+                <wa-icon name="file" library="system"></wa-icon>
+                <span>工作区</span>
+              </a>
+              <a class="sidebar-link sidebar-sub" href="/config#region-feishu">
+                <wa-icon name="user" library="system"></wa-icon>
+                <span>飞书</span>
+              </a>
+              <a class="sidebar-link sidebar-sub" href="/config#region-env">
+                <wa-icon name="file-code" library="system"></wa-icon>
+                <span>环境</span>
+              </a>
+              </div>
+            </div>
+          </div>
         </nav>
       </aside>
 
-      <main class="workspace-main" aria-label="操作区">
+      <div class="app-view" data-route="hitl">
+      <main id="workspace" class="workspace-main" aria-label="操作区">
         <div class="composer-block">
-          <p class="section-title">需求输入</p>
-          <label for="req">描述本轮交付目标 <span class="hint">human_request</span></label>
-          <textarea id="req" rows="5" placeholder="例如：为 npu_operator 场景实现 Mul 算子，含单测与性能基线…"></textarea>
-
+          <div class="func-region" id="region-new">
           <div class="field-row">
-            <div>
-              <label for="scenario">场景 <span class="hint">scenario_key</span></label>
-              <select id="scenario"></select>
-            </div>
-            <div>
-              <label for="project">项目 <span class="hint">project_id</span></label>
-              <select id="project"></select>
-            </div>
+            <wa-select id="project" label="项目" placeholder="先选择项目"></wa-select>
+            <wa-input id="runName" label="Run 命名" placeholder="先选择项目"></wa-input>
           </div>
+          <p class="hint-block" id="runScenarioHint">场景在项目配置里绑定。先选择项目，本轮沿用该项目的场景。命名默认是项目标识加递增序号，可改。</p>
+          <wa-textarea id="req" label="描述本轮交付目标" hint="human_request" rows="5" placeholder="例如：为 npu_operator 场景实现 Mul 算子，含单测与性能基线…"></wa-textarea>
 
           <input id="thread" type="hidden" />
 
           <div class="row-actions">
-            <button type="button" class="btn-primary" id="btnStart">启动本轮</button>
+            <wa-button id="btnStart" variant="brand">启动</wa-button>
+            <wa-button id="btnPause" appearance="outlined" variant="neutral" hidden>暂停</wa-button>
+            <wa-button id="btnStop" appearance="outlined" variant="neutral" hidden>停止</wa-button>
           </div>
-          <p class="inline-error" id="startError" hidden role="alert"></p>
+          <p class="hint-block" id="pauseNote" hidden>本轮已暂停。已完成的节点不会重做。</p>
+          <wa-callout id="startError" variant="danger" hidden></wa-callout>
+          </div>
 
           <hr class="main-divider" />
 
+          <div class="func-region" id="region-rail">
+          <p id="railCount" class="rail-count" hidden></p>
+          <ol id="nodeRail" class="node-rail"></ol>
+          </div>
+
+          <div class="func-region" id="region-todo">
           <p class="section-title" id="hitlSectionTitle">人工待办</p>
-          <div class="gate-card" id="banner" hidden role="status">
-            <h3 id="bannerText">等待人工处理</h3>
-            <div class="gate-id" id="bannerGate"></div>
-            <ul id="questionList" hidden class="status-empty" style="margin:0 0 0.75rem 1rem;"></ul>
+          <wa-card id="banner" class="gate-card" hidden with-header>
+            <h3 slot="header" id="bannerText">等待人工处理</h3>
+            <p class="gate-id" id="bannerGate"></p>
+            <article id="hitlReading" class="hitl-reading" hidden></article>
+            <ul id="questionList" hidden class="question-list"></ul>
             <div id="fieldGateDecision">
-              <label for="decision">关卡决定</label>
-              <select id="decision">
-                <option value="approved">批准 — 继续流程</option>
-                <option value="rejected">驳回 — 终止本轮</option>
-              </select>
+              <wa-select id="decision" label="关卡决定" value="approved">
+                <wa-option value="approved">批准 — 继续流程</wa-option>
+                <wa-option value="rejected">驳回 — 终止本轮</wa-option>
+              </wa-select>
             </div>
             <div id="fieldEscalation" hidden>
-              <label for="escalationChoice">升级决策</label>
-              <select id="escalationChoice">
-                <option value="continue">继续 — 再跑开发</option>
-                <option value="pause">暂停 — 保留现场</option>
-                <option value="abort">终止 — 结束本轮</option>
-              </select>
+              <wa-select id="escalationChoice" label="升级决策" value="continue">
+                <wa-option value="continue">继续 — 再跑开发</wa-option>
+                <wa-option value="pause">暂停 — 保留现场</wa-option>
+                <wa-option value="abort">终止 — 结束本轮</wa-option>
+              </wa-select>
             </div>
-            <label for="reply" id="replyLabel">附言 <span class="hint">human_reply</span></label>
-            <textarea id="reply" rows="3" placeholder="补充范围说明或驳回原因…"></textarea>
+            <wa-textarea id="reply" label="附言" hint="human_reply" rows="3" placeholder="补充范围说明或驳回原因…"></wa-textarea>
             <div class="row-actions">
-              <button type="button" class="btn-primary" id="btnSubmit" disabled>提交并续跑</button>
-              <button type="button" class="btn-secondary" id="btnRefresh">刷新状态</button>
+              <wa-button id="btnSubmit" variant="brand" disabled>提交并续跑</wa-button>
+              <wa-button id="btnRefresh" appearance="outlined" variant="neutral">刷新状态</wa-button>
             </div>
-            <p class="inline-error" id="hitlError" hidden role="alert"></p>
+            <wa-callout id="hitlError" variant="danger" hidden></wa-callout>
+          </wa-card>
+          <p class="status-empty" id="gateIdleHint">本轮还没有待办。启动后，关卡、澄清或升级会停在这里。</p>
           </div>
-          <p class="status-empty" id="gateIdleHint">启动 Run 后，流程在关卡处暂停时，此处会出现批复表单。</p>
         </div>
       </main>
 
       <aside class="workspace-inspect" aria-label="运行检视">
         <div class="inspect-head">
-          <h2>运行检视</h2>
-          <div class="phase-pill" id="phasePill" data-phase="idle" aria-live="polite">
-            <span class="phase-dot" aria-hidden="true"></span>
+          <h2 id="inspectTitle">运行检视</h2>
+          <wa-badge id="phasePill" variant="neutral" appearance="accent" pill data-phase="idle" aria-live="polite">
             <span id="phaseLabel">未启动</span>
-          </div>
+          </wa-badge>
         </div>
         <div class="inspect-body">
           <div id="statusHuman">
-            <p class="status-empty">尚无状态；启动 Run 或刷新后显示阶段、下一节点与基线摘要。</p>
+            <p class="status-empty">还没有运行记录。填写交付目标并启动后，阶段、成本和 QA 会显示在这里。</p>
           </div>
-          <details class="raw">
-            <summary>原始 JSON</summary>
+          <wa-details class="raw" summary="原始状态">
             <pre id="out">{}</pre>
-          </details>
+          </wa-details>
         </div>
       </aside>
+      </div>
+
+      <div class="app-view" data-route="config">
+      <main id="config-main" class="workspace-main" aria-label="配置">
+        <div class="composer-block">
+          <section class="config-pane-project" aria-labelledby="projectHeading">
+            <div class="func-region" id="region-project">
+            <p class="section-title" id="projectHeading">项目</p>
+            <p class="panel-lead">先选项目，再填标题、说明和工作区。整份 YAML 在这块末尾。</p>
+            <wa-select id="projectPick" label="选择项目" placeholder="选择项目"></wa-select>
+            <div class="row-actions">
+              <wa-button id="btnNewProject" appearance="outlined" variant="neutral">新建项目</wa-button>
+              <wa-button id="btnSaveProject" variant="brand">保存项目</wa-button>
+            </div>
+            <div id="newProjectRow" hidden>
+              <div class="inline-field">
+                <wa-input id="newProjectId" label="项目标识" placeholder="字母开头，可含 _ 和 -" spellcheck="false"></wa-input>
+                <wa-button id="btnCancelProject" appearance="outlined" variant="neutral">取消</wa-button>
+                <wa-button id="btnCreateProject" variant="brand">创建</wa-button>
+              </div>
+            </div>
+            <div id="projectFields">
+              <div class="field-row">
+                <div>
+                  <wa-input id="fieldTitle" label="标题"></wa-input>
+                </div>
+                <div>
+                  <wa-input id="fieldRetries" label="开发重试上限" hint="空则沿用场景" type="number" min="0" step="1" inputmode="numeric"></wa-input>
+                </div>
+              </div>
+              <wa-input id="fieldDescription" label="说明"></wa-input>
+              <wa-input id="fieldWorkspace" label="工作区" hint="待开发项目的 git 目录，可空" placeholder="/path/to/repo" spellcheck="false"></wa-input>
+              <p class="hint-block" id="workspaceHint"></p>
+              <wa-input id="fieldProfile" label="流程配置名" hint="profile_id，可空" spellcheck="false"></wa-input>
+            </div>
+            <wa-details class="raw" summary="原文 project.yaml">
+              <wa-textarea id="projectYaml" label="整份 YAML" rows="12" spellcheck="false" placeholder="先选择项目，或新建一个。"></wa-textarea>
+              <div class="row-actions">
+                <wa-button id="btnSaveRaw" appearance="outlined" variant="neutral">用原文覆盖</wa-button>
+              </div>
+            </wa-details>
+            <wa-callout id="projectError" variant="danger" hidden></wa-callout>
+            <p class="save-note" id="projectSaved" hidden aria-live="polite"></p>
+            </div>
+
+            <div class="func-region" id="region-scenario">
+              <p class="section-title" id="scenarioBindHeading">场景</p>
+              <wa-select id="fieldScenario" label="绑定场景"></wa-select>
+              <wa-select id="fieldDesign" label="设计轨" value="inherit">
+                <wa-option value="inherit">沿用场景</wa-option>
+                <wa-option value="on">开启</wa-option>
+                <wa-option value="off">关闭</wa-option>
+              </wa-select>
+              <wa-select id="fieldSkipMode" label="节点裁剪" value="inherit">
+                <wa-option value="inherit">沿用场景</wa-option>
+                <wa-option value="custom">在项目里指定</wa-option>
+              </wa-select>
+              <div id="skipWrap" hidden>
+                <span class="field-caption" id="skipCaption">跳过这些节点</span>
+                <div id="skipBox" class="choice-grid" role="group" aria-labelledby="skipCaption"></div>
+              </div>
+            </div>
+
+            <div class="func-region" id="region-notify">
+              <p class="section-title" id="notifyHeading">通知</p>
+              <wa-input id="fieldChat" label="飞书通知群" hint="chat_id，可空" placeholder="oc_…" spellcheck="false"></wa-input>
+              <wa-input id="fieldOpen" label="飞书通知人" hint="open_id，群为空时使用" placeholder="ou_…" spellcheck="false"></wa-input>
+            </div>
+          </section>
+
+          <hr class="main-divider config-pane-split" />
+
+          <section class="config-pane-runtime" aria-labelledby="agentHeading">
+            <div class="func-region" id="region-agent">
+            <p class="section-title" id="agentHeading">Agent</p>
+            <p class="panel-lead">这些值与具体项目无关，写入工厂根目录的 .env。API Key 只保存，页面不回显。</p>
+            <wa-select id="backendPick" label="后端" value="stub">
+              <wa-option value="stub">stub，不调用 Cursor</wa-option>
+              <wa-option value="cursor">cursor，Cursor SDK</wa-option>
+            </wa-select>
+            <wa-input id="modelInput" label="模型" hint="留空使用 Auto" placeholder="留空即 Auto"></wa-input>
+            <wa-input id="apiKeyInput" label="Cursor API Key" hint="不改就留空" type="password" placeholder="只写入 .env"></wa-input>
+            </div>
+
+            <div class="func-region" id="region-workspace">
+            <p class="section-title" id="defaultWorkspaceHeading">工作区</p>
+            <wa-input id="targetInput" label="默认工作区" hint="项目未填工作区时使用" placeholder="待开发仓库的绝对路径，可空"></wa-input>
+            </div>
+
+            <div class="func-region" id="region-feishu">
+            <p class="section-title" id="feishuHeading">飞书</p>
+            <wa-select id="larkBackend" label="飞书后端" value="lark_cli">
+              <wa-option value="lark_cli">lark-cli</wa-option>
+              <wa-option value="env_bot">应用凭据</wa-option>
+            </wa-select>
+            <wa-input id="publicBase" label="Web 地址" hint="卡片里的打开链接" placeholder="http://127.0.0.1:8765" spellcheck="false"></wa-input>
+            <wa-input id="feishuChat" label="默认通知群" hint="项目未填 chat_id 时使用" placeholder="oc_…" spellcheck="false"></wa-input>
+            <wa-input id="feishuOpen" label="默认通知人" hint="项目未填 open_id 时使用" placeholder="ou_…" spellcheck="false"></wa-input>
+            <div class="row-actions">
+              <wa-button id="btnSaveRuntime" variant="brand">写入 .env</wa-button>
+            </div>
+            <wa-callout id="runtimeError" variant="danger" hidden></wa-callout>
+            <p class="save-note" id="runtimeSaved" hidden aria-live="polite"></p>
+            </div>
+
+            <div class="func-region" id="region-env">
+            <p class="section-title" id="envHeading">环境</p>
+            <p class="panel-lead">只显示是否已配置。密钥的原文不会出现在这张表里。</p>
+            <ul id="settingsList" class="settings-list">
+              <li class="settings-pending">正在读取 .env…</li>
+            </ul>
+            <p class="hint-block" id="larkCliStatus"></p>
+            <p class="hint-block" id="settingsNote"></p>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <aside class="workspace-inspect" aria-label="场景与环境">
+        <div class="inspect-head config-pane-scenario">
+          <h2 id="scenarioHeading">场景</h2>
+        </div>
+        <div class="inspect-body">
+          <div class="config-pane-scenario">
+          <p class="panel-lead">场景文件只读。原文和合并 JSON 在下方折叠入口里。</p>
+          <wa-select id="scenarioPick" label="查看场景"></wa-select>
+          <wa-details class="raw" summary="原文 scenario.yaml">
+            <wa-textarea id="scenarioYaml" label="场景原文" rows="8" readonly></wa-textarea>
+          </wa-details>
+          <p class="section-title" id="previewHeading">合并结果</p>
+          <p class="panel-lead">场景与项目叠在一起之后，运行时实际采用的值。</p>
+          <wa-button id="btnEffective" appearance="outlined" variant="neutral">刷新预览</wa-button>
+          <wa-details class="raw" summary="原文 JSON">
+            <pre id="effectiveOut" class="mono-block">选择项目或场景后会刷新。</pre>
+          </wa-details>
+          </div>
+        </div>
+      </aside>
+      </div>
     </div>
   </div>
 
-  <button type="button" class="theme-toggle" id="themeToggle" aria-label="切换浅色与深色主题">夜晚</button>
-
+  <wa-button id="themeToggle" class="theme-fab" appearance="filled" variant="neutral" size="s" aria-label="切换浅色与深色主题">夜晚</wa-button>
   <script>
     const $ = (id) => document.getElementById(id);
     let awaitingKind = null;
@@ -744,12 +339,25 @@
       running: "运行中",
       awaiting_human: "等待人工",
       completed: "已完成",
+      paused: "已暂停",
       rejected: "已驳回",
+      stopped: "已停止",
+    };
+
+    const PHASE_VARIANT = {
+      idle: "neutral",
+      running: "brand",
+      awaiting_human: "warning",
+      completed: "success",
+      rejected: "danger",
+      stopped: "neutral",
     };
 
     function setPhase(phase) {
       const p = phase || "idle";
-      $("phasePill").dataset.phase = p;
+      const pill = $("phasePill");
+      pill.dataset.phase = p;
+      pill.variant = PHASE_VARIANT[p] || "neutral";
       $("phaseLabel").textContent = PHASE_LABELS[p] || p;
     }
 
@@ -764,61 +372,309 @@
     }
 
     function setLoading(btn, on) {
-      btn.disabled = on;
-      btn.classList.toggle("btn-loading", on);
+      btn.loading = !!on;
+      btn.disabled = !!on;
     }
+
+    let hitlSearch = location.pathname === "/config" ? "" : location.search;
 
     function syncUrlThread(tid) {
-      const url = new URL(window.location.href);
-      if (tid) url.searchParams.set("thread_id", tid);
-      else url.searchParams.delete("thread_id");
-      history.replaceState(null, "", url);
+      const params = new URLSearchParams(hitlSearch.startsWith("?") ? hitlSearch.slice(1) : hitlSearch);
+      if (tid) params.set("thread_id", tid);
+      else params.delete("thread_id");
+      params.delete("thread");
+      const query = params.toString();
+      hitlSearch = query ? "?" + query : "";
+      if (document.documentElement.dataset.route !== "config") {
+        history.replaceState({ route: "hitl" }, "", "/" + hitlSearch);
+      }
     }
 
-    function syncThreadChrome(tid) {
+    let runNameTouched = false;
+
+    function syncThreadChrome(tid, name) {
       const el = $("sidebarThread");
-      el.textContent = tid || "尚无";
+      const label = (name || "").trim() || tid || "尚未绑定";
+      $("sidebarThreadLabel").textContent = label;
       el.classList.toggle("is-active", !!tid);
-      el.title = tid || "";
-      $("appBarThread").textContent = tid ? tid.slice(0, 8) + "…" : "未绑定 Run";
-      $("appBarThread").title = tid || "";
+      el.title = tid ? (name ? name + " · " + tid : tid) : "";
     }
 
-    function renderHumanStatus(data) {
+    function applyBoundRunName(data) {
+      const input = $("runName");
+      if (!input) return;
+      const bound = !!$("thread").value.trim();
+      input.disabled = bound;
+      if (!bound) return;
+      const name = data && data.values && data.values.run_name;
+      if (name) input.value = name;
+      const projectId = data && data.values && data.values.project_id;
+      if (projectId) $("project").value = projectId;
+    }
+
+    async function fillRunNameSuggestion() {
+      const input = $("runName");
+      if (!input || $("thread").value.trim() || runNameTouched) return;
+      const pid = String($("project").value || "").trim();
+      if (!pid) {
+        input.value = "";
+        return;
+      }
+      try {
+        const r = await fetch("/api/runs/next-name?project_id=" + encodeURIComponent(pid));
+        const data = await r.json();
+        if (!r.ok || runNameTouched || $("thread").value.trim()) return;
+        input.value = data.run_name || "";
+      } catch (_) { /* 建议名取不到时仍可手填 */ }
+    }
+
+    const STATE_LABEL = {
+      pending: "未到",
+      skipped: "跳过",
+      done: "完成",
+      active: "进行中",
+      waiting: "待批复",
+      paused: "已暂停",
+      stopped: "已停止",
+      initial: "初始",
+      finished: "结束",
+    };
+    let lastStatus = null;
+    let statusKey = "";
+    let pollTimer = null;
+    let refreshing = false;
+    let startInFlight = false;
+
+    function stopPoll() {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = null;
+    }
+
+    function currentCell(rail) {
+      if (!rail || !rail.cells) return null;
+      if (rail.current) {
+        return rail.cells.find((cell) => cell.id === rail.current) || null;
+      }
+      const done = rail.cells.filter((cell) => cell.state === "done");
+      return done.length ? done[done.length - 1] : null;
+    }
+
+    function viewedCell(rail) {
+      if (!rail || !rail.cells) return null;
+      const want = nodeParam();
+      if (want) {
+        const found = rail.cells.find((cell) => cell.id === want);
+        if (found) return found;
+      }
+      return currentCell(rail);
+    }
+
+    function nodeParam() {
+      const raw = hitlSearch.startsWith("?") ? hitlSearch.slice(1) : hitlSearch;
+      return new URLSearchParams(raw).get("node") || "";
+    }
+
+    function setNodeParam(id) {
+      const params = new URLSearchParams(hitlSearch.startsWith("?") ? hitlSearch.slice(1) : hitlSearch);
+      if (id) params.set("node", id);
+      else params.delete("node");
+      const query = params.toString();
+      hitlSearch = query ? "?" + query : "";
+      if (document.documentElement.dataset.route !== "config") {
+        history.replaceState({ route: "hitl" }, "", "/" + hitlSearch);
+      }
+    }
+
+    function railArrow() {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "rail-arrow");
+      svg.setAttribute("viewBox", "0 0 22 16");
+      svg.setAttribute("width", "22");
+      svg.setAttribute("height", "16");
+      svg.setAttribute("aria-hidden", "true");
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("class", "awire-body");
+      line.setAttribute("x1", "1");
+      line.setAttribute("y1", "8");
+      line.setAttribute("x2", "13");
+      line.setAttribute("y2", "8");
+      const head = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      head.setAttribute("class", "awire-head");
+      head.setAttribute("d", "M11.4 3.6 L16.6 8 L11.4 12.4");
+      svg.append(line, head);
+      return svg;
+    }
+
+    function railWire(kind) {
+      const mark = document.createElement("span");
+      mark.className = "rail-wire" + (kind ? " " + kind : "");
+      mark.setAttribute("aria-hidden", "true");
+      mark.appendChild(railArrow());
+      return mark;
+    }
+
+    function renderRail(rail) {
+      const list = $("nodeRail");
+      const count = $("railCount");
+      count.hidden = true;
+      list.replaceChildren();
+      const cells = (rail && rail.cells) || [];
+      if (!cells.length) return;
+      const current = currentCell(rail);
+      cells.forEach((cell, index) => {
+        const pointed = current && current.id === cell.id;
+        const li = document.createElement("li");
+        li.className = "rail-step";
+        if (index > 0 || pointed) {
+          const kind = pointed ? (cell.state === "active" ? "is-live" : "is-mark") : "";
+          li.appendChild(railWire(kind));
+        }
+        const cellEl = document.createElement("button");
+        cellEl.type = "button";
+        const stateLabel = STATE_LABEL[cell.state] || cell.state;
+        cellEl.className = "rail-cell" + (cell.state === "active" ? " is-live" : "");
+        cellEl.dataset.state = cell.state;
+        cellEl.dataset.id = cell.id;
+        cellEl.title = stateLabel;
+        cellEl.setAttribute("aria-label", cell.label + "，" + stateLabel);
+        if (pointed) cellEl.setAttribute("aria-current", "step");
+        const viewing = nodeParam() || (current && current.id) || "";
+        if (cell.id === viewing) {
+          cellEl.classList.add("is-viewed");
+          cellEl.setAttribute("aria-pressed", "true");
+        } else {
+          cellEl.setAttribute("aria-pressed", "false");
+        }
+        cellEl.textContent = cell.label;
+        cellEl.addEventListener("click", () => {
+          const liveId = current && current.id;
+          setNodeParam(cell.id === liveId ? "" : cell.id);
+          const viewing = nodeParam() || liveId || "";
+          list.querySelectorAll(".rail-cell").forEach((el) => {
+            const on = el.dataset.id === viewing;
+            el.classList.toggle("is-viewed", on);
+            el.setAttribute("aria-pressed", on ? "true" : "false");
+          });
+          renderInspect(lastStatus && lastStatus.rail ? lastStatus : null);
+        });
+        li.appendChild(cellEl);
+        list.appendChild(li);
+      });
+    }
+
+    function renderInspect(data) {
       const box = $("statusHuman");
+      const rail = data && data.rail;
+      const cell = viewedCell(rail);
+      $("inspectTitle").textContent = cell ? cell.label : "运行检视";
       if (!data || !data.thread_id) {
-        box.innerHTML = '<p class="status-empty">尚未启动 Run，或输入 thread_id 后点「刷新状态」。</p>';
+        box.replaceChildren();
+        const p = document.createElement("p");
+        p.className = "status-empty";
+        p.textContent = "还没有运行记录。填写交付目标并启动后，阶段、成本和 QA 会显示在这里。";
+        box.appendChild(p);
         setPhase("idle");
         return;
       }
       setPhase(data.phase);
-      const ah = data.awaiting_human;
-      const rows = [
-        ["Run ID", data.thread_id, true],
-        ["阶段", PHASE_LABELS[data.phase] || data.phase, false],
-        ["下一节点", (data.next_nodes || []).join(", ") || "—", false],
-      ];
-      if (ah) {
-        rows.push(["待办类型", ah.kind, false]);
-        rows.push(["关卡", ah.gate_id || "—", true]);
-        if (ah.questions && ah.questions.length) {
-          rows.push(["待澄清", ah.questions.join("；"), false]);
-        }
-        if (ah.summary) {
-          rows.push(["摘要", ah.summary, false]);
-        }
+      if (!cell) {
+        box.replaceChildren();
+        const p = document.createElement("p");
+        p.className = "status-empty";
+        p.textContent = "这一步还没有产物。";
+        box.appendChild(p);
+        return;
       }
       const vals = data.values || {};
-      if (vals.baseline_log) {
-        const tail = String(vals.baseline_log).split("\n").slice(-2).join("\n");
-        rows.push(["最近基线", tail, true]);
+      const rows = [["状态", STATE_LABEL[cell.state] || cell.state, false]];
+      if (rail && cell.id === rail.current && data.awaiting_human && data.awaiting_human.summary) {
+        rows.push(["摘要", data.awaiting_human.summary, false]);
       }
-      box.innerHTML =
-        '<dl class="status-dl">' +
-        rows.map(([k, v, mono]) =>
-          `<div class="status-row"><dt>${k}</dt><dd class="${mono ? "mono" : ""}">${escapeHtml(String(v))}</dd></div>`
-        ).join("") +
-        "</dl>";
+      for (const key of cell.artifacts || []) {
+        if (vals[key]) rows.push([key, String(vals[key]).slice(0, 400), true]);
+      }
+      if (cell.role && vals.cost_ledger) {
+        const lines = String(vals.cost_ledger).split("\n").filter((line) => line.includes("role=" + cell.role));
+        if (lines.length) rows.push(["成本", lines.slice(-3).join("\n"), true]);
+      }
+      if (cell.id === "qa" && vals.qa_status) rows.push(["QA", vals.qa_status, false]);
+      const dl = document.createElement("dl");
+      dl.className = "status-dl";
+      for (const [k, v, mono] of rows) {
+        const row = document.createElement("div");
+        row.className = "status-row";
+        const dt = document.createElement("dt");
+        dt.textContent = k;
+        const dd = document.createElement("dd");
+        if (mono) dd.className = "mono";
+        dd.textContent = String(v);
+        row.append(dt, dd);
+        dl.appendChild(row);
+      }
+      box.replaceChildren(dl);
+    }
+
+    function applyStatus(data) {
+      const key = JSON.stringify({
+        phase: data && data.phase,
+        rail: data && data.rail,
+        awaiting: data && data.awaiting_human,
+      });
+      const same = key === statusKey && data && data.thread_id;
+      statusKey = key;
+      lastStatus = data;
+      if (same) return;
+      renderRail(data && data.rail);
+      renderInspect(data);
+    }
+
+    async function loadIdleRail() {
+      const project = String($("project").value || "").trim();
+      const q = new URLSearchParams();
+      if (project) q.set("project_id", project);
+      const r = await fetch("/api/rail?" + q.toString());
+      if (!r.ok) return;
+      const rail = await r.json();
+      lastStatus = { rail };
+      renderRail(rail);
+      renderInspect(null);
+    }
+
+    async function syncRunScenarioHint() {
+      const el = $("runScenarioHint");
+      const pid = String($("project").value || "").trim();
+      if (!pid) {
+        el.textContent = "场景在项目配置里绑定。先选择项目，本轮沿用该项目的场景。";
+        return;
+      }
+      try {
+        const r = await fetch("/api/config/projects/" + encodeURIComponent(pid) + "/form");
+        const data = await r.json();
+        const key = String((data && data.scenario_key) || "").trim();
+        el.textContent = key
+          ? "本轮使用项目绑定的场景：" + key + "。"
+          : "该项目尚未绑定场景。请先到项目配置里绑定。";
+      } catch (_) {
+        el.textContent = "场景在项目配置里绑定，本轮沿用所选项目。";
+      }
+    }
+
+    function renderReading(sections) {
+      const box = $("hitlReading");
+      box.replaceChildren();
+      if (!sections || !sections.length) {
+        box.hidden = true;
+        return;
+      }
+      box.hidden = false;
+      $("questionList").hidden = true;
+      for (const section of sections) {
+        const heading = document.createElement("h4");
+        heading.textContent = section.title;
+        const body = document.createElement("p");
+        body.textContent = section.body;
+        box.append(heading, body);
+      }
     }
 
     function escapeHtml(s) {
@@ -831,7 +687,8 @@
       $("fieldGateDecision").hidden = !ah || ah.kind !== "gate";
       $("fieldEscalation").hidden = !ah || ah.kind !== "escalation";
       if (ah && ah.kind === "pm_clarification") {
-        $("replyLabel").innerHTML = '澄清答复 <span class="hint">human_reply（必填）</span>';
+        $("reply").label = "澄清答复";
+        $("reply").hint = "human_reply（必填）";
         $("reply").placeholder = "逐条回答待澄清问题…";
         if (ah.questions && ah.questions.length) {
           qList.hidden = false;
@@ -841,54 +698,151 @@
           qList.innerHTML = "";
         }
       } else if (ah && ah.kind === "escalation") {
-        $("replyLabel").innerHTML = '说明 <span class="hint">human_reply（可选）</span>';
+        $("reply").label = "说明";
+        $("reply").hint = "human_reply（可选）";
         $("reply").placeholder = "补充决策理由…";
         qList.hidden = true;
+        qList.innerHTML = "";
       } else {
-        $("replyLabel").innerHTML = '附言 <span class="hint">human_reply</span>';
+        $("reply").label = "附言";
+        $("reply").hint = "human_reply";
         $("reply").placeholder = "补充范围说明或驳回原因…";
         qList.hidden = true;
+        qList.innerHTML = "";
       }
     }
 
-    async function refresh() {
+    function roundIsOpen(phase) {
+      return phase === "running" || phase === "awaiting_human" || phase === "paused" || startInFlight;
+    }
+
+    function syncStartButton(phase) {
+      const btn = $("btnStart");
+      const open = roundIsOpen(phase);
+      btn.disabled = open;
+      btn.textContent = open ? "进行中" : "启动";
+    }
+
+    function syncPauseButton(phase) {
+      const btn = $("btnPause");
+      const note = $("pauseNote");
+      const pausing = phase === "running" && !!(lastStatus && lastStatus.pause_requested);
+      if (phase === "paused") {
+        btn.hidden = false;
+        btn.disabled = false;
+        btn.loading = false;
+        btn.textContent = "继续";
+        note.hidden = false;
+        return;
+      }
+      const show = phase === "running" || startInFlight;
+      btn.hidden = !show;
+      btn.disabled = !show || pausing;
+      btn.loading = pausing;
+      btn.textContent = pausing ? "正在暂停" : "暂停";
+      note.hidden = true;
+    }
+
+    function syncStopButton(phase) {
+      const btn = $("btnStop");
+      const open = roundIsOpen(phase);
+      const stopping = open && !!(lastStatus && lastStatus.stop_requested);
+      btn.hidden = !open;
+      btn.disabled = !open || stopping;
+      btn.textContent = stopping ? "正在停止" : "停止";
+      syncPauseButton(phase);
+    }
+
+    function armPoll(phase) {
+      stopPoll();
+      if (document.hidden) return;
+      if (phase !== "running" && phase !== "awaiting_human") return;
+      pollTimer = setInterval(() => { refresh({ quiet: true }); }, 2000);
+    }
+
+    async function refresh(opts) {
+      if (refreshing) return;
+      refreshing = true;
+      const quiet = !!(opts && opts.quiet);
       const tid = $("thread").value.trim();
       showError($("hitlError"), "");
       if (!tid) {
-        renderHumanStatus(null);
+        stopPoll();
+        renderInspect(null);
         syncThreadChrome("");
+        applyBoundRunName(null);
         $("out").textContent = "{}";
         $("btnSubmit").disabled = true;
         $("banner").hidden = true;
         $("gateIdleHint").hidden = false;
+        syncStartButton("idle");
+        syncStopButton("idle");
+        await loadIdleRail();
+        refreshing = false;
         return;
       }
-      syncThreadChrome(tid);
-      setLoading($("btnRefresh"), true);
+      syncThreadChrome(tid, lastStatus && lastStatus.values && lastStatus.values.run_name);
+      if (!quiet) setLoading($("btnRefresh"), true);
       try {
         const r = await fetch("/api/runs/" + encodeURIComponent(tid));
         const data = await r.json();
         $("out").textContent = JSON.stringify(data, null, 2);
         if (!r.ok) {
-          showError($("hitlError"), data.detail || "无法读取 Run 状态");
+          showError(
+            $("startError"),
+            r.status === 404
+              ? "没有这一轮。核对地址栏中的 thread_id。"
+              : "读不到这一轮的状态。检查服务是否还在，然后刷新。"
+          );
+          if (startInFlight) {
+            syncStartButton("running");
+            syncStopButton("running");
+            return;
+          }
+          syncStartButton(r.status === 404 ? "idle" : (lastStatus && lastStatus.phase));
+          syncStopButton(r.status === 404 ? "idle" : (lastStatus && lastStatus.phase));
           return;
         }
-        renderHumanStatus(data);
+        showError($("startError"), "");
+        applyStatus(data);
+        applyBoundRunName(data);
+        syncThreadChrome(tid, data.values && data.values.run_name);
+        syncStartButton(data.phase);
+        syncStopButton(data.phase);
         const ah = data.awaiting_human;
         $("btnSubmit").disabled = data.phase !== "awaiting_human";
         if (ah) {
           $("banner").hidden = false;
           $("gateIdleHint").hidden = true;
           $("bannerText").textContent = ah.summary || "等待人工处理";
-          $("bannerGate").textContent = ah.gate_id || ah.kind;
+          const current = data.rail && data.rail.cells.find((cell) => cell.id === data.rail.current);
+          $("bannerGate").textContent = current ? current.label : "";
           applyHitlFormMode(ah);
+          renderReading(data.reading);
         } else {
           $("banner").hidden = true;
-          $("gateIdleHint").hidden = false;
+          $("gateIdleHint").hidden = data.phase === "awaiting_human";
+          if (data.phase === "completed") {
+            $("gateIdleHint").hidden = false;
+            $("gateIdleHint").textContent = "这一轮已结束。右侧是最后一步的产物。";
+          } else if (data.phase === "rejected") {
+            $("gateIdleHint").hidden = false;
+            $("gateIdleHint").textContent = "这一轮已驳回。";
+          } else if (data.phase === "stopped") {
+            $("gateIdleHint").hidden = false;
+            $("gateIdleHint").textContent = "这一轮已停止。";
+          } else {
+            $("gateIdleHint").textContent = "本轮还没有待办。启动后，关卡、澄清或升级会停在这里。";
+          }
           applyHitlFormMode(null);
+          renderReading([]);
         }
+        armPoll(data.phase);
+      } catch (err) {
+        showError($("startError"), "读不到这一轮的状态。检查服务是否还在，然后刷新。");
       } finally {
-        setLoading($("btnRefresh"), false);
+        if (!quiet) setLoading($("btnRefresh"), false);
+        refreshing = false;
       }
     }
 
@@ -896,15 +850,31 @@
       showError($("startError"), "");
       const body = {
         human_request: $("req").value.trim(),
-        scenario_key: $("scenario").value.trim(),
-        project_id: $("project").value.trim(),
+        scenario_key: "",
+        project_id: String($("project").value || "").trim(),
+        run_name: String($("runName").value || "").trim(),
       };
+      if (!body.project_id) {
+        showError($("startError"), "请先选择项目。场景沿用该项目在项目配置里的绑定。");
+        $("project").focus();
+        return;
+      }
       if (!body.human_request) {
         showError($("startError"), "请先填写需求说明。");
         $("req").focus();
         return;
       }
+      const previousThread = $("thread").value.trim();
+      const tid = window.crypto && crypto.randomUUID ? crypto.randomUUID() : "";
+      if (tid) {
+        body.thread_id = tid;
+        $("thread").value = tid;
+        syncUrlThread(tid);
+      }
       const btn = $("btnStart");
+      startInFlight = true;
+      syncStartButton("running");
+      syncStopButton("running");
       setLoading(btn, true);
       try {
         const r = await fetch("/api/runs", {
@@ -915,14 +885,100 @@
         const data = await r.json();
         $("out").textContent = JSON.stringify(data, null, 2);
         if (!r.ok) {
+          $("thread").value = previousThread;
+          syncUrlThread(previousThread);
           showError($("startError"), data.detail || "启动失败，请检查场景或项目配置。");
+          syncStartButton(lastStatus && lastStatus.phase);
+          syncStopButton(lastStatus && lastStatus.phase);
           return;
         }
         $("thread").value = data.thread_id;
         syncUrlThread(data.thread_id);
         await refresh();
+      } catch (err) {
+        if (!$("thread").value.trim() || $("thread").value.trim() === tid) {
+          $("thread").value = previousThread;
+          syncUrlThread(previousThread);
+        }
+        showError($("startError"), "启动没有返回。检查服务是否还在，然后重试。");
+        syncStartButton(lastStatus && lastStatus.phase);
+        syncStopButton(lastStatus && lastStatus.phase);
       } finally {
+        startInFlight = false;
         setLoading(btn, false);
+        syncStartButton((lastStatus && lastStatus.phase) || "idle");
+        syncStopButton((lastStatus && lastStatus.phase) || "idle");
+      }
+    };
+
+    $("btnStop").onclick = async () => {
+      const tid = $("thread").value.trim();
+      if (!tid) return;
+      showError($("startError"), "");
+      const btn = $("btnStop");
+      btn.disabled = true;
+      btn.textContent = "正在停止";
+      if (lastStatus) lastStatus.stop_requested = true;
+      try {
+        const r = await fetch("/api/runs/" + encodeURIComponent(tid) + "/stop", {
+          method: "POST",
+        });
+        const data = await r.json();
+        $("out").textContent = JSON.stringify(data, null, 2);
+        if (!r.ok) {
+          if (lastStatus) lastStatus.stop_requested = false;
+          showError($("startError"), data.detail || "停不了这一轮。刷新后再看阶段。");
+          syncStopButton((lastStatus && lastStatus.phase) || "running");
+          return;
+        }
+        if (data.stop_requested && data.phase !== "stopped") {
+          lastStatus = data;
+          syncStartButton(startInFlight ? "running" : data.phase);
+          syncStopButton(startInFlight ? "running" : data.phase);
+          return;
+        }
+        if (!startInFlight) await refresh();
+      } catch (err) {
+        if (lastStatus) lastStatus.stop_requested = false;
+        showError($("startError"), "停止没有返回。检查服务是否还在，然后刷新。");
+        syncStopButton((lastStatus && lastStatus.phase) || "running");
+      }
+    };
+
+    $("btnPause").onclick = async () => {
+      const tid = $("thread").value.trim();
+      if (!tid) return;
+      const resume = $("btnPause").textContent === "继续";
+      showError($("startError"), "");
+      const btn = $("btnPause");
+      btn.disabled = true;
+      btn.loading = true;
+      btn.textContent = resume ? "正在继续" : "正在暂停";
+      if (!resume && lastStatus) lastStatus.pause_requested = true;
+      try {
+        const r = await fetch(
+          "/api/runs/" + encodeURIComponent(tid) + (resume ? "/resume" : "/pause"),
+          { method: "POST" }
+        );
+        const data = await r.json();
+        $("out").textContent = JSON.stringify(data, null, 2);
+        if (!r.ok) {
+          if (lastStatus) lastStatus.pause_requested = false;
+          showError($("startError"), data.detail || (resume ? "继续不了这一轮。" : "暂停不了这一轮。"));
+          syncStopButton((lastStatus && lastStatus.phase) || "running");
+          return;
+        }
+        lastStatus = data;
+        if (data.pause_requested && data.phase === "running") {
+          syncStartButton(data.phase);
+          syncStopButton(data.phase);
+          return;
+        }
+        await refresh();
+      } catch (err) {
+        if (lastStatus) lastStatus.pause_requested = false;
+        showError($("startError"), resume ? "继续没有返回。检查服务是否还在。" : "暂停没有返回。检查服务是否还在。");
+        syncStopButton((lastStatus && lastStatus.phase) || "running");
       }
     };
 
@@ -959,29 +1015,37 @@
 
     $("btnRefresh").onclick = refresh;
 
-    $("btnSidebarNew").onclick = () => {
-      $("req").focus();
-      $("req").scrollIntoView({ behavior: "smooth", block: "center" });
-    };
+    $("btnSidebarNew").addEventListener("click", (event) => {
+      event.preventDefault();
+      const here = document.documentElement.dataset.route === "hitl";
+      applyRoute("/", "#region-new", {
+        historyMode: here && location.hash === "#region-new" ? undefined : "push",
+        smooth: true,
+      });
+      $("thread").value = "";
+      syncUrlThread("");
+      syncThreadChrome("");
+      stopPoll();
+      runNameTouched = false;
+      if ($("runName")) $("runName").disabled = false;
+      fillRunNameSuggestion();
+      loadIdleRail();
+      syncStartButton("idle");
+      syncStopButton("idle");
+      $("req").focus({ preventScroll: true });
+    });
 
     async function loadRunConfigOptions() {
       try {
-        const [sr, pr] = await Promise.all([
-          fetch("/api/config/scenarios").then((r) => r.json()),
-          fetch("/api/config/projects").then((r) => r.json()),
-        ]);
-        const sc = $("scenario");
-        sc.innerHTML = '<option value="">（不指定场景）</option>';
-        for (const s of sr.scenarios || []) {
-          const o = document.createElement("option");
-          o.value = s.scenario_key;
-          o.textContent = s.scenario_key;
-          sc.appendChild(o);
-        }
+        const pr = await fetch("/api/config/projects").then((r) => r.json());
         const pj = $("project");
-        pj.innerHTML = '<option value="">（不指定项目）</option>';
+        pj.replaceChildren();
+        const blankProject = document.createElement("wa-option");
+        blankProject.value = "";
+        blankProject.textContent = "（不指定项目）";
+        pj.append(blankProject);
         for (const p of pr.projects || []) {
-          const o = document.createElement("option");
+          const o = document.createElement("wa-option");
           o.value = p.project_id;
           o.textContent = p.project_id;
           pj.appendChild(o);
@@ -989,12 +1053,33 @@
       } catch (_) { /* 离线或未启动 API */ }
     }
 
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) stopPoll();
+      else if ($("thread").value.trim()) refresh({ quiet: true });
+    });
+
+    $("project").addEventListener("change", () => {
+      syncRunScenarioHint();
+      if (!$("thread").value.trim()) {
+        runNameTouched = false;
+        fillRunNameSuggestion();
+        loadIdleRail();
+      }
+    });
+    $("runName").addEventListener("input", () => {
+      if (!$("thread").value.trim()) runNameTouched = true;
+    });
+
     (function initFromUrl() {
-      loadRunConfigOptions().then(() => {
-        const tid = new URLSearchParams(window.location.search).get("thread_id");
+      customElements.whenDefined("wa-select").then(() => loadRunConfigOptions()).then(() => {
+        const params = new URLSearchParams(window.location.search);
+        const tid = params.get("thread_id") || params.get("thread");
         if (tid) {
           $("thread").value = tid;
+          if (params.get("thread") && !params.get("thread_id")) syncUrlThread(tid);
           refresh();
+        } else {
+          loadIdleRail();
         }
       });
     })();
@@ -1011,12 +1096,100 @@
       btn.addEventListener("click", function () {
         const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
         document.documentElement.setAttribute("data-theme", next);
+        document.documentElement.classList.toggle("wa-dark", next === "dark");
+        document.documentElement.classList.toggle("wa-light", next !== "dark");
         localStorage.setItem(key, next);
         syncToggleLabel();
       });
 
       syncToggleLabel();
     })();
+
+    function scrollBehavior(options) {
+      if (!options || !options.smooth) return "auto";
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return "auto";
+      return "smooth";
+    }
+
+    function routeFromPath(path) {
+      if (path === "/config") return "config";
+      if (path === "/project") return "project";
+      return "hitl";
+    }
+
+    function markRegion(target) {
+      document.querySelectorAll(".func-region.is-target").forEach((el) => el.classList.remove("is-target"));
+      const region = target && (target.classList.contains("func-region") ? target : target.closest(".func-region"));
+      if (region) region.classList.add("is-target");
+      return region;
+    }
+
+    function scrollRegion(region, options) {
+      const scroller = region.closest(".workspace-main");
+      if (!scroller) return;
+      const top = region.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      scroller.scrollTo({ top: Math.max(0, top), behavior: scrollBehavior(options) });
+    }
+
+    function applyRoute(path, hash, options) {
+      const historyMode = options && options.historyMode;
+      const route = routeFromPath(path);
+      const titles = {
+        hitl: "auto_studio · 运行",
+        project: "auto_studio · 项目配置",
+        config: "auto_studio · 配置",
+      };
+      document.documentElement.dataset.route = route;
+      document.title = titles[route];
+      document.querySelectorAll(".side-group").forEach((group) => {
+        const on = group.dataset.route === route;
+        group.classList.toggle("is-current", on);
+        const link = group.querySelector(":scope > a.sidebar-link");
+        if (link) link.classList.toggle("is-active", on);
+      });
+      if (historyMode === "push" || historyMode === "replace") {
+        let base = "/" + hitlSearch;
+        if (route === "config") base = "/config";
+        if (route === "project") base = "/project";
+        const method = historyMode === "push" ? "pushState" : "replaceState";
+        history[method]({ route }, "", base + (hash || ""));
+      }
+      if (!hash) return;
+      const target = document.getElementById(decodeURIComponent(hash.slice(1)));
+      const region = markRegion(target);
+      if (region) scrollRegion(region, options);
+    }
+
+    document.querySelector(".app-side-nav").addEventListener("click", (event) => {
+      const link = event.target.closest("a");
+      if (!link) return;
+      let url;
+      try {
+        url = new URL(link.getAttribute("href") || "", location.origin);
+      } catch (err) {
+        return;
+      }
+      if (url.origin !== location.origin) return;
+      if (url.pathname !== "/" && url.pathname !== "/config" && url.pathname !== "/project") return;
+      event.preventDefault();
+      if (link.id === "btnSidebarNew") return;
+      const route = routeFromPath(url.pathname);
+      const same = document.documentElement.dataset.route === route;
+      if (same && !url.hash) return;
+      if (same && url.hash === location.hash) {
+        applyRoute(url.pathname, url.hash, { smooth: true });
+        return;
+      }
+      applyRoute(url.pathname, url.hash, { historyMode: "push", smooth: true });
+    });
+
+    window.addEventListener("popstate", () => {
+      if (location.pathname !== "/config") hitlSearch = location.search;
+      applyRoute(location.pathname, location.hash);
+    });
+
+    applyRoute(location.pathname, location.hash, { historyMode: "replace" });
   </script>
+  <script src="/static/config.js"></script>
 </body>
 </html>

@@ -8,18 +8,23 @@ from typing import Protocol
 class AgentBackend(Protocol):
     """单次角色调用：读 role 定义 + 上下文，返回模型输出文本。"""
 
+    capabilities: frozenset[str]
+
     def complete(
         self,
         *,
         role_name: str,
         system_prompt: str,
         user_prompt: str,
+        model: str | None = None,
     ) -> str:
         """执行一次补全；失败应抛出 RuntimeError。"""
 
 
 class StubBackend:
-    """占位后端，保持图可跑通。"""
+    """占位后端，保持图可跑通。不具备文件与命令能力。"""
+
+    capabilities: frozenset[str] = frozenset({"text"})
 
     def complete(
         self,
@@ -27,6 +32,7 @@ class StubBackend:
         role_name: str,
         system_prompt: str,
         user_prompt: str,
+        model: str | None = None,
     ) -> str:
         return f"[stub:{role_name}] len={len(user_prompt)}"
 

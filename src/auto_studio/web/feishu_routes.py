@@ -20,6 +20,7 @@ from auto_studio.hitl.feishu_inbound import (
 )
 from auto_studio.hitl.feishu_notify import notify_awaiting_human_via_lark_cli
 from auto_studio.hitl.feishu_session import resolve_thread_id
+from auto_studio.hitl.feishu_status import answer_status_query, is_status_query
 from auto_studio.hitl.service import GraphRunService, HitlError
 
 router = APIRouter(tags=["feishu"])
@@ -55,6 +56,12 @@ def _handle_im_message(body: dict) -> dict:
     if im is None:
         return {"ok": True, "ignored": "not_text_im"}
     text = im["text"]
+    if is_status_query(text):
+        return answer_status_query(
+            service=_service(),
+            chat_id=im.get("chat_id") or "",
+            open_id=im.get("open_id") or "",
+        )
     thread_id = parse_thread_id_from_text(text) or resolve_thread_id(
         chat_id=im.get("chat_id") or "",
         open_id=im.get("open_id") or "",
@@ -150,6 +157,12 @@ async def feishu_webhook(request: Request) -> dict[str, Any]:
                 thread_id=action["thread_id"],
                 escalation_choice=action["escalation_choice"],  # type: ignore[arg-type]
                 human_reply=action.get("human_reply") or "",
+            )
+        elif action.get("hitl_action") == "pm_clarification":
+            st = svc.submit_hitl(
+                action["thread_id"],
+                human_reply=action.get("human_reply") or "",
+                channel="feishu",
             )
         else:
             st = svc.submit_from_feishu_card(

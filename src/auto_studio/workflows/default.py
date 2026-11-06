@@ -6,7 +6,6 @@
 
 from typing import Literal, TypedDict
 
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from auto_studio.config.context import (
@@ -16,6 +15,7 @@ from auto_studio.config.context import (
 )
 from auto_studio.hitl.gate import apply_gate_node
 from auto_studio.workflows.node_wrap import skip_if_disabled
+from auto_studio.workspace.checkpoint import default_checkpointer
 
 # 无有效 project/scenario 配置时的回退上限
 DEFAULT_MAX_DEV_RETRIES = 3
@@ -33,6 +33,7 @@ class FactoryState(TypedDict, total=False):
     human_request: str
     scenario_key: str
     project_id: str
+    run_name: str
     design_track_enabled: bool
     cost_ledger: str
     run_record: str
@@ -96,6 +97,15 @@ class FactoryState(TypedDict, total=False):
     hitl_audit_log: str
     escalation_choice: str
     hitl_clarification_resolved: bool
+    workspace_path: str
+    test_command: str
+    change_impact: str
+    change_baseline_note: str
+    delivery_ready: bool
+    run_stopped: bool
+    stopped_at: str
+    run_paused: bool
+    paused_at: str
 
 
 def _touch_artifact(state: FactoryState, key: str, role: str, note: str) -> dict:
@@ -256,6 +266,11 @@ def config_manager_plan(state: FactoryState) -> dict:
     }
 
 
+# 财务三个节点的函数仍保留在本文件，当前图不注册、不连边。
+# 需要时把 finance_budget_rough / finance_budget_final / finance_cost_snapshot
+# 加回 nodes，并接在 project_manager_scope、gate_architecture_review、project_manager_delivery 之前。
+
+
 @skip_if_disabled("finance_budget_rough")
 def finance_budget_rough(state: FactoryState) -> dict:
     from auto_studio.backends.runner import invoke_role
@@ -276,7 +291,7 @@ def project_manager_scope(state: FactoryState) -> dict:
         state,
         "requirement_spec",
         "project_manager",
-        "需求说明（范围已与粗估预算对齐，待架构）",
+        "需求说明（范围已确认，待架构）",
     )["requirement_spec"]
     body = f"{existing}\n\n---\n\n{note}" if existing else note
     return {"requirement_spec": body}
@@ -327,15 +342,41 @@ def developer(state: FactoryState) -> dict:
 
     retries = state.get("dev_retry_count", 0)
     task = state.get("task_plan") or ""
+    worktree = state.get("workspace_path") or ""
+    request = state.get("human_request") or ""
+    scope = ""
+    if worktree:
+        scope = f"只能修改这个工作树中的文件：{worktree}\n不要修改工作树以外的路径，也不要合并到其他分支。\n"
     body = invoke_role(
         role_name="developer",
         user_prompt=(
-            f"任务计划：\n{task[:8000]}\n\n"
+            f"{scope}"
+            f"人类要求：\n{request[:2000]}\n\n"
+            f"任务计划：\n{task[:6000]}\n\n"
             f"请产出本轮 `code_change` 说明（attempt={retries + 1}）。"
         ),
         stub_note=f"代码变更 attempt={retries + 1}",
     )
     return {"code_change": body, "dev_retry_count": retries + 1}
+
+
+def change_control(state: FactoryState) -> dict:
+    from auto_studio.verification.acceptance import classify_change_impact
+
+    impact = classify_change_impact(state.get("change_request") or "")
+    note = ""
+    if impact:
+        note = "变更尚未经过对应关卡批准，不写入新的基线项。"
+    return {"change_impact": impact, "change_baseline_note": note}
+
+
+def route_after_change(state: FactoryState) -> str:
+    impact = state.get("change_impact") or ""
+    if impact == "scope":
+        return "gate_requirement_confirm"
+    if impact == "architecture":
+        return "gate_architecture_review"
+    return "code_reviewer"
 
 
 @skip_if_disabled("code_reviewer")
@@ -371,9 +412,24 @@ def tester_execute(state: FactoryState) -> dict:
         user_prompt=(
             f"测试用例：\n{cases[:6000]}\n\n"
             f"请产出 `test_report`（预设 status={status}）。"
+            "若执行了测试命令，须引用命令输出中的 AC-*。"
         ),
         stub_note=f"测试报告 status={status}",
     )
+    from auto_studio.verification.command import TestCommandError, run_test_command
+
+    try:
+        command = run_test_command(state)
+    except TestCommandError as exc:
+        return {
+            "test_cases": cases,
+            "test_report": f"{report}\n\n## 测试命令\n拒绝执行：{exc}",
+            "test_status": "fail",
+        }
+    if command is not None:
+        report = f"{report}\n\n{command.transcript}"
+        if command.returncode != 0:
+            status = "fail"
     return {"test_cases": cases, "test_report": report, "test_status": status}
 
 
@@ -388,10 +444,21 @@ def qa(state: FactoryState) -> dict:
         user_prompt=(
             f"测试报告：\n{report_in[:8000]}\n\n"
             f"请产出 `qa_report`（预设 status={status}）。"
+            "若需求含 AC-*，须逐条引用测试证据。"
         ),
         stub_note=f"QA 报告 status={status}",
     )
-    return {"qa_report": body, "qa_status": status}
+    from auto_studio.verification.acceptance import (
+        acceptance_matrix,
+        missing_acceptance_ids,
+    )
+
+    spec = state.get("requirement_spec") or ""
+    evidence = f"{report_in}\n{body}"
+    matrix = acceptance_matrix(requirement_spec=spec, evidence=evidence)
+    if missing_acceptance_ids(requirement_spec=spec, evidence=evidence):
+        status = "fail"
+    return {"qa_report": f"{body}\n\n{matrix}", "qa_status": status}
 
 
 @skip_if_disabled("finance_cost_snapshot")
@@ -412,7 +479,20 @@ def finance_cost_snapshot(state: FactoryState) -> dict:
 @skip_if_disabled("project_manager_delivery")
 def project_manager_delivery(state: FactoryState) -> dict:
     from auto_studio.backends.runner import invoke_role
+    from auto_studio.verification.acceptance import missing_acceptance_ids
 
+    spec = state.get("requirement_spec") or ""
+    missing = missing_acceptance_ids(
+        requirement_spec=spec,
+        evidence=state.get("test_report") or "",
+    )
+    ready = not missing and state.get("qa_status") != "fail"
+    if not ready:
+        gap = "、".join(missing) if missing else "QA 未通过"
+        return {
+            "delivery_report": f"未形成可交付结论：{gap}。无验收证据不视为交付。",
+            "delivery_ready": False,
+        }
     body = invoke_role(
         role_name="project_manager",
         user_prompt=(
@@ -421,7 +501,7 @@ def project_manager_delivery(state: FactoryState) -> dict:
         ),
         stub_note="交付报告（待最终交付关卡）",
     )
-    return {"delivery_report": body}
+    return {"delivery_report": body, "delivery_ready": True}
 
 
 def gate_final_delivery(state: FactoryState) -> dict:
@@ -463,12 +543,27 @@ def process_owner_retro(state: FactoryState) -> dict:
         user_prompt="请产出 `process_proposals` 流程与角色改进提案。",
         stub_note="流程与角色改进提案",
     )
+    from auto_studio.backends.cost import take_cost_lines
+    from auto_studio.verification.retro import scorecard
+
     audit = str(state.get("hitl_audit_log") or state.get("run_record") or "").strip()
     run_record = audit or "[engine] 本轮无 HITL 审计条目"
+    costs = "\n".join(take_cost_lines())
+    card = scorecard(state)
+    proposal_id = ""
+    worktree = str(state.get("workspace_path") or "")
+    if worktree:
+        from auto_studio.evolution.proposals import save_retro_proposal
+
+        proposal_id = save_retro_proposal(worktree, proposals)
+    pending = "提案状态：pending。未经批准不得修改角色定义或流程。"
+    if proposal_id:
+        pending = f"{pending}\n提案编号：{proposal_id}"
     return {
-        "retro_report": retro,
-        "process_proposals": proposals,
+        "retro_report": f"{retro}\n\n{card}",
+        "process_proposals": proposals + "\n\n" + pending,
         "run_record": run_record,
+        "cost_ledger": costs,
     }
 
 
@@ -509,13 +604,13 @@ def route_after_qa(state: FactoryState) -> str:
         if state.get("dev_retry_count", 0) >= max_dev_retries_for_state(state):
             return "escalate_dev_retry"
         return "developer"
-    return "finance_cost_snapshot"
+    return "project_manager_delivery"
 
 
 def route_after_config_plan(state: FactoryState) -> str:
     if state.get("design_track_enabled"):
         return "ux_designer"
-    return "finance_budget_rough"
+    return "project_manager_scope"
 
 
 def _route_after_gate_rejected(state: FactoryState, on_approved: str) -> str:
@@ -536,6 +631,39 @@ def route_after_final_delivery_gate(state: FactoryState) -> str:
     return _route_after_gate_rejected(state, "config_manager_closeout")
 
 
+def route_after_delivery(state: FactoryState) -> str:
+    if state.get("delivery_ready") is False:
+        return "escalate_dev_retry"
+    return "gate_final_delivery"
+
+
+def _with_stop_guard(fn):
+    """停止请求到达后，不再执行后续节点。"""
+
+    def wrapped(state: FactoryState) -> dict:
+        from auto_studio.hitl.control import (
+            RunPaused,
+            RunStopped,
+            is_pause_requested,
+            is_stop_requested,
+        )
+
+        if is_stop_requested():
+            raise RunStopped("本轮已停止")
+        if is_pause_requested():
+            raise RunPaused("本轮已暂停")
+        result = fn(state)
+        if is_stop_requested():
+            raise RunStopped("本轮已停止")
+        if is_pause_requested():
+            raise RunPaused("本轮已暂停")
+        return result
+
+    wrapped.__name__ = getattr(fn, "__name__", "node")
+    wrapped.__doc__ = getattr(fn, "__doc__", None)
+    return wrapped
+
+
 def build_graph() -> StateGraph:
     builder = StateGraph(FactoryState)
 
@@ -547,16 +675,13 @@ def build_graph() -> StateGraph:
         "ui_designer": ui_designer,
         "visual_designer": visual_designer,
         "config_manager_plan": config_manager_plan,
-        "finance_budget_rough": finance_budget_rough,
         "project_manager_scope": project_manager_scope,
         "architect": architect,
-        "finance_budget_final": finance_budget_final,
         "gate_architecture_review": gate_architecture_review,
         "developer": developer,
         "code_reviewer": code_reviewer,
         "tester_execute": tester_execute,
         "qa": qa,
-        "finance_cost_snapshot": finance_cost_snapshot,
         "project_manager_delivery": project_manager_delivery,
         "gate_final_delivery": gate_final_delivery,
         "config_manager_closeout": config_manager_closeout,
@@ -564,9 +689,10 @@ def build_graph() -> StateGraph:
         "escalate_dev_retry": escalate_dev_retry,
         "pm_clarification_check": pm_clarification_check,
         "hitl_pause": hitl_pause,
+        "change_control": change_control,
     }
     for name, fn in nodes.items():
-        builder.add_node(name, fn)
+        builder.add_node(name, _with_stop_guard(fn))
 
     builder.add_edge(START, "project_manager_draft")
     builder.add_edge("project_manager_draft", "pm_clarification_check")
@@ -587,27 +713,40 @@ def build_graph() -> StateGraph:
         route_after_config_plan,
         {
             "ux_designer": "ux_designer",
-            "finance_budget_rough": "finance_budget_rough",
+            "project_manager_scope": "project_manager_scope",
         },
     )
     builder.add_edge("ux_designer", "ui_designer")
     builder.add_edge("ui_designer", "visual_designer")
-    builder.add_edge("visual_designer", "finance_budget_rough")
-    builder.add_edge("finance_budget_rough", "project_manager_scope")
+    builder.add_edge("visual_designer", "project_manager_scope")
     builder.add_edge("project_manager_scope", "architect")
-    builder.add_edge("architect", "finance_budget_final")
-    builder.add_edge("finance_budget_final", "gate_architecture_review")
+    builder.add_edge("architect", "gate_architecture_review")
     builder.add_conditional_edges(
         "gate_architecture_review",
         route_after_architecture_gate,
         {"developer": "developer", "__end__": END},
     )
-    builder.add_edge("developer", "code_reviewer")
+    builder.add_edge("developer", "change_control")
+    builder.add_conditional_edges(
+        "change_control",
+        route_after_change,
+        {
+            "code_reviewer": "code_reviewer",
+            "gate_requirement_confirm": "gate_requirement_confirm",
+            "gate_architecture_review": "gate_architecture_review",
+        },
+    )
     builder.add_conditional_edges("code_reviewer", route_after_review)
     builder.add_conditional_edges("tester_execute", route_after_test)
     builder.add_conditional_edges("qa", route_after_qa)
-    builder.add_edge("finance_cost_snapshot", "project_manager_delivery")
-    builder.add_edge("project_manager_delivery", "gate_final_delivery")
+    builder.add_conditional_edges(
+        "project_manager_delivery",
+        route_after_delivery,
+        {
+            "gate_final_delivery": "gate_final_delivery",
+            "escalate_dev_retry": "escalate_dev_retry",
+        },
+    )
     builder.add_conditional_edges(
         "gate_final_delivery",
         route_after_final_delivery_gate,
@@ -620,16 +759,29 @@ def build_graph() -> StateGraph:
     return builder
 
 
+# 财务节点暂不注册进图。保留函数引用，避免以后接回时从本文件丢失。
+_FINANCE_NODES_RESERVED = {
+    "finance_budget_rough": finance_budget_rough,
+    "finance_budget_final": finance_budget_final,
+    "finance_cost_snapshot": finance_cost_snapshot,
+}
+
+
 # 须同时提供 checkpointer，interrupt_before 才会在 run 边界生效；
 # VizLang 若发现已有 checkpointer 会整图复用，不会丢掉 interrupt 配置。
-CHECKPOINTER = MemorySaver()
 INTERRUPT_BEFORE_GATES = [
     "gate_requirement_confirm",
     "gate_architecture_review",
     "gate_final_delivery",
 ]
 
-graph = build_graph().compile(
-    checkpointer=CHECKPOINTER,
-    interrupt_before=INTERRUPT_BEFORE_GATES,
-)
+
+def compile_graph(checkpointer=None):
+    saver = checkpointer if checkpointer is not None else default_checkpointer()
+    return build_graph().compile(
+        checkpointer=saver,
+        interrupt_before=INTERRUPT_BEFORE_GATES,
+    )
+
+
+graph = compile_graph()

@@ -22,8 +22,16 @@ def apply_gate_node(gate_id: str, state: "FactoryState") -> dict:
     )
     prior = (state.get("baseline_log") or "").strip()
     log = f"{prior}\n{entry}".strip() if prior else entry
-    return {
+    cleared: dict = {
         "baseline_log": log,
         "last_gate_decision": decision,
         "human_reply": "",
     }
+    impact = str(state.get("change_impact") or "")
+    resolves = (gate_id == "gate_requirement_confirm" and impact == "scope") or (
+        gate_id == "gate_architecture_review" and impact == "architecture"
+    )
+    if decision == "approved" and resolves:
+        cleared["change_request"] = ""
+        cleared["change_impact"] = ""
+    return cleared

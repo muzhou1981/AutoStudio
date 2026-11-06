@@ -1,0 +1,9 @@
+id: workflow_v1
+evidence:
+  - dev_retry_count
+  - qa_status
+  - baseline_log
+  - cost_ledger
+rules:
+  - 打分必须引用上述字段，不能只写印象。
+  - Top3 改进只形成提案，proposal_status 保持 pending，直到人批准。

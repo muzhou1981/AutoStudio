@@ -1,3 +1,5 @@
+import os
+
 from auto_studio.backends.base import StubBackend, get_default_backend
 
 
@@ -36,3 +38,49 @@ def test_auto_studio_backend_stub_overrides_key(monkeypatch):
     monkeypatch.setenv("AUTO_STUDIO_BACKEND", "stub")
     b = get_default_backend()
     assert isinstance(b, StubBackend)
+
+
+def test_cursor_complete_records_token_usage(monkeypatch):
+    monkeypatch.setenv("CURSOR_API_KEY", "test-key")
+    monkeypatch.setenv("AUTO_STUDIO_CURSOR_VERIFY", "0")
+
+    class _Usage:
+        input_tokens = 3
+        output_tokens = 5
+
+    class _Run:
+        def __init__(self) -> None:
+            self._terminal_result = type("Result", (), {"usage": _Usage()})()
+
+        def text(self) -> str:
+            return "ok"
+
+    class _Agent:
+        def send(self, prompt: str) -> _Run:
+            return _Run()
+
+    class _Client:
+        def create_agent(self, opts, api_key=None):
+            return _Agent()
+
+    monkeypatch.setattr("cursor_sdk._client._default_client", lambda: _Client())
+    from auto_studio.backends.cost import begin_cost_log, end_cost_log, take_cost_lines
+    from auto_studio.backends.cursor_backend import CursorBackend
+
+    token = begin_cost_log()
+    try:
+        assert CursorBackend().complete(role_name="developer", system_prompt="s", user_prompt="u") == "ok"
+        lines = take_cost_lines()
+    finally:
+        end_cost_log(token)
+    assert any("input_tokens=3" in line and "output_tokens=5" in line for line in lines)
+
+
+def test_uppercase_proxy_is_copied_for_the_bridge(monkeypatch):
+    from auto_studio.backends.cursor_backend import ensure_lowercase_proxy
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    monkeypatch.delenv("https_proxy", raising=False)
+    ensure_lowercase_proxy()
+    assert os.environ["https_proxy"] == "http://proxy.example:8080"
+    assert os.environ["NODE_USE_ENV_PROXY"] == "1"

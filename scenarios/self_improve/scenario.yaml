@@ -1,0 +1,16 @@
+scenario_key: self_improve
+title: 用工厂改进 auto_studio 自身
+description: |
+  目标目录是工厂仓库时，必须显式设置 AUTO_STUDIO_ALLOW_FACTORY_TARGET=1。
+  代码改动只发生在 .auto_studio/worktrees/<thread_id>，不直接改当前工作副本。
+workflow:
+  graph_id: default
+  profile_id: self_improve_v1
+  skip_nodes:
+    - ux_designer
+    - ui_designer
+    - visual_designer
+  features:
+    design_track: false
+  limits:
+    max_dev_retries: 2

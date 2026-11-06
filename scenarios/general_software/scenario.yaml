@@ -1,0 +1,16 @@
+scenario_key: general_software
+title: 通用软件开发
+description: 覆盖应用、服务、库与命令行。默认走体验、界面和视觉；库或命令行可在项目里关闭设计轨。
+
+workflow:
+  graph_id: default
+  profile_id: general_software_v1
+  skip_nodes: []
+  features:
+    design_track: true
+  gates:
+    gate_requirement_confirm: true
+    gate_architecture_review: true
+    gate_final_delivery: true
+  limits:
+    max_dev_retries: 3

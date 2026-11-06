@@ -1,0 +1,24 @@
+scenario_key: middleware
+title: middleware
+description: 面向中间件的接口、协议与服务实现。默认不走体验、界面和视觉。
+
+artifacts_optional:
+  - ux_spec
+  - ui_spec
+  - visual_assets
+
+workflow:
+  graph_id: default
+  profile_id: middleware_v1
+  skip_nodes:
+    - ux_designer
+    - ui_designer
+    - visual_designer
+  features:
+    design_track: false
+  gates:
+    gate_requirement_confirm: true
+    gate_architecture_review: true
+    gate_final_delivery: true
+  limits:
+    max_dev_retries: 3

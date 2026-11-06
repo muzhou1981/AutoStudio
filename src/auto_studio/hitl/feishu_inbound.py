@@ -40,20 +40,41 @@ def _parse_action_value(raw: Any) -> dict[str, Any]:
     return {}
 
 
+def _action_parts(event: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    action = event.get("action") if isinstance(event.get("action"), dict) else {}
+    raw = event.get("action_value")
+    if raw is None and "event" in event and isinstance(event["event"], dict):
+        inner = event["event"]
+        nested = inner.get("action") if isinstance(inner.get("action"), dict) else {}
+        raw = inner.get("action_value")
+        if raw is None:
+            raw = nested.get("value")
+        if not action:
+            action = nested
+    if raw is None:
+        raw = action.get("value")
+    form = action.get("form_value") or event.get("form_value") or {}
+    if not isinstance(form, dict):
+        form = {}
+    return _parse_action_value(raw), form
+
+
 def parse_card_action_trigger(event: dict[str, Any]) -> dict[str, str]:
     """从 card.action.trigger 事件或扁平 webhook 体解析 HITL 参数。"""
-    action_value = event.get("action_value")
-    if action_value is None and "event" in event:
-        inner = event["event"]
-        if isinstance(inner, dict):
-            action_value = inner.get("action_value") or inner.get("action", {}).get(
-                "value"
-            )
-    data = _parse_action_value(action_value)
+    data, form = _action_parts(event)
     thread_id = str(data.get("thread_id") or "").strip()
     if not thread_id:
         raise FeishuInboundError("卡片回调缺少 thread_id")
     hitl_action = str(data.get("hitl_action") or "gate").strip().lower()
+    if hitl_action == "pm_clarification":
+        reply = str(form.get("reply") or data.get("human_reply") or "").strip()
+        if not reply:
+            raise FeishuInboundError("澄清卡片缺少答复")
+        return {
+            "thread_id": thread_id,
+            "hitl_action": "pm_clarification",
+            "human_reply": reply,
+        }
     if hitl_action == "escalation":
         choice = str(data.get("escalation_choice") or "").strip()
         if choice not in ("continue", "pause", "abort"):

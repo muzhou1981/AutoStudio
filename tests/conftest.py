@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
+
+os.environ.setdefault("AUTO_STUDIO_CHECKPOINT", "memory")
+os.environ.setdefault("AUTO_STUDIO_WORKSPACE", "0")
 
 
 @pytest.fixture(autouse=True)

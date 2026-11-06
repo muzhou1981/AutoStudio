@@ -4,7 +4,7 @@ from auto_studio.hitl.feishu_config import (
     load_feishu_hitl_config,
     resolve_lark_backend,
 )
-from auto_studio.hitl.feishu_notify import format_gate_message
+from auto_studio.hitl.feishu_notify import format_gate_message, hitl_page_url
 
 
 def test_resolve_lark_backend_default_lark_cli(tmp_path, monkeypatch):
@@ -31,6 +31,12 @@ def test_load_feishu_hitl_from_env(tmp_path, monkeypatch):
     assert cfg.notify_open_id == "ou_test"
 
 
+def test_hitl_page_url_uses_thread_id():
+    assert hitl_page_url("http://127.0.0.1:8765/", "abc") == (
+        "http://127.0.0.1:8765/?thread_id=abc"
+    )
+
+
 def test_format_gate_message():
     text = format_gate_message(
         thread_id="tid-1",
@@ -39,5 +45,6 @@ def test_format_gate_message():
         web_url="http://127.0.0.1:8766/?thread=tid-1",
     )
     assert "tid-1" in text
-    assert "gate_requirement_confirm" in text
+    assert "需求确认" in text
+    assert "待批复" in text
     assert "8766" in text

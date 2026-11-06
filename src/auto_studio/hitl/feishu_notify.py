@@ -33,9 +33,14 @@ def _use_interactive_card() -> bool:
     return raw not in ("0", "false", "no")
 
 
+def hitl_page_url(base: str, thread_id: str) -> str:
+    root = base.rstrip("/")
+    return f"{root}/?thread_id={thread_id}"
+
+
 def _web_url(cfg: FeishuHitlConfig, thread_id: str) -> str:
-    base = (cfg.web_base_url or resolve_public_base_url()).rstrip("/")
-    return f"{base}/?thread={thread_id}"
+    base = cfg.web_base_url or resolve_public_base_url()
+    return hitl_page_url(base, thread_id)
 
 
 def format_gate_message(
@@ -45,15 +50,20 @@ def format_gate_message(
     gate_id: str | None,
     web_url: str,
 ) -> str:
+    from auto_studio.hitl.rail import label_for
+
+    label = label_for(gate_id) if gate_id else ""
     lines = [
         "【软件工厂 · 项目经理】",
+        "阶段：等待人工",
         f"Run：{thread_id}",
     ]
-    if gate_id:
-        lines.append(f"关卡：{gate_id}")
+    if label:
+        lines.append(f"当前：{label}")
+        lines.append(f"待办：待批复 · {label}")
     if summary:
         lines.append(summary)
-    lines.append(f"Web 批复：{web_url}")
+    lines.append(f"打开：{web_url}")
     return "\n".join(lines)
 
 

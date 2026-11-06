@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="wa-theme-default wa-palette-default wa-brand-blue">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -13,55 +13,178 @@
         theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
       }
       document.documentElement.setAttribute("data-theme", theme);
+      document.documentElement.classList.toggle("wa-dark", theme === "dark");
+      document.documentElement.classList.toggle("wa-light", theme !== "dark");
     })();
   </script>
+  <link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css" />
+  <link rel="stylesheet" href="/static/vendor/webawesome/styles/utilities.css" />
   <link rel="stylesheet" href="/static/shared.css" />
+  <script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
 </head>
 <body>
+  <a class="skip-link" href="#config-main">跳到配置</a>
   <div class="app-frame">
-    <header class="app-bar">
-      <div class="app-bar-inner">
-        <nav class="app-nav" aria-label="主导航">
-          <a href="/">HITL</a>
-          <a href="/config" class="is-active">配置</a>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <nav class="app-side-nav" aria-label="页面">
+          <div class="side-group">
+            <a class="sidebar-link" href="/">
+              <wa-icon name="user" library="system"></wa-icon>
+              <span>人工处理</span>
+            </a>
+            <div class="side-sub">
+              <a class="sidebar-link sidebar-sub" href="/">
+                <wa-icon name="plus" library="system"></wa-icon>
+                <span>新建 Run</span>
+              </a>
+            </div>
+          </div>
+          <div class="side-group is-current">
+            <a class="sidebar-link is-active" href="/config">
+              <wa-icon name="gear" library="system"></wa-icon>
+              <span>配置</span>
+            </a>
+            <div class="side-sub">
+              <a class="sidebar-link sidebar-sub" href="#projectHeading">
+                <wa-icon name="file" library="system"></wa-icon>
+                <span>项目</span>
+              </a>
+              <a class="sidebar-link sidebar-sub" href="#runtimeHeading">
+                <wa-icon name="gauge" library="system"></wa-icon>
+                <span>运行配置</span>
+              </a>
+              <a class="sidebar-link sidebar-sub" href="#scenarioHeading">
+                <wa-icon name="table-columns" library="system"></wa-icon>
+                <span>场景</span>
+              </a>
+              <a class="sidebar-link sidebar-sub" href="#envHeading">
+                <wa-icon name="file-code" library="system"></wa-icon>
+                <span>环境</span>
+              </a>
+            </div>
+          </div>
         </nav>
-        <h1>项目与场景配置</h1>
-      </div>
-    </header>
+      </aside>
 
-    <div class="config-shell">
-      <section class="panel">
-        <h2>项目（L2）</h2>
-        <label for="projectPick">选择项目</label>
-        <select id="projectPick"></select>
-        <div class="row-actions">
-          <button type="button" class="btn-secondary" id="btnNewProject">新建项目</button>
-          <button type="button" class="btn-primary" id="btnSaveProject">保存 project.yaml</button>
+      <main id="config-main" class="workspace-main" aria-label="配置">
+        <div class="composer-block">
+          <section aria-labelledby="projectHeading">
+            <p class="section-title" id="projectHeading">项目</p>
+            <p class="panel-lead">先选场景和开关，再填单行。整份 YAML 在文末的原文里。</p>
+            <wa-select id="projectPick" label="选择项目" placeholder="选择项目"></wa-select>
+            <div class="row-actions">
+              <wa-button id="btnNewProject" appearance="outlined" variant="neutral">新建项目</wa-button>
+              <wa-button id="btnSaveProject" variant="brand">保存项目</wa-button>
+            </div>
+            <div id="newProjectRow" hidden>
+              <div class="inline-field">
+                <wa-input id="newProjectId" label="项目标识" placeholder="字母开头，可含 _ 和 -" spellcheck="false"></wa-input>
+                <wa-button id="btnCancelProject" appearance="outlined" variant="neutral">取消</wa-button>
+                <wa-button id="btnCreateProject" variant="brand">创建</wa-button>
+              </div>
+            </div>
+
+            <div id="projectFields">
+              <wa-select id="fieldScenario" label="绑定场景"></wa-select>
+              <wa-select id="fieldDesign" label="设计轨" value="inherit">
+                <wa-option value="inherit">沿用场景</wa-option>
+                <wa-option value="on">开启</wa-option>
+                <wa-option value="off">关闭</wa-option>
+              </wa-select>
+              <wa-select id="fieldSkipMode" label="节点裁剪" value="inherit">
+                <wa-option value="inherit">沿用场景</wa-option>
+                <wa-option value="custom">在项目里指定</wa-option>
+              </wa-select>
+              <div id="skipWrap" hidden>
+                <span class="field-caption" id="skipCaption">跳过这些节点</span>
+                <div id="skipBox" class="choice-grid" role="group" aria-labelledby="skipCaption"></div>
+              </div>
+              <div class="field-row">
+                <div>
+                  <wa-input id="fieldTitle" label="标题"></wa-input>
+                </div>
+                <div>
+                  <wa-input id="fieldRetries" label="开发重试上限" hint="空则沿用场景" type="number" min="0" step="1" inputmode="numeric"></wa-input>
+                </div>
+              </div>
+              <wa-input id="fieldDescription" label="说明"></wa-input>
+              <wa-input id="fieldWorkspace" label="工作区" hint="待开发项目的 git 目录，可空" placeholder="/path/to/repo" spellcheck="false"></wa-input>
+              <p class="hint-block" id="workspaceHint"></p>
+              <wa-input id="fieldProfile" label="流程配置名" hint="profile_id，可空" spellcheck="false"></wa-input>
+              <wa-input id="fieldChat" label="飞书通知群" hint="chat_id，可空" placeholder="oc_…" spellcheck="false"></wa-input>
+              <wa-input id="fieldOpen" label="飞书通知人" hint="open_id，群为空时使用" placeholder="ou_…" spellcheck="false"></wa-input>
+            </div>
+
+            <wa-details class="raw" summary="原文 project.yaml">
+              <wa-textarea id="projectYaml" label="整份 YAML" rows="12" spellcheck="false" placeholder="先选择项目，或新建一个。"></wa-textarea>
+              <div class="row-actions">
+                <wa-button id="btnSaveRaw" appearance="outlined" variant="neutral">用原文覆盖</wa-button>
+              </div>
+            </wa-details>
+            <wa-callout id="projectError" variant="danger" hidden></wa-callout>
+            <p class="save-note" id="projectSaved" hidden aria-live="polite"></p>
+          </section>
+
+          <hr class="main-divider" />
+
+          <section aria-labelledby="runtimeHeading">
+            <p class="section-title" id="runtimeHeading">运行配置</p>
+            <p class="panel-lead">写入工厂根目录的 .env。API Key 只保存，页面不回显。</p>
+            <wa-select id="backendPick" label="后端" value="stub">
+              <wa-option value="stub">stub，不调用 Cursor</wa-option>
+              <wa-option value="cursor">cursor，Cursor SDK</wa-option>
+            </wa-select>
+            <wa-input id="modelInput" label="模型" hint="留空使用 Auto" placeholder="留空即 Auto"></wa-input>
+            <wa-input id="targetInput" label="默认工作区" hint="项目未填工作区时使用" placeholder="待开发仓库的绝对路径，可空"></wa-input>
+            <wa-input id="apiKeyInput" label="Cursor API Key" hint="不改就留空" type="password" placeholder="只写入 .env"></wa-input>
+            <wa-select id="larkBackend" label="飞书后端" value="lark_cli">
+              <wa-option value="lark_cli">lark-cli</wa-option>
+              <wa-option value="env_bot">应用凭据</wa-option>
+            </wa-select>
+            <wa-input id="publicBase" label="Web 地址" hint="卡片里的打开链接" placeholder="http://127.0.0.1:8765" spellcheck="false"></wa-input>
+            <wa-input id="feishuChat" label="默认通知群" hint="项目未填 chat_id 时使用" placeholder="oc_…" spellcheck="false"></wa-input>
+            <wa-input id="feishuOpen" label="默认通知人" hint="项目未填 open_id 时使用" placeholder="ou_…" spellcheck="false"></wa-input>
+            <div class="row-actions">
+              <wa-button id="btnSaveRuntime" variant="brand">写入 .env</wa-button>
+            </div>
+            <wa-callout id="runtimeError" variant="danger" hidden></wa-callout>
+            <p class="save-note" id="runtimeSaved" hidden aria-live="polite"></p>
+          </section>
         </div>
-        <label for="projectYaml">project.yaml</label>
-        <textarea id="projectYaml" rows="16" spellcheck="false"></textarea>
-        <p class="inline-error" id="projectError" hidden role="alert"></p>
-      </section>
+      </main>
 
-      <section class="panel">
-        <h2>场景（L1，只读）</h2>
-        <label for="scenarioPick">选择场景</label>
-        <select id="scenarioPick"></select>
-        <label for="scenarioYaml">scenario.yaml</label>
-        <textarea id="scenarioYaml" rows="12" readonly spellcheck="false"></textarea>
+      <aside class="workspace-inspect" aria-label="场景与环境">
+        <div class="inspect-head">
+          <h2 id="scenarioHeading">场景</h2>
+        </div>
+        <div class="inspect-body">
+          <p class="panel-lead">场景文件只读。原文和合并 JSON 在下方折叠入口里。</p>
+          <wa-select id="scenarioPick" label="查看场景"></wa-select>
+          <wa-details class="raw" summary="原文 scenario.yaml">
+            <wa-textarea id="scenarioYaml" label="场景原文" rows="8" readonly></wa-textarea>
+          </wa-details>
+          <p class="section-title" id="previewHeading">合并结果</p>
+          <p class="panel-lead">场景与项目叠在一起之后，运行时实际采用的值。</p>
+          <wa-button id="btnEffective" appearance="outlined" variant="neutral">刷新预览</wa-button>
+          <wa-details class="raw" summary="原文 JSON">
+            <pre id="effectiveOut" class="mono-block">选择项目或场景后会刷新。</pre>
+          </wa-details>
 
-        <h2 style="margin-top:1.25rem">合并预览</h2>
-        <pre id="effectiveOut" class="mono-block">选择项目或场景后点击「刷新预览」。</pre>
-        <button type="button" class="btn-secondary" id="btnEffective">刷新预览</button>
+          <hr class="main-divider" />
 
-        <h2 style="margin-top:1.25rem">API Key / 环境</h2>
-        <ul id="settingsList" class="settings-list"></ul>
-        <p class="hint-block" id="larkCliStatus"></p>
-        <p class="hint-block" id="settingsNote"></p>
-      </section>
+          <p class="section-title" id="envHeading">环境</p>
+          <p class="panel-lead">只显示是否已配置。密钥的原文不会出现在这张表里。</p>
+          <ul id="settingsList" class="settings-list">
+            <li class="settings-pending">正在读取 .env…</li>
+          </ul>
+          <p class="hint-block" id="larkCliStatus"></p>
+          <p class="hint-block" id="settingsNote"></p>
+        </div>
+      </aside>
     </div>
   </div>
-  <button type="button" class="theme-toggle" id="themeToggle" aria-label="切换主题">夜晚</button>
+  <wa-button id="themeToggle" class="theme-fab" appearance="filled" variant="neutral" size="s" aria-label="切换浅色与深色主题">夜晚</wa-button>
   <script src="/static/config.js"></script>
 </body>
 </html>

@@ -4,7 +4,10 @@ import json
 
 from fastapi.testclient import TestClient
 
-from auto_studio.hitl.feishu_cards import build_gate_interactive_card
+from auto_studio.hitl.feishu_cards import (
+    build_gate_interactive_card,
+    build_pm_clarification_interactive_card,
+)
 from auto_studio.hitl.feishu_inbound import (
     parse_card_action_trigger,
     url_verification_response,
@@ -26,6 +29,29 @@ def test_parse_card_action():
         "action_value": '{"thread_id":"t1","gate_decision":"approved"}',
     }
     assert parse_card_action_trigger(event)["thread_id"] == "t1"
+    official = {
+        "action": {
+            "value": {
+                "thread_id": "t1",
+                "hitl_action": "gate",
+                "gate_decision": "rejected",
+            }
+        }
+    }
+    assert parse_card_action_trigger(official)["gate_decision"] == "rejected"
+
+
+def test_clarification_card_has_reply_input():
+    card = build_pm_clarification_interactive_card(
+        thread_id="tid",
+        summary="请确认范围",
+        questions=["预算上限？"],
+        web_url="http://127.0.0.1:8765/?thread_id=tid",
+    )
+    blob = str(card)
+    assert "pm_clarification" in blob
+    assert "reply" in blob
+    assert "thread_id=tid" in blob
 
 
 def test_gate_card_has_buttons():
@@ -38,6 +64,8 @@ def test_gate_card_has_buttons():
     assert card["schema"] == "2.0"
     body = str(card)
     assert "approved" in body and "rejected" in body
+    assert "需求确认" in body
+    assert "待批复 · 需求确认" in body
 
 
 def test_feishu_main_webhook_card_trigger():
@@ -67,6 +95,34 @@ def test_feishu_main_webhook_card_trigger():
     assert data.get("toast")
     r3 = client.get(f"/api/runs/{tid}")
     assert r3.json()["awaiting_human"]["gate_id"] == "gate_architecture_review"
+
+
+def test_feishu_clarification_form_webhook():
+    client = TestClient(app)
+    started = client.post(
+        "/api/runs",
+        json={"human_request": "clarify card", "scenario_key": "npu_operator"},
+    )
+    tid = started.json()["thread_id"]
+    opened = client.post(
+        f"/api/runs/{tid}/hitl/open",
+        json={"kind": "pm_clarification", "questions": ["预算？"], "summary": "请确认"},
+    )
+    assert opened.status_code == 200
+    body = {
+        "header": {"event_type": "card.action.trigger"},
+        "event": {
+            "action": {
+                "value": {"thread_id": tid, "hitl_action": "pm_clarification"},
+                "form_value": {"reply": "上限 2 人周"},
+            }
+        },
+    }
+    submitted = client.post("/api/webhooks/feishu", json=body)
+    assert submitted.status_code == 200
+    assert submitted.json()["ok"] is True
+    status = client.get(f"/api/runs/{tid}").json()
+    assert status["awaiting_human"] is None or status["awaiting_human"]["kind"] != "pm_clarification"
 
 
 def test_card_action_api_flow():

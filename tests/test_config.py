@@ -76,6 +76,18 @@ def test_web_app_design_track_enabled():
     assert ctx.skip_nodes == frozenset()
 
 
+def test_general_software_enables_design_track():
+    ctx = build_run_context(scenario_key="general_software")
+    assert ctx.feature_design_track_default() is True
+    assert ctx.skip_nodes == frozenset()
+
+
+def test_middleware_skips_design_nodes():
+    ctx = build_run_context(scenario_key="middleware")
+    assert ctx.feature_design_track_default() is False
+    assert {"ux_designer", "ui_designer", "visual_designer"} <= ctx.skip_nodes
+
+
 def test_project_inherits_scenario_from_project_yaml():
     ctx = build_run_context(project_id="_example")
     assert ctx.scenario_key == "npu_operator"

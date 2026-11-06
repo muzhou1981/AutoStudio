@@ -1,0 +1,10 @@
+id: npu_mul
+title: NPU Mul 算子基准任务
+scenario_key: npu_operator
+human_request: |
+  实现 float16 Mul 算子。验收标准：
+  AC-1 输入输出均为 float16。
+  AC-2 含可通过的单元测试。
+expect_acceptance_ids:
+  - AC-1
+  - AC-2

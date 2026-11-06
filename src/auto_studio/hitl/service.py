@@ -3,17 +3,42 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
 from langgraph.graph.state import CompiledStateGraph
 
+from auto_studio.backends.cost import (
+    begin_cost_log,
+    end_cost_log,
+    reset_project_id,
+    set_project_id,
+    take_cost_lines,
+)
+from auto_studio.config.context import ConfigError, build_run_context_from_state
 from auto_studio.hitl.constants import GATE_NODES, gate_summary
 from auto_studio.hitl.hitl_audit import audit_patch
 from auto_studio.hitl.pm_clarification import merge_clarification_reply
+from auto_studio.hitl.rail import build_rail
+from auto_studio.hitl.reading import human_reading
+from auto_studio.workspace.context import use_worktree
+from auto_studio.workspace.layout import (
+    prepare_run_layout,
+    resolve_target_root,
+    workspace_enabled,
+)
+from auto_studio.workspace.persist import persist_values
 
-RunPhase = Literal["running", "awaiting_human", "completed", "rejected"]
+RunPhase = Literal[
+    "running",
+    "awaiting_human",
+    "paused",
+    "completed",
+    "rejected",
+    "stopped",
+]
 HitlKind = Literal["gate", "pm_clarification", "escalation"]
 EscalationChoice = Literal["continue", "pause", "abort"]
 
@@ -40,6 +65,14 @@ class HitlError(ValueError):
     """HITL 状态或提交不合法。"""
 
 
+class StopPending(Exception):
+    """停止已记下，检查点尚未建立或图仍在执行。"""
+
+    def __init__(self, thread_id: str) -> None:
+        self.thread_id = thread_id
+        super().__init__(thread_id)
+
+
 class GraphRunService:
     """对单一已编译图提供启动、查询与 HITL 续跑。"""
 
@@ -52,6 +85,109 @@ class GraphRunService:
 
     def _config(self, thread_id: str) -> dict[str, Any]:
         return {"configurable": {"thread_id": thread_id}}
+
+    def _worktree_for(self, thread_id: str, payload: dict[str, Any] | None) -> str:
+        if payload and payload.get("workspace_path"):
+            return str(payload["workspace_path"])
+        try:
+            return str(self.status(thread_id).values.get("workspace_path") or "")
+        except HitlError:
+            return ""
+
+    def _invoke(self, thread_id: str, payload: dict[str, Any] | None) -> None:
+        from auto_studio.hitl.control import (
+            bind_thread,
+            enter_inflight,
+            is_pause_requested,
+            is_stop_requested,
+            leave_inflight,
+            unbind_thread,
+        )
+
+        token = bind_thread(thread_id)
+        already = enter_inflight(thread_id)
+        try:
+            if already:
+                self._stop_before_invoke(thread_id, payload)
+                return
+            try:
+                self._invoke_body(thread_id, payload)
+            except Exception:
+                if not is_stop_requested(thread_id) and not is_pause_requested(thread_id):
+                    raise
+        finally:
+            leave_inflight(thread_id)
+            unbind_thread(token)
+        if is_stop_requested(thread_id):
+            self._finish_stop(thread_id)
+        elif is_pause_requested(thread_id):
+            self._finish_pause(thread_id)
+
+    def _stop_before_invoke(self, thread_id: str, payload: dict[str, Any] | None) -> None:
+        try:
+            self.status(thread_id)
+        except HitlError:
+            if payload is None:
+                return
+            self._seed_stopped(thread_id, payload)
+            return
+        self._finish_stop(thread_id)
+
+    def _invoke_body(self, thread_id: str, payload: dict[str, Any] | None) -> None:
+        path = self._worktree_for(thread_id, payload)
+        project_id = ""
+        if payload and payload.get("project_id"):
+            project_id = str(payload["project_id"])
+        elif path or payload is None:
+            try:
+                project_id = str(self.status(thread_id).values.get("project_id") or "")
+            except HitlError:
+                project_id = ""
+        ctx = use_worktree(path) if path else nullcontext()
+        lock_root = None
+        if path:
+            from auto_studio.evolution.proposals import target_root_from_worktree
+
+            lock_root = target_root_from_worktree(path)
+        from auto_studio.workspace.policy import exclusive_write
+
+        write_lock = exclusive_write(lock_root) if lock_root is not None else nullcontext()
+        project_token = set_project_id(project_id)
+        cost_token = begin_cost_log()
+        try:
+            with write_lock, ctx:
+                self._graph.invoke(payload, self._config(thread_id))
+        finally:
+            lines = take_cost_lines()
+            end_cost_log(cost_token)
+            reset_project_id(project_token)
+        self._append_costs(thread_id, lines)
+
+    def _append_costs(self, thread_id: str, lines: list[str]) -> None:
+        if not lines:
+            return
+        try:
+            prior = str(self.status(thread_id).values.get("cost_ledger") or "")
+        except HitlError:
+            return
+        extra = [line for line in lines if line not in prior]
+        if not extra:
+            return
+        merged = (prior + "\n" + "\n".join(extra)).strip()
+        self._graph.update_state(self._config(thread_id), {"cost_ledger": merged})
+
+    def _done(self, thread_id: str) -> RunStatus:
+        st = self.status(thread_id)
+        if workspace_enabled():
+            run_dir = _run_dir_for(st.values, thread_id)
+            if run_dir is not None:
+                persist_values(
+                    run_dir=run_dir,
+                    thread_id=thread_id,
+                    phase=st.phase,
+                    values=st.values,
+                )
+        return st
 
     @staticmethod
     def _infer_awaiting(
@@ -86,8 +222,12 @@ class GraphRunService:
         values: dict[str, Any],
         awaiting: AwaitingHuman | None,
     ) -> RunPhase:
+        if values.get("run_stopped"):
+            return "stopped"
         if awaiting is not None:
             return "awaiting_human"
+        if values.get("run_paused"):
+            return "paused"
         if values.get("last_gate_decision") == "rejected" and not next_nodes:
             return "rejected"
         if not next_nodes:
@@ -118,16 +258,23 @@ class GraphRunService:
         scenario_key: str = "",
         project_id: str = "",
         thread_id: str | None = None,
+        run_name: str = "",
     ) -> RunStatus:
+        from auto_studio.hitl.run_name import assign_run_name, taken_names_for_project
+
         tid = thread_id or self.new_thread_id()
-        cfg = self._config(tid)
+        taken = taken_names_for_project(latest_run_records(self._graph), project_id)
         initial: dict[str, Any] = {
             "human_request": human_request,
             "scenario_key": scenario_key,
             "project_id": project_id,
+            "run_name": assign_run_name(project_id, run_name, taken),
         }
-        self._graph.invoke(initial, cfg)
-        return self.status(tid)
+        if workspace_enabled():
+            layout = prepare_run_layout(resolve_target_root(project_id), tid)
+            initial["workspace_path"] = str(layout.worktree)
+        self._invoke(tid, initial)
+        return self._done(tid)
 
     def advance_until_blocked(self, thread_id: str) -> RunStatus:
         cfg = self._config(thread_id)
@@ -141,8 +288,8 @@ class GraphRunService:
                 break
             if next_nodes[0] in GATE_NODES:
                 break
-            self._graph.invoke(None, cfg)
-        return self.status(thread_id)
+            self._invoke(thread_id, None)
+        return self._done(thread_id)
 
     def open_hitl(
         self,
@@ -153,7 +300,7 @@ class GraphRunService:
         summary: str = "",
     ) -> RunStatus:
         st = self.status(thread_id)
-        if st.phase == "completed" or st.phase == "rejected":
+        if st.phase in ("completed", "rejected", "stopped"):
             raise HitlError(f"Run 已结束（phase={st.phase}），无法打开 HITL")
         cfg = self._config(thread_id)
         patch: dict[str, Any] = {
@@ -163,7 +310,7 @@ class GraphRunService:
             "hitl_pending_since": datetime.now(UTC).isoformat(),
         }
         self._graph.update_state(cfg, patch)
-        return self.status(thread_id)
+        return self._done(thread_id)
 
     def _clear_pending_patch(self) -> dict[str, Any]:
         return {
@@ -206,8 +353,8 @@ class GraphRunService:
                 **audit,
             }
             self._graph.update_state(cfg, patch)
-            self._graph.invoke(None, cfg)
-            return self.status(thread_id)
+            self._invoke(thread_id, None)
+            return self._done(thread_id)
 
         if awaiting.kind == "pm_clarification":
             if not human_reply.strip():
@@ -229,8 +376,8 @@ class GraphRunService:
             snap = self._graph.get_state(cfg)
             if not snap.next:
                 self._graph.update_state(cfg, None, as_node="tester_testability")
-            self._graph.invoke(None, cfg)
-            return self.status(thread_id)
+            self._invoke(thread_id, None)
+            return self._done(thread_id)
 
         if awaiting.kind == "escalation":
             choice = escalation_choice
@@ -251,8 +398,8 @@ class GraphRunService:
                 snap = self._graph.get_state(cfg)
                 if not snap.next:
                     self._graph.update_state(cfg, None, as_node="developer")
-                self._graph.invoke(None, cfg)
-            return self.status(thread_id)
+                self._invoke(thread_id, None)
+            return self._done(thread_id)
 
         raise HitlError(f"未知 kind={awaiting.kind!r}")
 
@@ -280,12 +427,142 @@ class GraphRunService:
             channel="feishu",
         )
 
+    def stop(self, thread_id: str, *, channel: str = "web") -> RunStatus:
+        from auto_studio.hitl.control import (
+            cancel_active_runs,
+            clear_stop_request,
+            request_stop,
+        )
+
+        busy = request_stop(thread_id)
+        cancel_active_runs(thread_id)
+        if busy:
+            try:
+                return self.status(thread_id)
+            except HitlError as exc:
+                raise StopPending(thread_id) from exc
+        try:
+            st = self.status(thread_id)
+        except HitlError as exc:
+            raise StopPending(thread_id) from exc
+        if st.phase in ("completed", "rejected"):
+            clear_stop_request(thread_id)
+            raise HitlError(f"Run 已结束（phase={st.phase}），无法停止")
+        if st.phase == "stopped":
+            clear_stop_request(thread_id)
+            return st
+        return self._finish_stop(thread_id, channel=channel)
+
+    def pause(self, thread_id: str) -> RunStatus:
+        """暂停本轮。不结束检查点，已完成的节点保持完成。"""
+        from auto_studio.hitl.control import request_pause
+
+        st = self.status(thread_id)
+        if st.phase == "paused":
+            return st
+        if st.phase != "running":
+            raise HitlError(f"当前阶段是{st.phase}，不能暂停")
+        busy = request_pause(thread_id)
+        if busy:
+            return self.status(thread_id)
+        return self._finish_pause(thread_id)
+
+    def resume(self, thread_id: str) -> RunStatus:
+        """从暂停的节点继续，不重做已完成节点。"""
+        from auto_studio.hitl.control import clear_pause_request
+
+        st = self.status(thread_id)
+        if st.phase != "paused":
+            raise HitlError(f"当前阶段是{st.phase}，不能继续")
+        clear_pause_request(thread_id)
+        self._graph.update_state(
+            self._config(thread_id),
+            {"run_paused": False, "paused_at": ""},
+        )
+        self._invoke(thread_id, None)
+        return self._done(thread_id)
+
+    def _finish_pause(self, thread_id: str) -> RunStatus:
+        from auto_studio.hitl.control import clear_pause_request
+
+        try:
+            st = self.status(thread_id)
+        except HitlError:
+            clear_pause_request(thread_id)
+            raise
+        if st.phase != "running":
+            clear_pause_request(thread_id)
+            return st
+        paused_at = st.next_nodes[0] if st.next_nodes else str(_rail_for(st).get("current") or "")
+        self._graph.update_state(
+            self._config(thread_id),
+            {"run_paused": True, "paused_at": paused_at},
+        )
+        clear_pause_request(thread_id)
+        return self._done(thread_id)
+
+    def _seed_stopped(self, thread_id: str, payload: dict[str, Any]) -> None:
+        from langgraph.graph import END
+
+        from auto_studio.hitl.control import clear_stop_request
+
+        values = dict(payload)
+        values["run_stopped"] = True
+        values["stopped_at"] = ""
+        cfg = self._config(thread_id)
+        self._graph.update_state(cfg, values, as_node="__start__")
+        self._graph.update_state(cfg, None, as_node=END)
+        clear_stop_request(thread_id)
+
+    def _finish_stop(self, thread_id: str, *, channel: str = "web") -> RunStatus:
+        from langgraph.graph import END
+
+        from auto_studio.hitl.control import clear_pause_request, clear_stop_request
+
+        try:
+            st = self.status(thread_id)
+        except HitlError:
+            self._seed_stopped(thread_id, {})
+            clear_pause_request(thread_id)
+            return self.status(thread_id)
+        if st.phase in ("completed", "rejected", "stopped"):
+            clear_stop_request(thread_id)
+            clear_pause_request(thread_id)
+            return st
+        stopped_at = str(_rail_for(st).get("current") or "")
+        as_node = "project_manager_draft"
+        for name in st.next_nodes:
+            if name in self._graph.nodes:
+                as_node = name
+                break
+        patch: dict[str, Any] = {
+            "run_stopped": True,
+            "run_paused": False,
+            "stopped_at": stopped_at,
+            **self._clear_pending_patch(),
+            **audit_patch(
+                st.values,
+                channel=channel,
+                kind="stop",
+                thread_id=thread_id,
+                summary="停止本轮",
+            ),
+        }
+        cfg = self._config(thread_id)
+        self._graph.update_state(cfg, patch, as_node=as_node)
+        self._graph.update_state(cfg, None, as_node=END)
+        clear_stop_request(thread_id)
+        clear_pause_request(thread_id)
+        return self._done(thread_id)
+
     def status_dict(self, thread_id: str) -> dict[str, Any]:
         st = self.status(thread_id)
         ah = st.awaiting_human
         return {
             "thread_id": st.thread_id,
             "phase": st.phase,
+            "stop_requested": _stop_requested(st.thread_id),
+            "pause_requested": _pause_requested(st.thread_id),
             "next_nodes": list(st.next_nodes),
             "awaiting_human": (
                 {
@@ -299,7 +576,93 @@ class GraphRunService:
                 else None
             ),
             "values": _public_values(st.values),
+            "rail": _rail_for(st),
+            "reading": human_reading(
+                {
+                    "kind": ah.kind,
+                    "gate_id": ah.gate_id,
+                    "questions": ah.questions,
+                    "summary": ah.summary,
+                }
+                if ah
+                else None,
+                st.values,
+            ),
         }
+
+
+def _stop_requested(thread_id: str) -> bool:
+    from auto_studio.hitl.control import is_stop_requested
+
+    return is_stop_requested(thread_id)
+
+
+def _pause_requested(thread_id: str) -> bool:
+    from auto_studio.hitl.control import is_pause_requested
+
+    return is_pause_requested(thread_id)
+
+
+def _rail_for(st: RunStatus) -> dict[str, Any]:
+    values = st.values or {}
+    skip: set[str] | None = None
+    if str(values.get("scenario_key") or "").strip() or str(values.get("project_id") or "").strip():
+        try:
+            ctx = build_run_context_from_state(values)
+            skip = set(ctx.skip_nodes)
+        except ConfigError:
+            skip = None
+    awaiting = None
+    if st.awaiting_human is not None:
+        ah = st.awaiting_human
+        awaiting = {
+            "kind": ah.kind,
+            "gate_id": ah.gate_id,
+            "summary": ah.summary,
+        }
+    return build_rail(
+        phase=st.phase,
+        next_nodes=st.next_nodes,
+        awaiting=awaiting,
+        skip_nodes=skip,
+        baseline_log=str(values.get("baseline_log") or ""),
+        stopped_at=str(values.get("stopped_at") or ""),
+        paused_at=str(values.get("paused_at") or ""),
+    )
+
+
+def _run_dir_for(values: dict[str, Any], thread_id: str):
+    from pathlib import Path
+
+    worktree = str(values.get("workspace_path") or "").strip()
+    if not worktree:
+        return None
+    # 工作树在 <target>/.auto_studio/worktrees/<thread_id>
+    dot = Path(worktree).parent.parent
+    if dot.name != ".auto_studio":
+        return None
+    return dot / "runs" / thread_id
+
+
+def latest_run_records(graph) -> list[tuple[str, dict[str, Any]]]:
+    """每个 thread 只取最新检查点，用来给同一项目递增 Run 序号。"""
+    saver = getattr(graph, "checkpointer", None)
+    if saver is None:
+        return []
+    seen: set[str] = set()
+    records: list[tuple[str, dict[str, Any]]] = []
+    for item in saver.list(None):
+        configurable = (item.config or {}).get("configurable") or {}
+        thread_id = str(configurable.get("thread_id") or "")
+        namespace = str(configurable.get("checkpoint_ns") or "")
+        if not thread_id or namespace or thread_id in seen:
+            continue
+        values = (item.checkpoint or {}).get("channel_values") or {}
+        if not isinstance(values, dict):
+            continue
+        seen.add(thread_id)
+        records.append((thread_id, values))
+    return records
 
 
 def _public_values(values: dict[str, Any]) -> dict[str, Any]:
