@@ -75,7 +75,20 @@
                 <wa-icon name="check" library="system"></wa-icon>
                 <span>待办</span>
               </a>
-              <div class="run-list-item sidebar-sub" id="sidebarThread">
+              <label class="run-filter sidebar-sub">
+                <span>阶段</span>
+                <select id="runPhaseFilter" aria-label="按阶段筛选运行">
+                  <option value="">全部</option>
+                  <option value="running">运行中</option>
+                  <option value="paused">已暂停</option>
+                  <option value="awaiting_human">等待人工</option>
+                  <option value="completed">已完成</option>
+                  <option value="rejected">已驳回</option>
+                  <option value="stopped">已停止</option>
+                </select>
+              </label>
+              <div id="runList" class="run-list"></div>
+              <div class="run-list-item sidebar-sub" id="sidebarThread" hidden>
                 <wa-icon name="circle" library="system"></wa-icon>
                 <span id="sidebarThreadLabel">尚未绑定</span>
               </div>
@@ -109,6 +122,7 @@
             </div>
           </div>
         </nav>
+        <div id="sidebarResize" class="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="拖动调整侧栏宽度" tabindex="0"></div>
       </aside>
 
       <div class="app-view" data-route="hitl">
@@ -173,6 +187,7 @@
       </main>
 
       <aside class="workspace-inspect" aria-label="运行检视">
+        <div class="inspect-resize" role="separator" aria-orientation="vertical" aria-label="拖动调整检视栏宽度" tabindex="0"></div>
         <div class="inspect-head">
           <h2 id="inspectTitle">运行检视</h2>
           <wa-badge id="phasePill" variant="neutral" appearance="accent" pill data-phase="idle" aria-live="polite">
@@ -210,18 +225,12 @@
               </div>
             </div>
             <div id="projectFields">
-              <div class="field-row">
-                <div>
-                  <wa-input id="fieldTitle" label="标题"></wa-input>
-                </div>
-                <div>
-                  <wa-input id="fieldRetries" label="开发重试上限" hint="空则沿用场景" type="number" min="0" step="1" inputmode="numeric"></wa-input>
-                </div>
-              </div>
+              <wa-input id="fieldTitle" label="标题"></wa-input>
               <wa-input id="fieldDescription" label="说明"></wa-input>
               <wa-input id="fieldWorkspace" label="工作区" hint="待开发项目的 git 目录，可空" placeholder="/path/to/repo" spellcheck="false"></wa-input>
               <p class="hint-block" id="workspaceHint"></p>
               <wa-input id="fieldProfile" label="流程配置名" hint="profile_id，可空" spellcheck="false"></wa-input>
+              <wa-input id="fieldRetries" label="开发重试上限" hint="空则沿用场景" type="number" min="0" step="1" inputmode="numeric"></wa-input>
             </div>
             <wa-details class="raw" summary="原文 project.yaml">
               <wa-textarea id="projectYaml" label="整份 YAML" rows="12" spellcheck="false" placeholder="先选择项目，或新建一个。"></wa-textarea>
@@ -307,6 +316,7 @@
       </main>
 
       <aside class="workspace-inspect" aria-label="场景与环境">
+        <div class="inspect-resize" role="separator" aria-orientation="vertical" aria-label="拖动调整检视栏宽度" tabindex="0"></div>
         <div class="inspect-head config-pane-scenario">
           <h2 id="scenarioHeading">场景</h2>
         </div>
@@ -352,6 +362,65 @@
       rejected: "danger",
       stopped: "neutral",
     };
+
+    const PHASE_ICON = {
+      idle: "circle",
+      paused: "pause",
+      completed: "check",
+      rejected: "circle-xmark",
+    };
+
+    function phaseMark(phase) {
+      const key = phase || "";
+      if (key === "running" || key === "stopped" || key === "awaiting_human") {
+        const wrap = document.createElement("span");
+        wrap.className = "run-phase run-phase-svg" + (key === "running" ? " is-spin" : "");
+        wrap.dataset.phase = key;
+        wrap.setAttribute("aria-hidden", "true");
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 16 16");
+        svg.setAttribute("focusable", "false");
+        if (key === "running") {
+          const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          ring.setAttribute("cx", "8");
+          ring.setAttribute("cy", "8");
+          ring.setAttribute("r", "5.2");
+          ring.setAttribute("fill", "none");
+          ring.setAttribute("stroke", "currentColor");
+          ring.setAttribute("stroke-width", "2");
+          ring.setAttribute("stroke-linecap", "round");
+          ring.setAttribute("stroke-dasharray", "10 23");
+          svg.appendChild(ring);
+        } else if (key === "awaiting_human") {
+          const mark = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          mark.setAttribute("fill", "currentColor");
+          mark.setAttribute("fill-rule", "evenodd");
+          mark.setAttribute(
+            "d",
+            "M8 1.5 14.8 14.5H1.2Z M7.2 5.6h1.6v4.1H7.2Z M7.1 12.15a.9.9 0 1 1 1.8 0 .9.9 0 1 1-1.8 0Z",
+          );
+          svg.appendChild(mark);
+        } else {
+          const box = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          box.setAttribute("x", "3.4");
+          box.setAttribute("y", "3.4");
+          box.setAttribute("width", "9.2");
+          box.setAttribute("height", "9.2");
+          box.setAttribute("rx", "1.5");
+          box.setAttribute("fill", "currentColor");
+          svg.appendChild(box);
+        }
+        wrap.appendChild(svg);
+        return wrap;
+      }
+      const meta = document.createElement("wa-icon");
+      meta.className = "run-phase";
+      meta.setAttribute("name", PHASE_ICON[key] || "circle");
+      meta.setAttribute("library", "system");
+      meta.dataset.phase = key;
+      meta.setAttribute("aria-hidden", "true");
+      return meta;
+    }
 
     function setPhase(phase) {
       const p = phase || "idle";
@@ -412,6 +481,113 @@
       if (projectId) $("project").value = projectId;
     }
 
+    function clearCurrentRun() {
+      stopPoll();
+      $("thread").value = "";
+      syncUrlThread("");
+      syncThreadChrome("");
+      applyBoundRunName(null);
+      if ($("runName")) $("runName").disabled = false;
+      syncStartButton("idle");
+      syncStopButton("idle");
+      renderInspect(null);
+      loadIdleRail();
+    }
+
+    function armDelete(row, item) {
+      const label = item.run_name || item.thread_id;
+      const box = row.parentElement;
+      if (box) box.querySelectorAll(".run-confirm").forEach((el) => el.remove());
+      const panel = document.createElement("div");
+      panel.className = "run-confirm";
+      const text = document.createElement("p");
+      text.textContent = "删除「" + label + "」？这一轮记录不能恢复，目标仓库里的文件会保留。";
+      const ok = document.createElement("button");
+      ok.type = "button";
+      ok.className = "run-delete-confirm";
+      ok.textContent = "确认删除";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "run-delete-cancel";
+      cancel.textContent = "取消";
+      cancel.addEventListener("click", () => panel.remove());
+      ok.addEventListener("click", async () => {
+        ok.disabled = true;
+        const r = await fetch("/api/runs/" + encodeURIComponent(item.thread_id) + "/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm_name: label }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          text.textContent = data.detail || "没有删除。";
+          ok.disabled = false;
+          return;
+        }
+        if ($("thread").value.trim() === item.thread_id) clearCurrentRun();
+        await loadRunList();
+      });
+      panel.append(text, ok, cancel);
+      row.after(panel);
+    }
+
+    async function loadRunList() {
+      const box = $("runList");
+      if (!box) return;
+      const phase = $("runPhaseFilter") ? $("runPhaseFilter").value : "";
+      const q = new URLSearchParams();
+      if (phase) q.set("phase", phase);
+      try {
+        const r = await fetch("/api/runs?" + q.toString());
+        const data = await r.json();
+        box.replaceChildren();
+        const runs = (r.ok && data.runs) || [];
+        if (!runs.length) {
+          const empty = document.createElement("p");
+          empty.className = "hint-block sidebar-sub";
+          empty.textContent = "还没有运行。";
+          box.appendChild(empty);
+          return;
+        }
+        const current = $("thread").value.trim();
+        for (const item of runs) {
+          const label = item.run_name || item.thread_id;
+          const row = document.createElement("div");
+          row.className = "run-row";
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "run-open" + (item.thread_id === current ? " is-current" : "");
+          const phaseLabel = PHASE_LABELS[item.phase] || item.phase;
+          const name = document.createElement("span");
+          name.className = "run-name";
+          name.textContent = label;
+          const meta = phaseMark(item.phase);
+          const phaseText = document.createElement("span");
+          phaseText.className = "run-phase-label";
+          phaseText.textContent = phaseLabel;
+          btn.title = label + " · " + phaseLabel;
+          btn.append(name, meta, phaseText);
+          btn.addEventListener("click", () => {
+            $("thread").value = item.thread_id;
+            syncUrlThread(item.thread_id);
+            refresh();
+          });
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "run-delete";
+          del.setAttribute("aria-label", "删除");
+          del.title = "删除「" + label + "」";
+          del.innerHTML = '<svg class="run-delete-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M6.1 1.8h3.8l.35 1.15H13.2v1.25H2.8V2.95h2.95L6.1 1.8zM4.15 5.2h7.7l-.62 8.15c-.04.45-.42.8-.87.8H5.64c-.45 0-.83-.35-.87-.8L4.15 5.2zM6.55 6.7v5.15h1.2V6.7H6.55zm2.7 0v5.15h1.2V6.7H9.25z"/></svg>';
+          del.addEventListener("click", (event) => {
+            event.stopPropagation();
+            armDelete(row, item);
+          });
+          row.append(btn, del);
+          box.appendChild(row);
+        }
+      } catch (_) { /* 列表读不到时仍可按地址栏打开一轮 */ }
+    }
+
     async function fillRunNameSuggestion() {
       const input = $("runName");
       if (!input || $("thread").value.trim() || runNameTouched) return;
@@ -448,6 +624,11 @@
     function stopPoll() {
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = null;
+      if (pushSource) {
+        pushSource.close();
+        pushSource = null;
+        pushThread = "";
+      }
     }
 
     function currentCell(rail) {
@@ -590,13 +771,6 @@
       if (rail && cell.id === rail.current && data.awaiting_human && data.awaiting_human.summary) {
         rows.push(["摘要", data.awaiting_human.summary, false]);
       }
-      for (const key of cell.artifacts || []) {
-        if (vals[key]) rows.push([key, String(vals[key]).slice(0, 400), true]);
-      }
-      if (cell.role && vals.cost_ledger) {
-        const lines = String(vals.cost_ledger).split("\n").filter((line) => line.includes("role=" + cell.role));
-        if (lines.length) rows.push(["成本", lines.slice(-3).join("\n"), true]);
-      }
       if (cell.id === "qa" && vals.qa_status) rows.push(["QA", vals.qa_status, false]);
       const dl = document.createElement("dl");
       dl.className = "status-dl";
@@ -611,7 +785,37 @@
         row.append(dt, dd);
         dl.appendChild(row);
       }
-      box.replaceChildren(dl);
+      const artifactLines = [];
+      for (const key of cell.artifacts || []) {
+        if (vals[key]) artifactLines.push(key + "\n" + String(vals[key]).slice(0, 400));
+      }
+      const costLines = String(vals.cost_ledger || "").split("\n").filter((line) => {
+        if (!line.trim()) return false;
+        return !cell.role || line.includes("role=" + cell.role);
+      });
+      const used = Number(vals.dev_retry_count || 0);
+      const limit = data.limits && Number(data.limits.max_dev_retries);
+      const retryText = Number.isFinite(limit)
+        ? "已用 " + used + " / 上限 " + limit + (used >= limit ? "。已碰到开发重试上限。" : "。未碰到开发重试上限。")
+        : "已用 " + used + "。";
+      box.replaceChildren(
+        dl,
+        inspectSection("产物", artifactLines.length ? artifactLines.join("\n\n") : "这一步还没有产物。"),
+        inspectSection("调用次数", costLines.length ? String(costLines.length) + " 次\n" + costLines.slice(-3).join("\n") : "0 次"),
+        inspectSection("开发重试", retryText)
+      );
+    }
+
+    function inspectSection(title, body) {
+      const section = document.createElement("section");
+      section.className = "inspect-block";
+      const h = document.createElement("h3");
+      h.textContent = title;
+      const p = document.createElement("p");
+      p.className = "mono";
+      p.textContent = body;
+      section.append(h, p);
+      return section;
     }
 
     function applyStatus(data) {
@@ -753,11 +957,69 @@
       syncPauseButton(phase);
     }
 
+    let pushSource = null;
+    let pushThread = "";
+
+    function ingestStatus(data) {
+      $("out").textContent = JSON.stringify(data, null, 2);
+      showError($("startError"), "");
+      applyStatus(data);
+      applyBoundRunName(data);
+      syncThreadChrome($("thread").value.trim(), data.values && data.values.run_name);
+      syncStartButton(data.phase);
+      syncStopButton(data.phase);
+      const ah = data.awaiting_human;
+      $("btnSubmit").disabled = data.phase !== "awaiting_human";
+      if (ah) {
+        $("banner").hidden = false;
+        $("gateIdleHint").hidden = true;
+        $("bannerText").textContent = ah.summary || "等待人工处理";
+        const current = data.rail && data.rail.cells.find((cell) => cell.id === data.rail.current);
+        $("bannerGate").textContent = current ? current.label : "";
+        applyHitlFormMode(ah);
+        renderReading(data.reading);
+      } else {
+        $("banner").hidden = true;
+        $("gateIdleHint").hidden = data.phase === "awaiting_human";
+        if (data.phase === "completed") {
+          $("gateIdleHint").hidden = false;
+          $("gateIdleHint").textContent = "这一轮已结束。右侧是最后一步的产物。";
+        } else if (data.phase === "rejected") {
+          $("gateIdleHint").hidden = false;
+          $("gateIdleHint").textContent = "这一轮已驳回。";
+        } else if (data.phase === "stopped") {
+          $("gateIdleHint").hidden = false;
+          $("gateIdleHint").textContent = "这一轮已停止。";
+        } else {
+          $("gateIdleHint").textContent = "本轮还没有待办。启动后，关卡、澄清或升级会停在这里。";
+        }
+        applyHitlFormMode(null);
+        renderReading([]);
+      }
+      armPoll(data.phase);
+      loadRunList();
+    }
+
     function armPoll(phase) {
+      const tid = $("thread").value.trim();
+      const live = (phase === "running" || phase === "awaiting_human") && !document.hidden && !!tid;
+      if (!live) {
+        stopPoll();
+        return;
+      }
+      if (pushSource && pushThread === tid) return;
       stopPoll();
-      if (document.hidden) return;
-      if (phase !== "running" && phase !== "awaiting_human") return;
-      pollTimer = setInterval(() => { refresh({ quiet: true }); }, 2000);
+      if (typeof EventSource !== "function") {
+        pollTimer = setInterval(() => { refresh({ quiet: true }); }, 2000);
+        return;
+      }
+      pushThread = tid;
+      pushSource = new EventSource("/api/runs/" + encodeURIComponent(tid) + "/events");
+      pushSource.addEventListener("status", (ev) => {
+        try { ingestStatus(JSON.parse(ev.data)); } catch (_) { /* 忽略坏帧 */ }
+      });
+      pushSource.addEventListener("end", () => { stopPoll(); });
+      pushSource.onerror = () => { stopPoll(); };
     }
 
     async function refresh(opts) {
@@ -778,6 +1040,7 @@
         syncStartButton("idle");
         syncStopButton("idle");
         await loadIdleRail();
+        await loadRunList();
         refreshing = false;
         return;
       }
@@ -838,6 +1101,7 @@
           renderReading([]);
         }
         armPoll(data.phase);
+        await loadRunList();
       } catch (err) {
         showError($("startError"), "读不到这一轮的状态。检查服务是否还在，然后刷新。");
       } finally {
@@ -1058,6 +1322,10 @@
       else if ($("thread").value.trim()) refresh({ quiet: true });
     });
 
+    if ($("runPhaseFilter")) {
+      $("runPhaseFilter").addEventListener("change", () => { loadRunList(); });
+    }
+
     $("project").addEventListener("change", () => {
       syncRunScenarioHint();
       if (!$("thread").value.trim()) {
@@ -1080,7 +1348,114 @@
           refresh();
         } else {
           loadIdleRail();
+          loadRunList();
         }
+      });
+    })();
+
+    (function initSidebarResize() {
+      const handle = $("sidebarResize");
+      const sidebar = document.querySelector(".sidebar");
+      if (!handle || !sidebar) return;
+      const key = "auto_studio_sidebar_w";
+      const saved = localStorage.getItem(key);
+      if (saved) document.documentElement.style.setProperty("--sidebar-w", saved);
+
+      function widthPx() {
+        return sidebar.getBoundingClientRect().width;
+      }
+
+      function applyWidth(px) {
+        const max = Math.max(280, Math.min(window.innerWidth * 0.46, 560));
+        const next = Math.round(Math.min(Math.max(px, 200), max));
+        document.documentElement.style.setProperty("--sidebar-w", next + "px");
+        return next;
+      }
+
+      handle.addEventListener("pointerdown", (event) => {
+        if (window.innerWidth < 900) return;
+        event.preventDefault();
+        handle.classList.add("is-dragging");
+        try { handle.setPointerCapture(event.pointerId); } catch (_) { /* 非真实指针时仍按移动事件调整 */ }
+        const originX = event.clientX;
+        const originW = widthPx();
+        function move(ev) {
+          applyWidth(originW + ev.clientX - originX);
+        }
+        function end(ev) {
+          handle.classList.remove("is-dragging");
+          try { handle.releasePointerCapture(ev.pointerId); } catch (_) { /* 未捕获指针 */ }
+          localStorage.setItem(key, widthPx() + "px");
+          handle.removeEventListener("pointermove", move);
+          handle.removeEventListener("pointerup", end);
+          handle.removeEventListener("pointercancel", end);
+        }
+        handle.addEventListener("pointermove", move);
+        handle.addEventListener("pointerup", end);
+        handle.addEventListener("pointercancel", end);
+      });
+
+      handle.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        const delta = event.key === "ArrowRight" ? 16 : -16;
+        const next = applyWidth(widthPx() + delta);
+        localStorage.setItem(key, next + "px");
+      });
+    })();
+
+    (function initInspectResize() {
+      const handles = document.querySelectorAll(".inspect-resize");
+      if (!handles.length) return;
+      const key = "auto_studio_inspect_w";
+      const saved = localStorage.getItem(key);
+      if (saved) document.documentElement.style.setProperty("--inspect-w", saved);
+
+      function paneOf(handle) {
+        return handle.closest(".workspace-inspect");
+      }
+
+      function applyWidth(px) {
+        const max = Math.max(320, Math.min(window.innerWidth * 0.5, 640));
+        const next = Math.round(Math.min(Math.max(px, 220), max));
+        document.documentElement.style.setProperty("--inspect-w", next + "px");
+        return next;
+      }
+
+      handles.forEach((handle) => {
+        handle.addEventListener("pointerdown", (event) => {
+          const pane = paneOf(handle);
+          if (!pane || window.innerWidth < 900 || getComputedStyle(pane).display === "none") return;
+          event.preventDefault();
+          handle.classList.add("is-dragging");
+          try { handle.setPointerCapture(event.pointerId); } catch (_) { /* 非真实指针时仍按移动事件调整 */ }
+          const originX = event.clientX;
+          const originW = pane.getBoundingClientRect().width;
+          function move(ev) {
+            applyWidth(originW + originX - ev.clientX);
+          }
+          function end(ev) {
+            handle.classList.remove("is-dragging");
+            try { handle.releasePointerCapture(ev.pointerId); } catch (_) { /* 未捕获指针 */ }
+            localStorage.setItem(key, applyWidth(pane.getBoundingClientRect().width) + "px");
+            handle.removeEventListener("pointermove", move);
+            handle.removeEventListener("pointerup", end);
+            handle.removeEventListener("pointercancel", end);
+          }
+          handle.addEventListener("pointermove", move);
+          handle.addEventListener("pointerup", end);
+          handle.addEventListener("pointercancel", end);
+        });
+
+        handle.addEventListener("keydown", (event) => {
+          const pane = paneOf(handle);
+          if (!pane || event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          if (getComputedStyle(pane).display === "none") return;
+          event.preventDefault();
+          const delta = event.key === "ArrowLeft" ? 16 : -16;
+          const next = applyWidth(pane.getBoundingClientRect().width + delta);
+          localStorage.setItem(key, next + "px");
+        });
       });
     })();
 

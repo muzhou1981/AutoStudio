@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -37,6 +37,10 @@ class StartRunBody(BaseModel):
     project_id: str = ""
     thread_id: str | None = None
     run_name: str = ""
+
+
+class DeleteRunBody(BaseModel):
+    confirm_name: str = ""
 
 
 class HitlSubmitBody(BaseModel):
@@ -74,6 +78,11 @@ def api_rail(scenario_key: str = "", project_id: str = "") -> dict:
     return build_rail(phase="idle", next_nodes=[], awaiting=None, skip_nodes=skip)
 
 
+@app.get("/api/runs")
+def api_list_runs(project_id: str = "", phase: str = "") -> dict:
+    return {"runs": _run_service.list_runs(project_id=project_id, phase=phase)}
+
+
 @app.get("/api/runs/next-name")
 def api_next_run_name(project_id: str = "") -> dict:
     """新建 Run 时的默认名称：项目标识加递增序号。"""
@@ -101,6 +110,46 @@ def api_start_run(body: StartRunBody) -> dict:
         raise HTTPException(status_code=400, detail=str(e)) from e
     notify_awaiting_human_via_lark_cli(_run_service, st.thread_id, body.project_id)
     return _run_service.status_dict(st.thread_id)
+
+
+@app.post("/api/runs/{thread_id}/delete")
+def api_delete_run(thread_id: str, body: DeleteRunBody) -> dict:
+    try:
+        _run_service.delete_run(thread_id, confirm_name=body.confirm_name)
+    except HitlError as e:
+        missing = "未知" in str(e)
+        raise HTTPException(status_code=404 if missing else 409, detail=str(e)) from e
+    return {"deleted": True, "thread_id": thread_id}
+
+
+@app.get("/api/runs/{thread_id}/events")
+def api_run_events(thread_id: str, once: int = 0):
+    """运行中或等待人工时推送状态。其他阶段推送当前一帧后结束。"""
+    import json
+    import time
+
+    def generate():
+        previous = ""
+        while True:
+            try:
+                data = _run_service.status_dict(thread_id)
+            except HitlError:
+                yield "event: end\ndata: {}\n\n"
+                return
+            payload = json.dumps(data, ensure_ascii=False, default=str)
+            if payload != previous:
+                yield f"event: status\ndata: {payload}\n\n"
+                previous = payload
+            if once or data.get("phase") not in ("running", "awaiting_human"):
+                yield "event: end\ndata: {}\n\n"
+                return
+            time.sleep(0.4)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/runs/{thread_id}")

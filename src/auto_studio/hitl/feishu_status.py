@@ -49,13 +49,16 @@ def _current_label(rail: dict) -> str:
     return "无"
 
 
-def _todo_line(awaiting: dict | None, current_label: str) -> str:
+def _todo_line(awaiting: dict | None, current_label: str, *, timed_out: bool = False) -> str:
     if not awaiting:
         return "无"
     kind = str(awaiting.get("kind") or "")
     name = current_label if current_label and current_label != "无" else "当前节点"
     if kind == "gate":
-        return f"待批复 · {name}"
+        line = f"待批复 · {name}"
+        if timed_out:
+            return f"{line}（超时未批复）"
+        return line
     if kind == "pm_clarification":
         return f"待澄清 · {name}"
     if kind == "escalation":
@@ -71,7 +74,7 @@ def status_lines_for_thread(service: GraphRunService, thread_id: str, web_url: s
     lines = [
         f"阶段：{_PHASE_LABEL.get(phase, phase or '未启动')}",
         f"当前：{current}",
-        f"待办：{_todo_line(data.get('awaiting_human'), current)}",
+        f"待办：{_todo_line(data.get('awaiting_human'), current, timed_out=bool((data.get('values') or {}).get('gate_timeout_recorded')))}",
     ]
     if web_url:
         lines.append(f"打开：{web_url}")

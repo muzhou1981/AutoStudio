@@ -130,6 +130,9 @@ class RunContext:
     def feature_design_track_default(self) -> bool:
         return bool(_features(self.workflow).get("design_track", False))
 
+    def feature_finance(self) -> bool:
+        return bool(_features(self.workflow).get("finance", False))
+
     def is_node_enabled(self, node_name: str) -> bool:
         return node_name not in self.skip_nodes
 

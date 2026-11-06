@@ -1,8 +1,12 @@
-"""default 工作流图中可裁剪的节点名（与 default.py 当前注册名一致）。
+"""default 工作流图中可裁剪的节点名（与 default.py 当前注册名一致）。"""
 
-财务三个节点暂未注册。函数保留在 workflows/default.py 的
-_FINANCE_NODES_RESERVED，接回图之后再加入本集合。
-"""
+FINANCE_NODES = frozenset(
+    {
+        "finance_budget_rough",
+        "finance_budget_final",
+        "finance_cost_snapshot",
+    }
+)
 
 DEFAULT_GRAPH_NODES = frozenset(
     {
@@ -26,5 +30,6 @@ DEFAULT_GRAPH_NODES = frozenset(
         "config_manager_closeout",
         "process_owner_retro",
         "escalate_dev_retry",
+        *FINANCE_NODES,
     }
 )

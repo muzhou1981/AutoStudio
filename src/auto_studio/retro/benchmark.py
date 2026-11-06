@@ -34,7 +34,13 @@ def score_values(values: dict[str, Any], expected: list[str]) -> dict[str, Any]:
     }
 
 
-def run_task(path: Path, *, test_command: str = "", max_steps: int = 12) -> dict[str, Any]:
+def run_task(
+    path: Path,
+    *,
+    test_command: str = "",
+    workspace_path: str = "",
+    max_steps: int = 12,
+) -> dict[str, Any]:
     task = load_task(path)
     expected = [str(item) for item in task.get("expect_acceptance_ids") or []]
     svc = GraphRunService(graph)
@@ -42,14 +48,14 @@ def run_task(path: Path, *, test_command: str = "", max_steps: int = 12) -> dict
         human_request=str(task.get("human_request") or "").strip(),
         scenario_key=str(task.get("scenario_key") or "npu_operator"),
     )
-    if test_command:
-        svc._graph.update_state(
-            svc._config(st.thread_id),
-            {
-                "test_command": test_command,
-                "requirement_spec": "\n".join(expected),
-            },
-        )
+    if test_command or workspace_path:
+        patch: dict[str, Any] = {}
+        if test_command:
+            patch["test_command"] = test_command
+            patch["requirement_spec"] = "\n".join(expected)
+        if workspace_path:
+            patch["workspace_path"] = workspace_path
+        svc._graph.update_state(svc._config(st.thread_id), patch)
     for _ in range(max_steps):
         st = svc.status(st.thread_id)
         if st.phase in ("completed", "rejected", "stopped"):

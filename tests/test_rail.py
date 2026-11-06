@@ -164,7 +164,10 @@ def test_started_run_rail_waits_at_requirement_gate():
     assert states["gate_requirement_confirm"] == "waiting"
     assert states["project_manager_draft"] == "done"
     assert states["ux_designer"] == "skipped"
-    assert rail["total"] == len(rail["cells"]) - 3
+    assert states["finance_budget_rough"] == "skipped"
+    assert states["finance_budget_final"] == "skipped"
+    assert states["finance_cost_snapshot"] == "skipped"
+    assert rail["total"] == len(rail["cells"]) - 6
 
 
 def test_idle_rail_is_all_pending_except_skips():

@@ -34,7 +34,10 @@ class FactoryState(TypedDict, total=False):
     scenario_key: str
     project_id: str
     run_name: str
+    config_snapshot_scenario: str
+    config_snapshot_project: str
     design_track_enabled: bool
+    finance_enabled: bool
     cost_ledger: str
     run_record: str
 
@@ -94,6 +97,9 @@ class FactoryState(TypedDict, total=False):
     hitl_questions: list[str]
     hitl_summary: str
     hitl_pending_since: str
+    awaiting_since: str
+    gate_timeout_recorded: bool
+    gate_timeout_note: str
     hitl_audit_log: str
     escalation_choice: str
     hitl_clarification_resolved: bool
@@ -264,11 +270,6 @@ def config_manager_plan(state: FactoryState) -> dict:
         ),
         "design_track_enabled": enabled,
     }
-
-
-# 财务三个节点的函数仍保留在本文件，当前图不注册、不连边。
-# 需要时把 finance_budget_rough / finance_budget_final / finance_cost_snapshot
-# 加回 nodes，并接在 project_manager_scope、gate_architecture_review、project_manager_delivery 之前。
 
 
 @skip_if_disabled("finance_budget_rough")
@@ -533,11 +534,6 @@ def config_manager_closeout(state: FactoryState) -> dict:
 def process_owner_retro(state: FactoryState) -> dict:
     from auto_studio.backends.runner import invoke_role
 
-    retro = invoke_role(
-        role_name="process_owner",
-        user_prompt="请产出 `retro_report`（Top3 问题与改进点）。",
-        stub_note="本轮复盘 Top3",
-    )
     proposals = invoke_role(
         role_name="process_owner",
         user_prompt="请产出 `process_proposals` 流程与角色改进提案。",
@@ -548,8 +544,10 @@ def process_owner_retro(state: FactoryState) -> dict:
 
     audit = str(state.get("hitl_audit_log") or state.get("run_record") or "").strip()
     run_record = audit or "[engine] 本轮无 HITL 审计条目"
-    costs = "\n".join(take_cost_lines())
-    card = scorecard(state)
+    prior_costs = str(state.get("cost_ledger") or "").strip()
+    fresh = [line for line in take_cost_lines() if line not in prior_costs]
+    costs = "\n".join(part for part in (prior_costs, "\n".join(fresh)) if part).strip()
+    card = scorecard({**state, "cost_ledger": costs})
     proposal_id = ""
     worktree = str(state.get("workspace_path") or "")
     if worktree:
@@ -560,7 +558,7 @@ def process_owner_retro(state: FactoryState) -> dict:
     if proposal_id:
         pending = f"{pending}\n提案编号：{proposal_id}"
     return {
-        "retro_report": f"{retro}\n\n{card}",
+        "retro_report": card,
         "process_proposals": proposals + "\n\n" + pending,
         "run_record": run_record,
         "cost_ledger": costs,
@@ -599,18 +597,43 @@ def route_after_test(state: FactoryState) -> str:
     return "qa"
 
 
+def _finance_enabled(state: FactoryState) -> bool:
+    if "finance_enabled" in state:
+        return bool(state.get("finance_enabled"))
+    ctx = _run_context_or_none(state)
+    if ctx is None:
+        return False
+    return ctx.feature_finance()
+
+
 def route_after_qa(state: FactoryState) -> str:
     if state.get("qa_status") == "fail":
         if state.get("dev_retry_count", 0) >= max_dev_retries_for_state(state):
             return "escalate_dev_retry"
         return "developer"
+    if _finance_enabled(state):
+        return "finance_cost_snapshot"
     return "project_manager_delivery"
 
 
 def route_after_config_plan(state: FactoryState) -> str:
     if state.get("design_track_enabled"):
         return "ux_designer"
+    if _finance_enabled(state):
+        return "finance_budget_rough"
     return "project_manager_scope"
+
+
+def route_after_visual(state: FactoryState) -> str:
+    if _finance_enabled(state):
+        return "finance_budget_rough"
+    return "project_manager_scope"
+
+
+def route_after_architect(state: FactoryState) -> str:
+    if _finance_enabled(state):
+        return "finance_budget_final"
+    return "gate_architecture_review"
 
 
 def _route_after_gate_rejected(state: FactoryState, on_approved: str) -> str:
@@ -674,14 +697,17 @@ def build_graph() -> StateGraph:
         "ux_designer": ux_designer,
         "ui_designer": ui_designer,
         "visual_designer": visual_designer,
+        "finance_budget_rough": finance_budget_rough,
         "config_manager_plan": config_manager_plan,
         "project_manager_scope": project_manager_scope,
         "architect": architect,
+        "finance_budget_final": finance_budget_final,
         "gate_architecture_review": gate_architecture_review,
         "developer": developer,
         "code_reviewer": code_reviewer,
         "tester_execute": tester_execute,
         "qa": qa,
+        "finance_cost_snapshot": finance_cost_snapshot,
         "project_manager_delivery": project_manager_delivery,
         "gate_final_delivery": gate_final_delivery,
         "config_manager_closeout": config_manager_closeout,
@@ -713,14 +739,31 @@ def build_graph() -> StateGraph:
         route_after_config_plan,
         {
             "ux_designer": "ux_designer",
+            "finance_budget_rough": "finance_budget_rough",
             "project_manager_scope": "project_manager_scope",
         },
     )
     builder.add_edge("ux_designer", "ui_designer")
     builder.add_edge("ui_designer", "visual_designer")
-    builder.add_edge("visual_designer", "project_manager_scope")
+    builder.add_conditional_edges(
+        "visual_designer",
+        route_after_visual,
+        {
+            "finance_budget_rough": "finance_budget_rough",
+            "project_manager_scope": "project_manager_scope",
+        },
+    )
+    builder.add_edge("finance_budget_rough", "project_manager_scope")
     builder.add_edge("project_manager_scope", "architect")
-    builder.add_edge("architect", "gate_architecture_review")
+    builder.add_conditional_edges(
+        "architect",
+        route_after_architect,
+        {
+            "finance_budget_final": "finance_budget_final",
+            "gate_architecture_review": "gate_architecture_review",
+        },
+    )
+    builder.add_edge("finance_budget_final", "gate_architecture_review")
     builder.add_conditional_edges(
         "gate_architecture_review",
         route_after_architecture_gate,
@@ -739,6 +782,7 @@ def build_graph() -> StateGraph:
     builder.add_conditional_edges("code_reviewer", route_after_review)
     builder.add_conditional_edges("tester_execute", route_after_test)
     builder.add_conditional_edges("qa", route_after_qa)
+    builder.add_edge("finance_cost_snapshot", "project_manager_delivery")
     builder.add_conditional_edges(
         "project_manager_delivery",
         route_after_delivery,
@@ -757,14 +801,6 @@ def build_graph() -> StateGraph:
     builder.add_edge("escalate_dev_retry", END)
 
     return builder
-
-
-# 财务节点暂不注册进图。保留函数引用，避免以后接回时从本文件丢失。
-_FINANCE_NODES_RESERVED = {
-    "finance_budget_rough": finance_budget_rough,
-    "finance_budget_final": finance_budget_final,
-    "finance_cost_snapshot": finance_cost_snapshot,
-}
 
 
 # 须同时提供 checkpointer，interrupt_before 才会在 run 边界生效；

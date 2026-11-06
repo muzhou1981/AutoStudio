@@ -30,4 +30,6 @@ def default_checkpointer() -> BaseCheckpointSaver:
     mode = os.environ.get("AUTO_STUDIO_CHECKPOINT", "sqlite").strip().lower()
     if mode == "memory":
         return MemorySaver()
-    return sqlite_checkpointer(factory_root() / "runs" / "checkpoints.sqlite")
+    raw = os.environ.get("AUTO_STUDIO_CHECKPOINT_PATH", "").strip()
+    path = Path(raw) if raw else factory_root() / "runs" / "checkpoints.sqlite"
+    return sqlite_checkpointer(path)

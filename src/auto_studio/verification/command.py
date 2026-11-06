@@ -47,11 +47,25 @@ def resolve_test_command(state: dict) -> list[str] | None:
     return argv
 
 
+def assert_command_cwd(cwd: Path, workspace: Path) -> None:
+    """工作目录必须落在本轮工作树内。"""
+    if not str(workspace).strip():
+        raise TestCommandError("没有本轮工作树，拒绝执行测试命令。")
+    root = workspace.resolve()
+    resolved = cwd.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise TestCommandError(f"测试命令的工作目录必须在本轮工作树内：{workspace}")
+
+
 def run_test_command(state: dict, *, timeout: float = 120) -> TestCommandResult | None:
     argv = resolve_test_command(state)
     if argv is None:
         return None
-    cwd = str(state.get("workspace_path") or "").strip() or os.getcwd()
+    workspace = str(state.get("workspace_path") or "").strip()
+    if not workspace:
+        raise TestCommandError("没有本轮工作树，拒绝执行测试命令。")
+    cwd = Path(workspace)
+    assert_command_cwd(cwd, cwd)
     proc = subprocess.run(
         argv,
         cwd=cwd,

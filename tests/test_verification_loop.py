@@ -115,6 +115,23 @@ def test_disallowed_test_command_is_rejected():
         resolve_test_command({"test_command": "bash -c echo"})
 
 
+def test_test_command_must_stay_inside_the_worktree(tmp_path):
+    from auto_studio.verification.command import (
+        TestCommandError,
+        assert_command_cwd,
+        run_test_command,
+    )
+
+    workspace = tmp_path / "tree"
+    workspace.mkdir()
+    outside = tmp_path / "else"
+    outside.mkdir()
+    with pytest.raises(TestCommandError, match="工作树"):
+        run_test_command({"test_command": "python3 -c pass"})
+    with pytest.raises(TestCommandError, match="工作目录"):
+        assert_command_cwd(outside, workspace)
+
+
 def test_cli_hitl_approves_gate():
     from auto_studio.cli import main
     from auto_studio.hitl.service import GraphRunService
@@ -132,7 +149,7 @@ def test_benchmark_before_and_after_command(tmp_path: Path):
     script = tmp_path / "check.py"
     script.write_text("print('AC-1 passed')\nprint('AC-2 passed')\n", encoding="utf-8")
     before = run_task(task)
-    after = run_task(task, test_command=f"python3 {script}")
+    after = run_task(task, test_command=f"python3 {script}", workspace_path=str(tmp_path))
     assert before["acceptance_gap"] == ["AC-1", "AC-2"]
     assert after["acceptance_gap"] == []
     assert after["qa_status"] == "pass"

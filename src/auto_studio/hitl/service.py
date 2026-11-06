@@ -208,11 +208,16 @@ class GraphRunService:
             return None
         head = next_nodes[0]
         if head in GATE_NODES:
+            since = str(values.get("awaiting_since") or "").strip() or datetime.now(UTC).isoformat()
+            summary = gate_summary(head)
+            note = str(values.get("gate_timeout_note") or "").strip()
+            if note:
+                summary = f"{summary} {note}"
             return AwaitingHuman(
                 kind="gate",
-                since=datetime.now(UTC).isoformat(),
+                since=since,
                 gate_id=head,
-                summary=gate_summary(head),
+                summary=summary,
             )
         return None
 
@@ -260,15 +265,24 @@ class GraphRunService:
         thread_id: str | None = None,
         run_name: str = "",
     ) -> RunStatus:
+        from auto_studio.config.context import build_run_context
+        from auto_studio.config.precheck import precheck_scenario_materials
+        from auto_studio.config.snapshot import capture_config_snapshot
         from auto_studio.hitl.run_name import assign_run_name, taken_names_for_project
 
+        precheck_scenario_materials(scenario_key, project_id)
         tid = thread_id or self.new_thread_id()
         taken = taken_names_for_project(latest_run_records(self._graph), project_id)
+        snap = capture_config_snapshot(scenario_key, project_id)
+        ctx = build_run_context(
+            scenario_key=snap["scenario_key"] or scenario_key,
+            project_id=snap["project_id"] or project_id,
+        )
         initial: dict[str, Any] = {
             "human_request": human_request,
-            "scenario_key": scenario_key,
-            "project_id": project_id,
-            "run_name": assign_run_name(project_id, run_name, taken),
+            "run_name": assign_run_name(snap["project_id"] or project_id, run_name, taken),
+            "finance_enabled": ctx.feature_finance(),
+            **snap,
         }
         if workspace_enabled():
             layout = prepare_run_layout(resolve_target_root(project_id), tid)
@@ -555,8 +569,87 @@ class GraphRunService:
         clear_pause_request(thread_id)
         return self._done(thread_id)
 
-    def status_dict(self, thread_id: str) -> dict[str, Any]:
+    def list_runs(self, *, project_id: str = "", phase: str = "") -> list[dict[str, Any]]:
+        """按检查点列出已有轮次。点进某一轮仍用原来的状态接口。"""
+        rows: list[dict[str, Any]] = []
+        want_project = project_id.strip()
+        want_phase = phase.strip()
+        for thread_id, _values in latest_run_records(self._graph):
+            try:
+                st = self.status(thread_id)
+            except HitlError:
+                continue
+            pid = str(st.values.get("project_id") or "")
+            if want_project and pid != want_project:
+                continue
+            if want_phase and st.phase != want_phase:
+                continue
+            rail = _rail_for(st)
+            rows.append(
+                {
+                    "thread_id": st.thread_id,
+                    "run_name": str(st.values.get("run_name") or st.thread_id),
+                    "phase": st.phase,
+                    "project_id": pid,
+                    "current": rail.get("current") or "",
+                }
+            )
+        return rows
+
+    def delete_run(self, thread_id: str, *, confirm_name: str) -> None:
+        """删除一轮检查点。名称必须一致，运行中的一轮要先停止。"""
+        from auto_studio.hitl.control import clear_pause_request, clear_stop_request
+
         st = self.status(thread_id)
+        if st.phase == "running":
+            raise HitlError("这一轮还在运行，先停止再删除。")
+        expected = str(st.values.get("run_name") or thread_id).strip() or thread_id
+        if confirm_name.strip() != expected:
+            raise HitlError("名称不一致，没有删除。")
+        saver = getattr(self._graph, "checkpointer", None)
+        if saver is None or not hasattr(saver, "delete_thread"):
+            raise HitlError("当前检查点不能删除这一轮。")
+        saver.delete_thread(thread_id)
+        clear_stop_request(thread_id)
+        clear_pause_request(thread_id)
+
+    def note_gate_timeout(self, thread_id: str) -> RunStatus:
+        """等待超过时限时记一笔未批复，关卡仍停在原地，不自动批准或驳回。"""
+        st = self.status(thread_id)
+        if st.awaiting_human is None or st.values.get("gate_timeout_recorded"):
+            return st
+        since = str(st.values.get("awaiting_since") or "").strip()
+        if not since:
+            since = datetime.now(UTC).isoformat()
+            self._graph.update_state(self._config(thread_id), {"awaiting_since": since})
+            st = self.status(thread_id)
+        limit = _gate_timeout_seconds()
+        try:
+            started = datetime.fromisoformat(since)
+        except ValueError:
+            return st
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=UTC)
+        elapsed = (datetime.now(UTC) - started).total_seconds()
+        if limit > 0 and elapsed < limit:
+            return st
+        note = "超时未批复。本轮仍停在关卡上，不自动批准或驳回。"
+        audit = str(st.values.get("hitl_audit_log") or "").strip()
+        line = f"[timeout] {note}"
+        if line not in audit:
+            audit = f"{audit}\n{line}".strip()
+        self._graph.update_state(
+            self._config(thread_id),
+            {
+                "gate_timeout_recorded": True,
+                "gate_timeout_note": note,
+                "hitl_audit_log": audit,
+            },
+        )
+        return self.status(thread_id)
+
+    def status_dict(self, thread_id: str) -> dict[str, Any]:
+        st = self.note_gate_timeout(thread_id)
         ah = st.awaiting_human
         return {
             "thread_id": st.thread_id,
@@ -576,6 +669,7 @@ class GraphRunService:
                 else None
             ),
             "values": _public_values(st.values),
+            "limits": {"max_dev_retries": _dev_retry_limit(st.values)},
             "rail": _rail_for(st),
             "reading": human_reading(
                 {
@@ -603,13 +697,35 @@ def _pause_requested(thread_id: str) -> bool:
     return is_pause_requested(thread_id)
 
 
+def _gate_timeout_seconds() -> float:
+    import os
+
+    raw = os.environ.get("AUTO_STUDIO_GATE_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return 24 * 60 * 60
+    try:
+        return float(raw)
+    except ValueError:
+        return 24 * 60 * 60
+
+
+def _dev_retry_limit(values: dict[str, Any]) -> int:
+    from auto_studio.workflows.default import max_dev_retries_for_state
+
+    return max_dev_retries_for_state(values)
+
+
 def _rail_for(st: RunStatus) -> dict[str, Any]:
     values = st.values or {}
     skip: set[str] | None = None
     if str(values.get("scenario_key") or "").strip() or str(values.get("project_id") or "").strip():
         try:
             ctx = build_run_context_from_state(values)
+            from auto_studio.config.workflow_nodes import FINANCE_NODES
+
             skip = set(ctx.skip_nodes)
+            if not ctx.feature_finance():
+                skip.update(FINANCE_NODES)
         except ConfigError:
             skip = None
     awaiting = None

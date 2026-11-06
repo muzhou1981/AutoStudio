@@ -26,6 +26,9 @@ def apply_gate_node(gate_id: str, state: "FactoryState") -> dict:
         "baseline_log": log,
         "last_gate_decision": decision,
         "human_reply": "",
+        "awaiting_since": "",
+        "gate_timeout_recorded": False,
+        "gate_timeout_note": "",
     }
     impact = str(state.get("change_impact") or "")
     resolves = (gate_id == "gate_requirement_confirm" and impact == "scope") or (
