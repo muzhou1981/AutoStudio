@@ -122,8 +122,12 @@ def build_rail(
     baseline_log: str = "",
     stopped_at: str = "",
     paused_at: str = "",
+    catalog: tuple[tuple[str, str], ...] | None = None,
+    meta: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """返回轨道。skip_nodes 为 None 表示还不知道场景裁剪，此时不给出完成计数。"""
+    items = catalog or RAIL_NODES
+    index = {name: i for i, (name, _) in enumerate(items)}
     current = _current_node(
         phase,
         next_nodes,
@@ -131,15 +135,18 @@ def build_rail(
         baseline_log,
         stopped_at=stopped_at,
         paused_at=paused_at,
+        index=index,
+        start_id=items[0][0],
+        end_id=items[-1][0],
     )
-    current_index = RAIL_INDEX.get(current) if current else None
+    current_index = index.get(current) if current else None
     known_skip = skip_nodes is not None
     skipped = skip_nodes or set()
 
     cells: list[dict[str, Any]] = []
     done = 0
     runnable = 0
-    for index, (name, label) in enumerate(RAIL_NODES):
+    for index, (name, label) in enumerate(items):
         if known_skip and name in skipped and name not in _RAIL_MARKERS:
             continue
         if phase == "stopped":
@@ -174,13 +181,21 @@ def build_rail(
         runnable += 1
         if state == "done":
             done += 1
+        info = (meta or {}).get(name) or {}
+        artifacts = info.get("artifacts")
+        if not isinstance(artifacts, list):
+            artifacts = list(NODE_ARTIFACTS.get(name, ()))
+        role = info.get("role")
+        if not isinstance(role, str):
+            role = NODE_ROLE.get(name, "")
         cells.append(
             {
                 "id": name,
                 "label": label,
                 "state": state,
-                "artifacts": list(NODE_ARTIFACTS.get(name, ())),
-                "role": NODE_ROLE.get(name, ""),
+                "artifacts": [str(item) for item in artifacts],
+                "role": role,
+                "kind": str(info.get("kind") or ""),
             }
         )
 
@@ -200,40 +215,48 @@ def _current_node(
     *,
     stopped_at: str = "",
     paused_at: str = "",
+    index: dict[str, int] | None = None,
+    start_id: str = "run_start",
+    end_id: str = "run_end",
 ) -> str | None:
+    known = index if index is not None else RAIL_INDEX
     if phase == "stopped":
-        if stopped_at in RAIL_INDEX:
+        if stopped_at in known:
             return stopped_at
         return None
     if phase == "paused":
-        if paused_at in RAIL_INDEX:
+        if paused_at in known:
             return paused_at
-        if next_nodes and next_nodes[0] in RAIL_INDEX:
+        if next_nodes and next_nodes[0] in known:
             return next_nodes[0]
         return None
     if phase in {"idle", ""}:
-        return "run_start"
+        return start_id
     if phase == "completed":
-        return "run_end"
+        return end_id
     if awaiting:
         kind = str(awaiting.get("kind") or "")
-        if kind == "pm_clarification":
+        if kind == "pm_clarification" and "project_manager_draft" in known:
             return "project_manager_draft"
         if kind == "escalation":
-            return "developer"
+            origin = str(awaiting.get("from_node") or "")
+            if origin in known:
+                return origin
+            if "developer" in known:
+                return "developer"
         if kind == "gate":
             gate_id = str(awaiting.get("gate_id") or "")
-            if gate_id in RAIL_INDEX:
+            if gate_id in known:
                 return gate_id
     if phase == "rejected":
         gate_id = rejected_gate_id(baseline_log)
-        if gate_id in RAIL_INDEX:
+        if gate_id and gate_id in known:
             return gate_id
         return None
     if not next_nodes:
         return None
     head = next_nodes[0]
     mapped = _INTERNAL_TO_RAIL.get(head, head)
-    if mapped in RAIL_INDEX:
+    if mapped in known:
         return mapped
     return None

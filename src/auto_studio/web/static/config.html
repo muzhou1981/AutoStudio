@@ -111,7 +111,7 @@
               <wa-input id="fieldDescription" label="说明"></wa-input>
               <wa-input id="fieldWorkspace" label="工作区" hint="待开发项目的 git 目录，可空" placeholder="/path/to/repo" spellcheck="false"></wa-input>
               <p class="hint-block" id="workspaceHint"></p>
-              <wa-input id="fieldProfile" label="流程配置名" hint="profile_id，可空" spellcheck="false"></wa-input>
+              <wa-select id="fieldProfile" label="流程" hint="可空。未选择时不绑定流程。"></wa-select>
               <wa-input id="fieldChat" label="飞书通知群" hint="chat_id，可空" placeholder="oc_…" spellcheck="false"></wa-input>
               <wa-input id="fieldOpen" label="飞书通知人" hint="open_id，群为空时使用" placeholder="ou_…" spellcheck="false"></wa-input>
             </div>
@@ -175,11 +175,14 @@
 
           <p class="section-title" id="envHeading">环境</p>
           <p class="panel-lead">只显示是否已配置。密钥的原文不会出现在这张表里。</p>
-          <ul id="settingsList" class="settings-list">
-            <li class="settings-pending">正在读取 .env…</li>
-          </ul>
-          <p class="hint-block" id="larkCliStatus"></p>
-          <p class="hint-block" id="settingsNote"></p>
+          <div id="settingsList">
+            <p class="settings-pending">正在读取 .env…</p>
+          </div>
+          <div id="larkStatusBlock" hidden>
+            <p class="section-title">飞书命令行</p>
+            <ul id="larkCliStatus" class="settings-list"></ul>
+            <ul id="settingsNote" class="env-notes"></ul>
+          </div>
         </div>
       </aside>
     </div>

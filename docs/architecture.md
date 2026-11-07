@@ -49,7 +49,7 @@
 
 ### 场景、项目与单次运行（配置栈）
 
-针对**具体目标项目**，模板与流程可在工厂默认之上**覆盖或裁剪**，合并优先级为：**单次 Run 输入 > 项目 `projects/<id>/project.yaml` > 场景 `scenarios/<key>/` > 工厂默认**。模板通过 **`template_path` 决议**（项目 → 场景 templates → `templates/artifacts/`）与可选 **`omit_sections`** 裁剪；流程通过 **Workflow Profile**（`skip_nodes`、`features.design_track`、关卡开关等）作用于同一张 Python 图，而非默认每项目一份独立图文件。配置管理员在 **`config_plan`** 中登记本轮生效路径与裁剪项。
+针对**具体目标项目**，模板与流程可在工厂默认之上**覆盖或裁剪**，合并优先级为：**单次 Run 输入 > 项目 `projects/<id>/project.yaml` > 场景 `scenarios/<key>/` > 工厂默认**。模板通过 **`template_path` 决议**（项目 → 场景 templates → `templates/artifacts/`）与可选 **`omit_sections`** 裁剪。未选定流程时，Workflow Profile（`skip_nodes`、`features.design_track`、关卡开关等）作用于默认 Python 图。项目选定 `workflows/<id>/workflow.yaml` 时，当轮的图按该流程的节点编译，见 [ADR 0005](decisions/0005-selected-workflow-compiles-run-graph.md)。配置管理员在 **`config_plan`** 中登记本轮生效路径与裁剪项。
 
 详见 [ADR 0002：场景配置、项目配置与流程/模板裁剪](decisions/0002-scenario-project-config-and-cropping.md)。
 

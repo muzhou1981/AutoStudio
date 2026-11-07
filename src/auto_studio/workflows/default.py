@@ -4,7 +4,7 @@
 后续在各节点内接入角色定义（roles/）与后端插件（backends/）。
 """
 
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -112,6 +112,14 @@ class FactoryState(TypedDict, total=False):
     stopped_at: str
     run_paused: bool
     paused_at: str
+
+    # 项目所选流程编译出的当轮图（ADR 0005）。未选流程时这些字段为空。
+    workflow_id: str
+    workflow_gates: list[str]
+    workflow_nodes: list[dict[str, Any]]
+    return_counts: dict[str, int]
+    return_target: str
+    escalated_from: str
 
 
 def _touch_artifact(state: FactoryState, key: str, role: str, note: str) -> dict:

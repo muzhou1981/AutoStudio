@@ -16,16 +16,22 @@
       document.documentElement.classList.toggle("wa-dark", theme === "dark");
       document.documentElement.classList.toggle("wa-light", theme !== "dark");
       document.documentElement.dataset.route =
-        location.pathname === "/config" ? "config" : location.pathname === "/project" ? "project" : "hitl";
+        location.pathname === "/config" ? "config"
+        : location.pathname === "/project" ? "project"
+        : location.pathname === "/workflow" ? "workflow"
+        : location.pathname === "/help" ? "help"
+        : "hitl";
       if (location.pathname === "/config") document.title = "AutoStudio · 配置";
       if (location.pathname === "/project") document.title = "AutoStudio · 项目";
+      if (location.pathname === "/workflow") document.title = "AutoStudio · 流程";
+      if (location.pathname === "/help") document.title = "AutoStudio · 帮助";
       if (location.pathname === "/" || location.pathname === "") document.title = "AutoStudio · 运行";
     })();
   </script>
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css" />
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/utilities.css" />
-  <link rel="stylesheet" href="/static/shared.css?v=20261107-open" />
-  <link rel="stylesheet" href="/static/hitl.css?v=20261107-dir4" />
+  <link rel="stylesheet" href="/static/shared.css?v=20261107-envpane3" />
+  <link rel="stylesheet" href="/static/hitl.css?v=20261107-audit" />
   <script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
 </head>
 <body>
@@ -69,7 +75,7 @@
               </a>
               <a class="sidebar-link sidebar-sub" href="/#region-rail">
                 <wa-icon name="gauge" library="system"></wa-icon>
-                <span>流程</span>
+                <span>运行状态</span>
               </a>
               <a class="sidebar-link sidebar-sub" href="/#region-todo">
                 <wa-icon name="check" library="system"></wa-icon>
@@ -95,6 +101,24 @@
               </div>
             </div>
           </div>
+          <div class="side-group" data-route="workflow">
+            <a class="sidebar-link" href="/workflow">
+              <svg class="sidebar-svg" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M2 3.5A1.5 1.5 0 0 1 3.5 2h2A1.5 1.5 0 0 1 7 3.5v1A1.5 1.5 0 0 1 5.5 6h-2A1.5 1.5 0 0 1 2 4.5v-1zM9 11.5A1.5 1.5 0 0 1 10.5 10h2a1.5 1.5 0 0 1 1.5 1.5v1a1.5 1.5 0 0 1-1.5 1.5h-2A1.5 1.5 0 0 1 9 12.5v-1zM2 11.5A1.5 1.5 0 0 1 3.5 10h2A1.5 1.5 0 0 1 7 11.5v1A1.5 1.5 0 0 1 5.5 14h-2A1.5 1.5 0 0 1 2 12.5v-1zM7 4h2.2a2 2 0 0 1 2 2v2.2"/></svg>
+              <span>流程</span>
+            </a>
+            <div class="side-sub">
+              <div class="side-sub-inner">
+              <a class="sidebar-link sidebar-sub" data-workflow-mode="new" href="/workflow#new">
+                <wa-icon name="plus" library="system"></wa-icon>
+                <span>新建</span>
+              </a>
+              <a class="sidebar-link sidebar-sub" data-workflow-mode="open" href="/workflow#open">
+                <wa-icon name="file" library="system"></wa-icon>
+                <span>打开</span>
+              </a>
+              </div>
+            </div>
+          </div>
           <div class="side-group" data-route="config">
             <a class="sidebar-link" href="/config">
               <wa-icon name="gear" library="system"></wa-icon>
@@ -114,10 +138,26 @@
                 <wa-icon name="user" library="system"></wa-icon>
                 <span>飞书</span>
               </a>
-              <a class="sidebar-link sidebar-sub" href="/config#region-env">
-                <wa-icon name="file-code" library="system"></wa-icon>
-                <span>环境</span>
-              </a>
+              </div>
+            </div>
+          </div>
+          <div class="side-group" data-route="help">
+            <a class="sidebar-link" href="/help#overview">
+              <svg class="sidebar-svg" viewBox="0 0 512 512" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.9 4.9-17 12.7-21.2l46.3-24.9c4.2-2.3 6.9-6.6 6.9-11.4c0-7.1-5.7-12.8-12.8-12.8l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+              <span>帮助</span>
+            </a>
+            <div class="side-sub">
+              <div class="side-sub-inner">
+              <a class="sidebar-link sidebar-sub" data-help-topic="overview" href="/help#overview"><span>概览</span></a>
+              <a class="sidebar-link sidebar-sub" data-help-topic="guide" href="/help#guide"><span>入门指南</span></a>
+              <a class="sidebar-link sidebar-sub" data-help-topic="project" href="/help#project"><span>项目</span></a>
+              <a class="sidebar-link sidebar-sub" data-help-topic="run" href="/help#run"><span>运行</span></a>
+              <a class="sidebar-link sidebar-sub" data-help-topic="workflow" href="/help#workflow"><span>流程</span></a>
+              <a class="sidebar-link sidebar-sub" data-help-topic="roles" href="/help#roles"><span>角色</span></a>
+              <a class="sidebar-link sidebar-sub" data-help-topic="agent" href="/help#agent"><span>Agent</span></a>
+              <a class="sidebar-link sidebar-sub" data-help-topic="workspace" href="/help#workspace"><span>工作区</span></a>
+              <a class="sidebar-link sidebar-sub" data-help-topic="feishu" href="/help#feishu"><span>飞书</span></a>
+              <a class="sidebar-link sidebar-sub" data-help-topic="env" href="/help#env"><span>环境</span></a>
               </div>
             </div>
           </div>
@@ -152,7 +192,7 @@
           <div class="func-region" id="region-rail">
           <p class="section-title" id="railHeading">运行状态</p>
           <p id="railCount" class="rail-count" hidden></p>
-          <div id="swimRail" class="swim-rail" aria-label="流程泳道"></div>
+          <div id="swimRail" class="swim-rail" aria-label="运行泳道"></div>
           <ol id="nodeRail" class="node-rail"></ol>
           </div>
 
@@ -176,7 +216,7 @@
                 <wa-option value="abort">终止 — 结束本轮</wa-option>
               </wa-select>
             </div>
-            <wa-textarea id="reply" label="附言" hint="human_reply" rows="3" placeholder="补充范围说明或驳回原因…"></wa-textarea>
+            <wa-textarea id="reply" label="附言" hint="可空" rows="3" placeholder="补充范围说明或驳回原因…"></wa-textarea>
             <div class="row-actions">
               <wa-button id="btnSubmit" variant="brand" disabled>提交并续跑</wa-button>
               <wa-button id="btnRefresh" appearance="outlined" variant="neutral">刷新状态</wa-button>
@@ -198,13 +238,100 @@
         </div>
         <div class="inspect-body">
           <div id="statusHuman">
-            <p class="status-empty">还没有运行记录。填写交付目标并启动后，阶段、成本和 QA 会显示在这里。</p>
+            <p class="status-empty">还没有运行记录。填写交付目标并启动后，阶段和产物会显示在这里。</p>
           </div>
           <wa-details class="raw" summary="原始状态">
             <pre id="out">{}</pre>
           </wa-details>
         </div>
       </aside>
+      </div>
+
+      <div class="app-view" data-route="workflow">
+        <main class="workspace-main" aria-label="流程">
+          <p class="section-title" id="flowHeading">编排</p>
+          <div id="flowOpen" hidden>
+            <wa-select id="flowPick" label="选择流程" placeholder="选择流程"></wa-select>
+            <div class="row-actions">
+              <wa-button id="btnOpenFlow" variant="brand">打开</wa-button>
+            </div>
+            <p class="hint-block" id="flowHint">先选择要打开的流程。</p>
+            <p class="hint-block" id="flowEmpty" hidden>还没有流程。</p>
+            <div class="row-actions" id="flowEmptyAction" hidden>
+              <wa-button id="btnFlowGoNew" appearance="outlined" variant="neutral">新建</wa-button>
+            </div>
+          </div>
+          <div id="flowEditor" hidden>
+            <div class="flow-add">
+              <wa-select id="flowRole" label="角色"></wa-select>
+              <wa-input id="flowActivityName" label="活动名" spellcheck="false"></wa-input>
+              <wa-button id="btnAddActivity" appearance="outlined" variant="neutral">添加活动</wa-button>
+              <wa-input id="flowGateName" label="决策点" spellcheck="false"></wa-input>
+              <wa-button id="btnAddGate" appearance="outlined" variant="neutral">添加关卡</wa-button>
+            </div>
+            <div class="flow-scroll" id="flowScroll">
+              <div id="flowBoard" class="flow-board"></div>
+            </div>
+            <ol class="flow-column" id="flowColumn"></ol>
+            <div class="row-actions">
+              <wa-button id="btnCreateFlow" variant="brand" hidden>创建</wa-button>
+              <wa-button id="btnSaveFlow" appearance="outlined" variant="neutral" hidden>保存</wa-button>
+            </div>
+            <wa-details class="raw" id="flowRaw" summary="原文 workflow.yaml" hidden>
+              <wa-textarea id="flowYaml" label="整份 YAML" rows="12" spellcheck="false"></wa-textarea>
+              <div class="row-actions">
+                <wa-button id="btnSaveFlowRaw" appearance="outlined" variant="neutral">用原文覆盖</wa-button>
+              </div>
+            </wa-details>
+          </div>
+          <wa-callout id="flowError" variant="danger" hidden></wa-callout>
+          <p class="save-note" id="flowSaved" hidden aria-live="polite"></p>
+        </main>
+        <aside class="workspace-inspect" aria-label="流程说明">
+          <div class="inspect-resize" role="separator" aria-orientation="vertical" aria-label="拖动调整检视栏宽度" tabindex="0"></div>
+          <div class="inspect-head">
+            <h2>流程说明</h2>
+          </div>
+          <div class="inspect-body">
+          <div id="flowInspectMeta">
+            <p class="hint-block" id="flowIdHint">标识按标题自动生成。中文标题会译成英文。创建后不再改变。</p>
+            <p class="hint-block" id="flowIdLine" hidden></p>
+            <wa-input id="flowTitle" label="标题"></wa-input>
+            <wa-input id="flowDescription" label="说明"></wa-input>
+            <p class="hint-block" id="flowMetaHint">点空白处回到这里。点一个节点后，在右侧修改它。</p>
+          </div>
+          <div id="flowInspectNode" hidden>
+            <p class="section-title" id="flowNodeHeading">节点</p>
+            <wa-input id="flowNodeName" label="名称" spellcheck="false"></wa-input>
+            <wa-select id="flowNodeRole" label="角色"></wa-select>
+            <wa-select id="flowNodeReturn" label="回退到"></wa-select>
+            <wa-select id="flowNodeDecision" label="决定类型">
+              <wa-option value="approve">批准或驳回</wa-option>
+            </wa-select>
+            <div id="flowContract" hidden>
+              <p class="section-title">输入</p>
+              <p class="hint-block" id="flowInputEmpty" hidden>这个活动不读取已有产物。</p>
+              <div id="flowInputList" class="io-list"></div>
+              <div class="row-actions">
+                <wa-button id="btnAddInput" appearance="outlined" variant="neutral">添加输入</wa-button>
+              </div>
+              <p class="section-title">输出</p>
+              <p class="hint-block" id="flowOutputEmpty" hidden>这个活动还没有输出。</p>
+              <div id="flowOutputList" class="io-list"></div>
+              <div class="row-actions">
+                <wa-button id="btnAddOutput" appearance="outlined" variant="neutral">添加输出</wa-button>
+              </div>
+            </div>
+            <p class="hint-block" id="flowNodeNeighbors"></p>
+            <p class="hint-block" id="flowNodeFixed" hidden>启动和结束不能改名，也不能删除，也不能跳过。</p>
+            <div class="row-actions">
+              <wa-button id="btnFlowUp" appearance="outlined" variant="neutral">上移</wa-button>
+              <wa-button id="btnFlowDown" appearance="outlined" variant="neutral">下移</wa-button>
+              <wa-button id="btnFlowDelete" appearance="outlined" variant="neutral">删除</wa-button>
+            </div>
+          </div>
+          </div>
+        </aside>
       </div>
 
       <div class="app-view" data-route="config">
@@ -235,37 +362,21 @@
               <p class="hint-block">服务进程能读取的 git 目录绝对路径。选定后直接打开，手填时按回车打开。</p>
               <div id="dirMatches" class="choice-grid" hidden></div>
               <div id="dirCreate" hidden>
-                <wa-input id="fieldDirId" label="项目标识" placeholder="字母开头，可含 _ 和 -" spellcheck="false"></wa-input>
+                <p class="hint-block">项目标识按目录名自动生成。中文目录名会译成英文。</p>
                 <wa-select id="fieldDirScenario" label="项目类型"></wa-select>
                 <div class="row-actions">
                   <wa-button id="btnCreateFromDir" variant="brand">创建并打开</wa-button>
                 </div>
               </div>
             </div>
-            <div id="newIdRow">
-              <wa-input id="newProjectId" label="项目标识" placeholder="字母开头，可含 _ 和 -" spellcheck="false"></wa-input>
-            </div>
+            <p class="hint-block" id="newIdHint">标识按标题自动生成。中文标题会译成英文。创建后不再改变。</p>
             <div id="projectFields">
               <wa-input id="fieldTitle" label="标题"></wa-input>
               <wa-input id="fieldDescription" label="说明"></wa-input>
               <wa-input id="fieldRemoteUrl" label="远程仓库" hint="git 远端地址，可空" placeholder="https://github.com/org/repo.git" spellcheck="false"></wa-input>
               <wa-input id="fieldWorkspace" label="工作区" hint="待开发项目的 git 目录，可空" placeholder="/path/to/repo" spellcheck="false"></wa-input>
               <p class="hint-block" id="workspaceHint"></p>
-              <wa-input id="fieldProfile" label="流程配置名" hint="profile_id，可空" spellcheck="false"></wa-input>
-              <wa-input id="fieldRetries" label="开发重试上限" hint="空则沿用项目类型" type="number" min="0" step="1" inputmode="numeric"></wa-input>
             </div>
-            <div class="row-actions" id="projectActions">
-              <wa-button id="btnCreateProject" variant="brand">创建</wa-button>
-              <wa-button id="btnSaveProject" appearance="outlined" variant="neutral" hidden>保存</wa-button>
-            </div>
-            <wa-details class="raw" id="projectRaw" summary="原文 project.yaml">
-              <wa-textarea id="projectYaml" label="整份 YAML" rows="12" spellcheck="false" placeholder="先选择项目，或新建一个。"></wa-textarea>
-              <div class="row-actions">
-                <wa-button id="btnSaveRaw" appearance="outlined" variant="neutral">用原文覆盖</wa-button>
-              </div>
-            </wa-details>
-            <wa-callout id="projectError" variant="danger" hidden></wa-callout>
-            <p class="save-note" id="projectSaved" hidden aria-live="polite"></p>
             </div>
 
             <div class="func-region" id="region-scenario">
@@ -291,6 +402,24 @@
               <wa-input id="fieldChat" label="飞书通知群" hint="chat_id，可空" placeholder="oc_…" spellcheck="false"></wa-input>
               <wa-input id="fieldOpen" label="飞书通知人" hint="open_id，群为空时使用" placeholder="ou_…" spellcheck="false"></wa-input>
             </div>
+
+            <div class="func-region" id="region-extra">
+              <p class="section-title" id="extraHeading">其它</p>
+              <wa-select id="fieldProfile" label="流程" hint="不指定时，运行使用内置默认流程。"></wa-select>
+              <wa-input id="fieldRetries" label="开发重试上限" hint="空则沿用项目类型" type="number" min="0" step="1" inputmode="numeric"></wa-input>
+            </div>
+            <div class="row-actions" id="projectActions">
+              <wa-button id="btnCreateProject" variant="brand">创建</wa-button>
+              <wa-button id="btnSaveProject" appearance="outlined" variant="neutral" hidden>保存</wa-button>
+            </div>
+            <wa-details class="raw" id="projectRaw" summary="原文 project.yaml">
+              <wa-textarea id="projectYaml" label="整份 YAML" rows="12" spellcheck="false" placeholder="先选择项目，或新建一个。"></wa-textarea>
+              <div class="row-actions">
+                <wa-button id="btnSaveRaw" appearance="outlined" variant="neutral">用原文覆盖</wa-button>
+              </div>
+            </wa-details>
+            <wa-callout id="projectError" variant="danger" hidden></wa-callout>
+            <p class="save-note" id="projectSaved" hidden aria-live="polite"></p>
           </section>
 
           <hr class="main-divider config-pane-split" />
@@ -327,16 +456,6 @@
             <wa-callout id="runtimeError" variant="danger" hidden></wa-callout>
             <p class="save-note" id="runtimeSaved" hidden aria-live="polite"></p>
             </div>
-
-            <div class="func-region" id="region-env">
-            <p class="section-title" id="envHeading">环境</p>
-            <p class="panel-lead">只显示是否已配置。密钥的原文不会出现在这张表里。</p>
-            <ul id="settingsList" class="settings-list">
-              <li class="settings-pending">正在读取 .env…</li>
-            </ul>
-            <p class="hint-block" id="larkCliStatus"></p>
-            <p class="hint-block" id="settingsNote"></p>
-            </div>
           </section>
         </div>
       </main>
@@ -346,8 +465,7 @@
         <div class="inspect-head config-pane-scenario">
           <h2 id="scenarioHeading">项目类型</h2>
         </div>
-        <div class="inspect-body">
-          <div class="config-pane-scenario">
+        <div class="inspect-body config-pane-scenario">
           <p class="panel-lead">项目类型文件只读。原文和合并 JSON 在下方折叠入口里。</p>
           <wa-select id="scenarioPick" label="查看项目类型"></wa-select>
           <wa-details class="raw" summary="原文 scenario.yaml">
@@ -359,9 +477,133 @@
           <wa-details class="raw" summary="原文 JSON">
             <pre id="effectiveOut" class="mono-block">选择项目或项目类型后会刷新。</pre>
           </wa-details>
+        </div>
+        <div class="inspect-head config-pane-env">
+          <h2 id="envHeading">环境</h2>
+        </div>
+        <div class="inspect-body config-pane-env">
+          <p class="panel-lead">只显示是否已配置。密钥的原文不会出现在这张表里。</p>
+          <div id="settingsList">
+            <p class="settings-pending">正在读取 .env…</p>
+          </div>
+          <div id="larkStatusBlock" hidden>
+            <p class="section-title">飞书命令行</p>
+            <ul id="larkCliStatus" class="settings-list"></ul>
+            <ul id="settingsNote" class="env-notes"></ul>
           </div>
         </div>
       </aside>
+      </div>
+
+      <div class="app-view" data-route="help">
+        <main class="workspace-main" aria-label="帮助">
+          <p class="section-title" id="helpHeading">概览</p>
+          <p class="hint-block" id="helpMissing" hidden>没有这一节，改看概览。</p>
+          <article class="help-copy" data-help-article="overview">
+            <ul>
+              <li>AutoStudio 接收人的交付目标，按项目绑定的流程让各角色写出文档和代码，并在决策点停下来等人批复。</li>
+              <li>工厂自身和待开发项目分开。</li>
+              <li>左栏自上而下是项目、运行、流程、配置和帮助。</li>
+              <li>项目决定这一轮用哪份流程、哪一种项目类型。</li>
+              <li>运行看这一轮走到哪。</li>
+              <li>流程编排活动和决策点。</li>
+              <li>配置填写与具体项目无关的后端、工作区、飞书和环境。</li>
+            </ul>
+          </article>
+          <article class="help-copy" data-help-article="guide" hidden>
+            <ul>
+              <li>安装完成后，先打开这个 Web 页面。</li>
+              <li>在「配置」的 Agent 里选择后端。想先熟悉界面，选 stub，它不调用 Cursor。</li>
+              <li>要让角色真正工作时，后端选 cursor，并写入 Cursor API Key。密钥只保存，页面不回显。</li>
+              <li>模型可以留空，留空时使用 Auto。写完后按「写入 .env」。</li>
+              <li>工作区可以先空着。项目里填写了工作区时用项目的目录；都没填时，才用配置页的默认工作区。</li>
+              <li>飞书可以以后再配。需要通知和在飞书里批复时，再填写飞书后端、Web 地址，以及默认通知群或通知人。</li>
+              <li>到「项目」新建一个项目。只写标题，标识会按标题生成。选择项目类型，并填写待开发项目的工作区。</li>
+              <li>流程可以先不指定，这时运行使用内置的默认流程。若要自定义，先在「流程」里写好活动和模板，再回到项目里选中它。</li>
+              <li>最后到「运行」。选择刚建的项目，填写交付目标，确认名称后启动。</li>
+              <li>遇到决策点时，在待办里批准或驳回。批准后继续，驳回则这一轮结束。</li>
+            </ul>
+          </article>
+          <article class="help-copy" data-help-article="project" hidden>
+            <ul>
+              <li>可以新建、打开，或从本机的 git 目录创建。</li>
+              <li>新建只写标题。标识按标题生成，中文标题会译成英文。</li>
+              <li>打开之后标识只读，再改标题也不会改标识。</li>
+              <li>从目录打开时，标识按目录名生成，工作区就是这个目录。</li>
+              <li>项目里可以选择项目类型、设计轨、节点裁剪、通知对象、远程仓库、工作区和流程。</li>
+              <li>流程可以不指定。不指定时，运行使用内置的默认流程。</li>
+            </ul>
+          </article>
+          <article class="help-copy" data-help-article="run" hidden>
+            <ul>
+              <li>先选择项目，再填写交付目标并启动。</li>
+              <li>名称默认是项目标识加递增序号，启动前可以改。</li>
+              <li>中栏是这一轮的泳道，只列出当轮会走到的节点。</li>
+              <li>可以进行中暂停、继续或停止。</li>
+              <li>决策点、需求澄清和回退升级停在待办里，批复后继续。</li>
+              <li>点一个格子，右栏查看这一步的产物和该角色的会话。</li>
+            </ul>
+          </article>
+          <article class="help-copy" data-help-article="workflow" hidden>
+            <ul>
+              <li>可以新建或打开一份流程。新建只写标题，标识按标题生成。</li>
+              <li>宽屏用泳道排列活动和决策点。右栏左缘可以拖动，改变右栏宽度。</li>
+              <li>活动要写出输入和输出。每项输出要有模板。</li>
+              <li>模板是服务进程能读取的本地文件，或一个 http、https 链接。</li>
+              <li>决策点目前的决定类型是批准或驳回。</li>
+              <li>把这份流程选进项目后，下一轮按这些节点执行。</li>
+              <li>活动没有输出，或某项输出没有模板时，不能启动。</li>
+            </ul>
+          </article>
+          <article class="help-copy" data-help-article="roles" hidden>
+            <ul>
+              <li>角色写在工厂的 <code>roles</code> 目录里，每个角色一份 <code>role.md</code>。</li>
+              <li>页面不能新建角色，也不能改角色的原则。</li>
+              <li>泳道和流程里显示的是文件头里的标题。</li>
+              <li>新建活动时，用该角色文件中的输入和输出名字作为初值。</li>
+              <li>模板仍要在流程页补上。</li>
+            </ul>
+          </article>
+          <article class="help-copy" data-help-article="agent" hidden>
+            <ul>
+              <li>在「配置」的 Agent 中选择后端。</li>
+              <li>stub 不调用 Cursor。</li>
+              <li>cursor 使用 Cursor SDK，并复用该工作区里已有的工具、规则和 Skill。</li>
+              <li>模型留空时使用 Auto。</li>
+              <li>API Key 只写入本机配置，页面不回显。</li>
+            </ul>
+          </article>
+          <article class="help-copy" data-help-article="workspace" hidden>
+            <ul>
+              <li>默认工作区在项目没有填写工作区时使用。</li>
+              <li>一轮任务在待开发项目自己的目录里进行，不改工厂仓库里的源码。</li>
+              <li>项目里填写的工作区优先于这里的默认值。</li>
+            </ul>
+          </article>
+          <article class="help-copy" data-help-article="feishu" hidden>
+            <ul>
+              <li>飞书用来通知和批复，和网页上的待办是同一套决定。</li>
+              <li>可以填写飞书后端、卡片里使用的 Web 地址、默认通知群和默认通知人。</li>
+              <li>项目里另外填写的通知群或通知人优先于这些默认值。</li>
+            </ul>
+          </article>
+          <article class="help-copy" data-help-article="env" hidden>
+            <ul>
+              <li>配置页右栏的环境按 Agent、工作区、飞书分组。每一项左侧是名称，右侧是是否已配置。</li>
+              <li>有具体取值时写在名称下面。密钥只显示已配置，不写出原文。</li>
+              <li>飞书命令行单独列出安装、配置和发消息，说明按条目写在下面。</li>
+            </ul>
+          </article>
+        </main>
+        <aside class="workspace-inspect" aria-label="帮助说明">
+          <div class="inspect-resize" role="separator" aria-orientation="vertical" aria-label="拖动调整检视栏宽度" tabindex="0"></div>
+          <div class="inspect-head">
+            <h2>帮助</h2>
+          </div>
+          <div class="inspect-body">
+            <p class="hint-block">帮助只读。</p>
+          </div>
+        </aside>
       </div>
     </div>
   </div>
@@ -471,7 +713,36 @@
       btn.disabled = !!on;
     }
 
-    let hitlSearch = location.pathname === "/config" ? "" : location.search;
+    let hitlSearch = location.pathname === "/config" || location.pathname === "/workflow" || location.pathname === "/help" ? "" : location.search;
+
+    const HELP_TOPICS = {
+      overview: "概览",
+      guide: "入门指南",
+      project: "项目",
+      run: "运行",
+      workflow: "流程",
+      roles: "角色",
+      agent: "Agent",
+      workspace: "工作区",
+      feishu: "飞书",
+      env: "环境",
+    };
+
+    function showHelp(hash) {
+      const raw = (hash || "").replace(/^#/, "");
+      const known = Object.prototype.hasOwnProperty.call(HELP_TOPICS, raw);
+      const topic = known ? raw : "overview";
+      document.querySelectorAll("[data-help-article]").forEach((el) => {
+        el.hidden = el.dataset.helpArticle !== topic;
+      });
+      const heading = $("helpHeading");
+      if (heading) heading.textContent = HELP_TOPICS[topic];
+      const missing = $("helpMissing");
+      if (missing) missing.hidden = known || raw === "";
+      document.querySelectorAll("[data-help-topic]").forEach((el) => {
+        el.classList.toggle("is-active", el.dataset.helpTopic === topic);
+      });
+    }
 
     function syncUrlThread(tid) {
       const params = new URLSearchParams(hitlSearch.startsWith("?") ? hitlSearch.slice(1) : hitlSearch);
@@ -730,19 +1001,32 @@
 
     const SWIM_LANES = [
       { id: "decision", label: "人类" },
-      { id: "project", label: "项目" },
-      { id: "config", label: "配置" },
-      { id: "ux", label: "体验" },
-      { id: "ui", label: "界面" },
-      { id: "visual", label: "视觉" },
-      { id: "architect", label: "架构" },
-      { id: "develop", label: "开发" },
-      { id: "review", label: "评审" },
-      { id: "test", label: "测试" },
-      { id: "qa", label: "QA" },
-      { id: "process", label: "流程" },
-      { id: "finance", label: "财务" },
+      { id: "project", role: "project_manager" },
+      { id: "config", role: "config_manager" },
+      { id: "ux", role: "ux_designer" },
+      { id: "ui", role: "ui_designer" },
+      { id: "visual", role: "visual_designer" },
+      { id: "architect", role: "architect" },
+      { id: "develop", role: "developer" },
+      { id: "review", role: "code_reviewer" },
+      { id: "test", role: "tester" },
+      { id: "qa", role: "qa" },
+      { id: "process", role: "process_owner" },
+      { id: "finance", role: "finance" },
     ];
+    let roleTitles = {};
+    let swimMeta = {};
+    function laneLabel(lane) {
+      if (lane.label) return lane.label;
+      return roleTitles[lane.role] || lane.role || lane.id;
+    }
+    async function loadRoleTitles() {
+      try {
+        const data = await fetch("/api/workflows/roles").then((response) => response.json());
+        roleTitles = {};
+        (data.roles || []).forEach((role) => { roleTitles[role.id] = role.label; });
+      } catch (err) { /* 角色名暂时用标识 */ }
+    }
     const SWIM_LANE_OF = {
       run_start: "decision",
       run_end: "decision",
@@ -770,6 +1054,12 @@
       finance_cost_snapshot: "finance",
     };
     function swimLaneId(id) {
+      const cell = swimMeta[id];
+      if (cell && cell.role) {
+        if (cell.role === "human" || cell.kind === "gate" || cell.kind === "start" || cell.kind === "end") return "decision";
+        const lane = SWIM_LANES.find((item) => item.role === cell.role);
+        if (lane) return lane.id;
+      }
       if (SWIM_LANE_OF[id]) return SWIM_LANE_OF[id];
       if (String(id).startsWith("gate_")) return "decision";
       return "develop";
@@ -778,6 +1068,9 @@
     let swimObserver = null;
 
     function swimKind(id) {
+      const cell = swimMeta[id];
+      if (cell && (cell.kind === "start" || cell.kind === "end")) return "marker";
+      if (cell && cell.kind === "gate") return "gate";
       if (id === "run_start" || id === "run_end") return "marker";
       if (String(id).startsWith("gate_")) return "gate";
       return "node";
@@ -830,6 +1123,8 @@
     }
 
     function renderSwim(cells, current) {
+      swimMeta = {};
+      cells.forEach((cell) => { swimMeta[cell.id] = cell; });
       const host = $("swimRail");
       host.replaceChildren();
       const lanes = SWIM_LANES.filter((lane) => cells.some((cell) => swimLaneId(cell.id) === lane.id));
@@ -844,7 +1139,7 @@
         row.className = "swim-lane";
         const label = document.createElement("div");
         label.className = "swim-label";
-        label.textContent = lane.label;
+        label.textContent = laneLabel(lane);
         const track = document.createElement("div");
         track.className = "swim-track";
         cells.forEach((cell, index) => {
@@ -903,7 +1198,16 @@
       return marker;
     }
 
+    function fitSwimLabels(grid) {
+      const labels = [...grid.querySelectorAll(".swim-label")];
+      if (!labels.length) return;
+      labels.forEach((el) => { el.style.width = "auto"; });
+      const width = Math.max(...labels.map((el) => el.scrollWidth));
+      labels.forEach((el) => { el.style.width = width + "px"; });
+    }
+
     function layoutSwimTimeline(grid) {
+      fitSwimLabels(grid);
       const track = grid.querySelector(".swim-track");
       if (!track) return;
       const width = track.clientWidth;
@@ -1124,7 +1428,7 @@
         box.replaceChildren();
         const p = document.createElement("p");
         p.className = "status-empty";
-        p.textContent = "还没有运行记录。填写交付目标并启动后，阶段、成本和 QA 会显示在这里。";
+        p.textContent = "还没有运行记录。填写交付目标并启动后，阶段和产物会显示在这里。";
         box.appendChild(p);
         setPhase("idle");
         return;
@@ -1517,7 +1821,7 @@
       $("fieldEscalation").hidden = !ah || ah.kind !== "escalation";
       if (ah && ah.kind === "pm_clarification") {
         $("reply").label = "澄清答复";
-        $("reply").hint = "human_reply（必填）";
+        $("reply").hint = "必填";
         $("reply").placeholder = "逐条回答待澄清问题…";
         if (ah.questions && ah.questions.length) {
           qList.hidden = false;
@@ -1528,13 +1832,13 @@
         }
       } else if (ah && ah.kind === "escalation") {
         $("reply").label = "说明";
-        $("reply").hint = "human_reply（可选）";
+        $("reply").hint = "可空";
         $("reply").placeholder = "补充决策理由…";
         qList.hidden = true;
         qList.innerHTML = "";
       } else {
         $("reply").label = "附言";
-        $("reply").hint = "human_reply";
+        $("reply").hint = "可空";
         $("reply").placeholder = "补充范围说明或驳回原因…";
         qList.hidden = true;
         qList.innerHTML = "";
@@ -1970,7 +2274,7 @@
     });
 
     (function initFromUrl() {
-      customElements.whenDefined("wa-select").then(() => loadRunConfigOptions()).then(() => {
+      customElements.whenDefined("wa-select").then(() => loadRoleTitles()).then(() => loadRunConfigOptions()).then(() => {
         const params = new URLSearchParams(window.location.search);
         const tid = params.get("thread_id") || params.get("thread");
         if (tid) {
@@ -2120,6 +2424,8 @@
     function routeFromPath(path) {
       if (path === "/config") return "config";
       if (path === "/project") return "project";
+      if (path === "/workflow") return "workflow";
+      if (path === "/help") return "help";
       return "hitl";
     }
 
@@ -2143,7 +2449,9 @@
       const titles = {
         hitl: "AutoStudio · 运行",
         project: "AutoStudio · 项目",
+        workflow: "AutoStudio · 流程",
         config: "AutoStudio · 配置",
+        help: "AutoStudio · 帮助",
       };
       document.documentElement.dataset.route = route;
       document.title = titles[route];
@@ -2153,6 +2461,8 @@
         const link = group.querySelector(":scope > a.sidebar-link");
         if (link) link.classList.toggle("is-active", on);
       });
+      let helpHash = hash || "";
+      if (route === "help" && !(helpHash.replace(/^#/, ""))) helpHash = "#overview";
       if (historyMode === "push" || historyMode === "replace") {
         let base = "/" + hitlSearch;
         if (route === "config") base = "/config";
@@ -2160,10 +2470,22 @@
           const pid = new URLSearchParams(location.search).get("project");
           base = "/project" + (pid ? "?project=" + encodeURIComponent(pid) : "");
         }
+        if (route === "workflow") {
+          const wid = new URLSearchParams(location.search).get("workflow");
+          base = "/workflow" + (wid ? "?workflow=" + encodeURIComponent(wid) : "");
+        }
+        if (route === "help") base = "/help";
         const method = historyMode === "push" ? "pushState" : "replaceState";
-        history[method]({ route }, "", base + (hash || ""));
+        history[method]({ route }, "", base + (route === "help" ? helpHash : (hash || "")));
       }
-      if (!hash || route === "project") return;
+      if (route === "workflow" && historyMode && !(options && options.skipWorkflow) && window.applyWorkflowLocation) {
+        window.applyWorkflowLocation();
+      }
+      if (route === "help") {
+        showHelp(helpHash);
+        return;
+      }
+      if (!hash || route === "project" || route === "workflow") return;
       const target = document.getElementById(decodeURIComponent(hash.slice(1)));
       const region = markRegion(target);
       if (region) scrollRegion(region, options);
@@ -2179,8 +2501,13 @@
         return;
       }
       if (url.origin !== location.origin) return;
-      if (url.pathname !== "/" && url.pathname !== "/config" && url.pathname !== "/project") return;
+      if (url.pathname !== "/" && url.pathname !== "/config" && url.pathname !== "/project" && url.pathname !== "/workflow" && url.pathname !== "/help") return;
       event.preventDefault();
+      if (link.dataset.workflowMode && window.requestWorkflowMode) {
+        applyRoute("/workflow", url.hash, { skipWorkflow: true });
+        window.requestWorkflowMode(link.dataset.workflowMode);
+        return;
+      }
       if (link.dataset.projectMode && window.requestProjectMode) {
         window.requestProjectMode(link.dataset.projectMode);
         return;
@@ -2197,13 +2524,27 @@
     });
 
     window.addEventListener("popstate", () => {
-      if (location.pathname !== "/config") hitlSearch = location.search;
+      if (location.pathname !== "/config" && location.pathname !== "/workflow" && location.pathname !== "/help") hitlSearch = location.search;
       applyRoute(location.pathname, location.hash);
       if (location.pathname === "/project" && window.applyProjectLocation) window.applyProjectLocation();
+      if (location.pathname === "/workflow" && window.applyWorkflowLocation) window.applyWorkflowLocation();
     });
 
     applyRoute(location.pathname, location.hash, { historyMode: "replace" });
   </script>
+  <div id="filePicker" class="dir-picker" hidden>
+    <div class="dir-picker-card" role="dialog" aria-modal="true" aria-labelledby="filePickerTitle">
+      <p class="section-title" id="filePickerTitle">选择模板文件</p>
+      <p class="dir-picker-path" id="filePickerPath"></p>
+      <div class="row-actions">
+        <wa-button id="btnFileUp" appearance="outlined" variant="neutral">上一级</wa-button>
+        <wa-button id="btnFileCancel" appearance="outlined" variant="neutral">取消</wa-button>
+      </div>
+      <div id="filePickerList" class="dir-picker-list"></div>
+      <p class="hint-block" id="filePickerNote" hidden></p>
+      <wa-callout id="filePickerError" variant="danger" hidden></wa-callout>
+    </div>
+  </div>
   <div id="dirPicker" class="dir-picker" hidden>
     <div class="dir-picker-card" role="dialog" aria-modal="true" aria-labelledby="dirPickerTitle">
       <p class="section-title" id="dirPickerTitle">选择目录</p>
@@ -2218,6 +2559,7 @@
       <wa-callout id="dirPickerError" variant="danger" hidden></wa-callout>
     </div>
   </div>
-  <script src="/static/config.js?v=20261107-dir4"></script>
+  <script src="/static/config.js?v=20261107-audit"></script>
+  <script src="/static/workflow.js?v=20261107-audit"></script>
 </body>
 </html>

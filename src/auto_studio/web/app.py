@@ -20,10 +20,12 @@ from auto_studio.hitl.service import GraphRunService, HitlError, StopPending
 from auto_studio.web.config_routes import router as config_router
 from auto_studio.web.feishu_routes import bind_run_service
 from auto_studio.web.feishu_routes import router as feishu_router
+from auto_studio.web.workflow_routes import router as workflow_router
 from auto_studio.workflows.default import graph
 
 app = FastAPI(title="AutoStudio", version="0.1.0")
 app.include_router(config_router)
+app.include_router(workflow_router)
 app.include_router(feishu_router)
 _static_dir = Path(__file__).with_name("static")
 app.mount("/static", StaticFiles(directory=_static_dir), name="static")
@@ -56,31 +58,73 @@ def _static_html(name: str) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 @app.get("/project", response_class=HTMLResponse)
+@app.get("/workflow", response_class=HTMLResponse)
 @app.get("/config", response_class=HTMLResponse)
+@app.get("/help", response_class=HTMLResponse)
 def console_ui() -> str:
-    """人工处理、项目配置与运行配置在同一文档里切换，避免一级菜单整页刷新。"""
+    """人工处理、项目、流程与运行配置在同一文档里切换，避免一级菜单整页刷新。"""
     return _static_html("hitl.html")
 
 
 @app.get("/api/rail")
 def api_rail(scenario_key: str = "", project_id: str = "") -> dict:
-    """启动前的轨道。已知场景时不列出未启用的节点。"""
+    """启动前的轨道。已知场景时不列出未启用的节点。选定流程时只列出该流程的节点。"""
     skip: set[str] | None = None
+    catalog = None
+    meta = None
     if scenario_key.strip() or project_id.strip():
         try:
             ctx = build_run_context(
                 scenario_key=scenario_key.strip(),
                 project_id=project_id.strip(),
             )
-            from auto_studio.config.workflow_nodes import nodes_hidden_from_rail
+            from auto_studio.config.workflow_defs import get_workflow, workflow_exists
 
-            skip = nodes_hidden_from_rail(
-                skip_nodes=ctx.skip_nodes,
-                finance_enabled=ctx.feature_finance(),
-            )
+            if ctx.profile_id.strip() and workflow_exists(ctx.profile_id.strip()):
+                loaded = get_workflow(ctx.profile_id.strip())
+                catalog, meta = _preview_catalog(loaded["workflow"])
+                skip = set()
+            else:
+                from auto_studio.config.workflow_nodes import nodes_hidden_from_rail
+
+                skip = nodes_hidden_from_rail(
+                    skip_nodes=ctx.skip_nodes,
+                    finance_enabled=ctx.feature_finance(),
+                )
         except ConfigError:
             skip = None
-    return build_rail(phase="idle", next_nodes=[], awaiting=None, skip_nodes=skip)
+            catalog = None
+            meta = None
+    else:
+        from auto_studio.config.workflow_nodes import nodes_hidden_from_rail
+
+        skip = nodes_hidden_from_rail(skip_nodes=set(), finance_enabled=False)
+    return build_rail(
+        phase="idle",
+        next_nodes=[],
+        awaiting=None,
+        skip_nodes=skip,
+        catalog=catalog,
+        meta=meta,
+    )
+
+
+def _preview_catalog(workflow: dict) -> tuple[tuple[tuple[str, str], ...], dict]:
+    items: list[tuple[str, str]] = []
+    meta: dict = {}
+    for node in workflow.get("nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "")
+        if not node_id:
+            continue
+        items.append((node_id, str(node.get("name") or node_id)))
+        meta[node_id] = {
+            "role": node.get("role") or "",
+            "kind": node.get("kind") or "",
+            "artifacts": list(node.get("outputs") or []),
+        }
+    return tuple(items), meta
 
 
 @app.get("/api/runs")

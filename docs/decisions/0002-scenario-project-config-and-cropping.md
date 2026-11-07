@@ -158,7 +158,7 @@ projects/
 ## 不做什么（M2）
 
 - 不做拖拽式流程编辑器。
-- 不做 YAML 全图编译替代 Python（与 ADR 0001 冲突时，以 0001 为准）。
+- 不做 YAML 全图编译替代 Python（与 ADR 0001 冲突时，以 0001 为准）。项目已选择 `workflows/<id>/workflow.yaml` 时，改以 [ADR 0005](0005-selected-workflow-compiles-run-graph.md) 为准：当轮的图按该流程的节点编译。未选择流程时，本条仍然有效。
 - 不做模板 Git 子模块自动同步（项目模板路径手动或 CI 拷贝）。
 
 ## 后续实现顺序（建议）

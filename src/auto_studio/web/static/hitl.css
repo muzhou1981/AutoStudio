@@ -318,6 +318,7 @@
 
 #scenarioBindHeading,
 #notifyHeading,
+#extraHeading,
 #defaultWorkspaceHeading,
 #feishuHeading {
   margin-top: 1.25rem;
@@ -501,12 +502,13 @@ html[data-theme="dark"] .swim-lane:nth-child(odd) {
   flex: none;
   display: flex;
   align-items: center;
-  width: 2.5rem;
+  width: auto;
   height: auto;
   background: transparent;
   color: var(--text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .swim-cell {
@@ -830,4 +832,176 @@ details.raw pre {
 
 @media (prefers-reduced-motion: reduce) {
   .btn-loading::after { animation: none; border-top-color: var(--spinner-head); }
+}
+
+.flow-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.55rem;
+  margin-bottom: 0.85rem;
+}
+
+.flow-add wa-select,
+.flow-add wa-input { min-width: 9rem; }
+
+#flowContract > .section-title {
+  margin-top: 1.75rem;
+}
+
+.io-list { display: flex; flex-direction: column; }
+.io-list:not(:empty) {
+  margin-top: 0.35rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-base) 40%, var(--bg-elevated));
+}
+.io-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.io-row + .io-row {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.io-caption {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.io-line { display: flex; gap: 0.35rem; align-items: center; }
+.io-line input,
+.io-line select {
+  flex: 1;
+  min-width: 0;
+  min-height: 2rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 0.375rem);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+.io-line button {
+  flex: none;
+}
+
+.help-copy {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  line-height: 1.7;
+}
+
+.help-copy ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.help-copy[hidden] { display: none; }
+
+
+.flow-scroll {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.flow-board { position: relative; min-height: 8rem; }
+
+.flow-lane {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+}
+
+.flow-lane:nth-child(odd) {
+  background: color-mix(in srgb, var(--text-primary) 18%, var(--bg-elevated));
+}
+
+html[data-theme="dark"] .flow-lane:nth-child(odd) {
+  background: color-mix(in srgb, var(--text-primary) 12%, var(--bg-elevated));
+}
+
+.flow-lane-label {
+  width: 4.5rem;
+  padding-left: 0.55rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.flow-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.flow-edges path {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.flow-node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.1rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+}
+
+.flow-node.is-marker { border-radius: 999px; }
+
+.flow-node.is-gate {
+  flex-direction: column;
+  gap: 0.1rem;
+  background: transparent;
+  border-color: transparent;
+}
+
+.flow-node img { width: 1.7rem; height: 1.7rem; object-fit: contain; pointer-events: none; }
+
+.flow-node.is-selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.flow-node.is-gate.is-selected { border-color: transparent; }
+
+.flow-column { display: none; margin: 0.75rem 0 0; padding: 0; list-style: none; }
+
+.flow-column-item {
+  width: 100%;
+  text-align: left;
+}
+
+.flow-column-item.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated));
+}
+
+@media (max-width: 899px) {
+  .flow-scroll { display: none; }
+  .flow-column { display: flex; flex-direction: column; gap: 0.35rem; }
 }

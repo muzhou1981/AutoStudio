@@ -77,6 +77,14 @@ def test_unknown_scenario_still_lists_every_node() -> None:
     assert rail["total"] is None
 
 
+def test_idle_rail_without_project_hides_finance() -> None:
+    client = TestClient(app)
+    ids = _ids(client.get("/api/rail").json())
+    assert FINANCE_NODES.isdisjoint(ids)
+    assert ids[0] == "run_start"
+    assert ids[-1] == "run_end"
+
+
 def test_npu_and_general_software_hide_only_what_is_off() -> None:
     client = TestClient(app)
     npu = _ids(client.get("/api/rail", params={"scenario_key": "npu_operator"}).json())

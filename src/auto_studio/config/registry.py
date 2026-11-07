@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -220,6 +221,72 @@ def list_directory_children(raw: str) -> dict[str, Any]:
         "dirs": dirs[:limit],
         "truncated": len(dirs) > limit,
     }
+
+
+def list_directory_entries(raw: str) -> dict[str, Any]:
+    """列出子目录和文件，供选择模板文件。"""
+    from auto_studio.workspace.layout import _expand_workspace
+
+    text = raw.strip()
+    path = _expand_workspace(text) if text else Path.home().resolve()
+    if not path.exists():
+        raise ConfigError("目录不存在。")
+    if not path.is_dir():
+        raise ConfigError("要选择目录，不能是文件。")
+    try:
+        path = path.resolve()
+        children = list(path.iterdir())
+    except PermissionError as e:
+        raise ConfigError("没有权限读取这个目录。") from e
+    except OSError as e:
+        raise ConfigError("读不到这个目录。") from e
+    dirs: list[dict[str, str]] = []
+    files: list[dict[str, str]] = []
+    for child in children:
+        try:
+            item = {"name": child.name, "path": str(child.resolve())}
+            if child.is_dir():
+                dirs.append(item)
+            elif child.is_file():
+                files.append(item)
+        except OSError:
+            continue
+    def _order(item: dict[str, str]) -> tuple[bool, str]:
+        return (item["name"].startswith("."), item["name"].casefold())
+
+    dirs.sort(key=_order)
+    files.sort(key=_order)
+    limit = 500
+    dir_shown = dirs[:limit]
+    file_shown = files[: max(0, limit - len(dir_shown))]
+    parent = None if path.parent == path else str(path.parent)
+    return {
+        "path": str(path),
+        "parent": parent,
+        "dirs": dir_shown,
+        "files": file_shown,
+        "truncated": len(dirs) + len(files) > limit,
+    }
+
+
+def template_file_error(raw: str) -> str:
+    """本地模板路径不可读时返回原因，可读时返回空字符串。"""
+    text = (raw or "").strip()
+    if not text:
+        return "还没有选择本地文件。"
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        return "本地文件要写绝对路径。"
+    try:
+        if not path.exists():
+            return "文件不存在。"
+        if not path.is_file():
+            return "要选择文件，不能是目录。"
+        if not os.access(path, os.R_OK):
+            return "没有权限读取这个文件。"
+    except OSError:
+        return "读不到这个文件。"
+    return ""
 
 
 def describe_project_directory(raw: str, root: Path | None = None) -> dict[str, Any]:

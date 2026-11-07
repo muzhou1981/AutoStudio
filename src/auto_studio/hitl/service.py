@@ -78,6 +78,29 @@ class GraphRunService:
 
     def __init__(self, compiled_graph: CompiledStateGraph) -> None:
         self._graph = compiled_graph
+        self._graphs: dict[str, CompiledStateGraph] = {}
+        self._compiled: dict[str, CompiledStateGraph] = {}
+
+    def _bound(self, thread_id: str) -> CompiledStateGraph:
+        """未选流程时用默认图。选定流程的轮次用那张编译图。"""
+        found = self._graphs.get(thread_id)
+        if found is not None:
+            return found
+        snap = self._graph.get_state(self._config(thread_id))
+        workflow_id = str((snap.values or {}).get("workflow_id") or "").strip()
+        if not workflow_id:
+            return self._graph
+        compiled = self._compiled.get(workflow_id)
+        if compiled is None:
+            from auto_studio.workflows.executable import compile_for_project
+
+            compiled, _extra = compile_for_project(
+                workflow_id,
+                checkpointer=self._graph.checkpointer,
+            )
+            self._compiled[workflow_id] = compiled
+        self._graphs[thread_id] = compiled
+        return compiled
 
     @staticmethod
     def new_thread_id() -> str:
@@ -156,7 +179,7 @@ class GraphRunService:
         cost_token = begin_cost_log()
         try:
             with write_lock, ctx:
-                self._graph.invoke(payload, self._config(thread_id))
+                self._bound(thread_id).invoke(payload, self._config(thread_id))
         finally:
             lines = take_cost_lines()
             end_cost_log(cost_token)
@@ -174,7 +197,7 @@ class GraphRunService:
         if not extra:
             return
         merged = (prior + "\n" + "\n".join(extra)).strip()
-        self._graph.update_state(self._config(thread_id), {"cost_ledger": merged})
+        self._bound(thread_id).update_state(self._config(thread_id), {"cost_ledger": merged})
 
     def _done(self, thread_id: str) -> RunStatus:
         st = self.status(thread_id)
@@ -207,9 +230,10 @@ class GraphRunService:
         if not next_nodes:
             return None
         head = next_nodes[0]
-        if head in GATE_NODES:
+        gates = values.get("workflow_gates") or []
+        if head in GATE_NODES or (isinstance(gates, list) and head in gates):
             since = str(values.get("awaiting_since") or "").strip() or datetime.now(UTC).isoformat()
-            summary = gate_summary(head)
+            summary = _workflow_gate_summary(values, head) or gate_summary(head)
             note = str(values.get("gate_timeout_note") or "").strip()
             if note:
                 summary = f"{summary} {note}"
@@ -241,7 +265,7 @@ class GraphRunService:
 
     def status(self, thread_id: str) -> RunStatus:
         cfg = self._config(thread_id)
-        snap = self._graph.get_state(cfg)
+        snap = self._bound(thread_id).get_state(cfg)
         if not snap.values and not snap.next:
             raise HitlError(f"未知 thread_id={thread_id!r}")
         next_nodes = tuple(snap.next or ())
@@ -265,7 +289,7 @@ class GraphRunService:
         thread_id: str | None = None,
         run_name: str = "",
     ) -> RunStatus:
-        from auto_studio.config.context import build_run_context
+        from auto_studio.config.context import build_run_context, factory_root
         from auto_studio.config.precheck import precheck_scenario_materials
         from auto_studio.config.snapshot import capture_config_snapshot
         from auto_studio.hitl.run_name import assign_run_name, taken_names_for_project
@@ -284,6 +308,21 @@ class GraphRunService:
             "finance_enabled": ctx.feature_finance(),
             **snap,
         }
+        profile = ctx.profile_id.strip()
+        from auto_studio.config.workflow_defs import workflow_exists
+
+        root = factory_root()
+        if profile and workflow_exists(profile, root):
+            from auto_studio.workflows.executable import compile_for_project
+
+            compiled, extra = compile_for_project(
+                profile,
+                checkpointer=self._graph.checkpointer,
+                root=root,
+            )
+            self._compiled[profile] = compiled
+            self._graphs[tid] = compiled
+            initial.update(extra)
         if workspace_enabled():
             layout = prepare_run_layout(resolve_target_root(project_id), tid)
             initial["workspace_path"] = str(layout.worktree)
@@ -293,14 +332,15 @@ class GraphRunService:
     def advance_until_blocked(self, thread_id: str) -> RunStatus:
         cfg = self._config(thread_id)
         while True:
-            snap = self._graph.get_state(cfg)
+            snap = self._bound(thread_id).get_state(cfg)
             values = dict(snap.values or {})
             if values.get("hitl_pending_kind"):
                 break
             next_nodes = tuple(snap.next or ())
             if not next_nodes:
                 break
-            if next_nodes[0] in GATE_NODES:
+            gates = values.get("workflow_gates") or []
+            if next_nodes[0] in GATE_NODES or (isinstance(gates, list) and next_nodes[0] in gates):
                 break
             self._invoke(thread_id, None)
         return self._done(thread_id)
@@ -323,7 +363,7 @@ class GraphRunService:
             "hitl_summary": summary,
             "hitl_pending_since": datetime.now(UTC).isoformat(),
         }
-        self._graph.update_state(cfg, patch)
+        self._bound(thread_id).update_state(cfg, patch)
         return self._done(thread_id)
 
     def _clear_pending_patch(self) -> dict[str, Any]:
@@ -366,7 +406,7 @@ class GraphRunService:
                 "human_reply": human_reply,
                 **audit,
             }
-            self._graph.update_state(cfg, patch)
+            self._bound(thread_id).update_state(cfg, patch)
             self._invoke(thread_id, None)
             return self._done(thread_id)
 
@@ -386,10 +426,10 @@ class GraphRunService:
                 **self._clear_pending_patch(),
                 **audit,
             }
-            self._graph.update_state(cfg, patch)
-            snap = self._graph.get_state(cfg)
+            self._bound(thread_id).update_state(cfg, patch)
+            snap = self._bound(thread_id).get_state(cfg)
             if not snap.next:
-                self._graph.update_state(cfg, None, as_node="tester_testability")
+                self._bound(thread_id).update_state(cfg, None, as_node="tester_testability")
             self._invoke(thread_id, None)
             return self._done(thread_id)
 
@@ -407,11 +447,14 @@ class GraphRunService:
                 **self._clear_pending_patch(),
                 **audit,
             }
-            self._graph.update_state(cfg, patch)
+            self._bound(thread_id).update_state(cfg, patch)
             if choice == "continue":
-                snap = self._graph.get_state(cfg)
+                snap = self._bound(thread_id).get_state(cfg)
                 if not snap.next:
-                    self._graph.update_state(cfg, None, as_node="developer")
+                    resume_at = str(st.values.get("escalated_from") or "developer")
+                    if resume_at not in self._bound(thread_id).nodes:
+                        resume_at = "developer"
+                    self._bound(thread_id).update_state(cfg, None, as_node=resume_at)
                 self._invoke(thread_id, None)
             return self._done(thread_id)
 
@@ -489,7 +532,7 @@ class GraphRunService:
         if st.phase != "paused":
             raise HitlError(f"当前阶段是{st.phase}，不能继续")
         clear_pause_request(thread_id)
-        self._graph.update_state(
+        self._bound(thread_id).update_state(
             self._config(thread_id),
             {"run_paused": False, "paused_at": ""},
         )
@@ -508,7 +551,7 @@ class GraphRunService:
             clear_pause_request(thread_id)
             return st
         paused_at = st.next_nodes[0] if st.next_nodes else str(_rail_for(st).get("current") or "")
-        self._graph.update_state(
+        self._bound(thread_id).update_state(
             self._config(thread_id),
             {"run_paused": True, "paused_at": paused_at},
         )
@@ -524,8 +567,8 @@ class GraphRunService:
         values["run_stopped"] = True
         values["stopped_at"] = ""
         cfg = self._config(thread_id)
-        self._graph.update_state(cfg, values, as_node="__start__")
-        self._graph.update_state(cfg, None, as_node=END)
+        self._bound(thread_id).update_state(cfg, values, as_node="__start__")
+        self._bound(thread_id).update_state(cfg, None, as_node=END)
         clear_stop_request(thread_id)
 
     def _finish_stop(self, thread_id: str, *, channel: str = "web") -> RunStatus:
@@ -546,7 +589,7 @@ class GraphRunService:
         stopped_at = str(_rail_for(st).get("current") or "")
         as_node = "project_manager_draft"
         for name in st.next_nodes:
-            if name in self._graph.nodes:
+            if name in self._bound(thread_id).nodes:
                 as_node = name
                 break
         patch: dict[str, Any] = {
@@ -563,8 +606,8 @@ class GraphRunService:
             ),
         }
         cfg = self._config(thread_id)
-        self._graph.update_state(cfg, patch, as_node=as_node)
-        self._graph.update_state(cfg, None, as_node=END)
+        self._bound(thread_id).update_state(cfg, patch, as_node=as_node)
+        self._bound(thread_id).update_state(cfg, None, as_node=END)
         clear_stop_request(thread_id)
         clear_pause_request(thread_id)
         return self._done(thread_id)
@@ -621,7 +664,7 @@ class GraphRunService:
         since = str(st.values.get("awaiting_since") or "").strip()
         if not since:
             since = datetime.now(UTC).isoformat()
-            self._graph.update_state(self._config(thread_id), {"awaiting_since": since})
+            self._bound(thread_id).update_state(self._config(thread_id), {"awaiting_since": since})
             st = self.status(thread_id)
         limit = _gate_timeout_seconds()
         try:
@@ -638,7 +681,7 @@ class GraphRunService:
         line = f"[timeout] {note}"
         if line not in audit:
             audit = f"{audit}\n{line}".strip()
-        self._graph.update_state(
+        self._bound(thread_id).update_state(
             self._config(thread_id),
             {
                 "gate_timeout_recorded": True,
@@ -736,7 +779,11 @@ def _rail_for(st: RunStatus) -> dict[str, Any]:
             "kind": ah.kind,
             "gate_id": ah.gate_id,
             "summary": ah.summary,
+            "from_node": str(values.get("escalated_from") or ""),
         }
+    catalog, meta = _workflow_catalog(values)
+    if catalog:
+        skip = set()
     return build_rail(
         phase=st.phase,
         next_nodes=st.next_nodes,
@@ -745,7 +792,41 @@ def _rail_for(st: RunStatus) -> dict[str, Any]:
         baseline_log=str(values.get("baseline_log") or ""),
         stopped_at=str(values.get("stopped_at") or ""),
         paused_at=str(values.get("paused_at") or ""),
+        catalog=catalog,
+        meta=meta,
     )
+
+
+def _workflow_catalog(
+    values: dict[str, Any],
+) -> tuple[tuple[tuple[str, str], ...] | None, dict[str, dict[str, Any]] | None]:
+    raw = values.get("workflow_nodes")
+    if not isinstance(raw, list) or not raw:
+        return None, None
+    items: list[tuple[str, str]] = []
+    meta: dict[str, dict[str, Any]] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        node_id = str(item.get("id") or "").strip()
+        if not node_id:
+            continue
+        items.append((node_id, str(item.get("label") or node_id)))
+        meta[node_id] = item
+    if not items:
+        return None, None
+    return tuple(items), meta
+
+
+def _workflow_gate_summary(values: dict[str, Any], gate_id: str) -> str:
+    raw = values.get("workflow_nodes")
+    if not isinstance(raw, list):
+        return ""
+    for item in raw:
+        if isinstance(item, dict) and str(item.get("id") or "") == gate_id:
+            name = str(item.get("label") or gate_id)
+            return f"{name}：请批准或驳回。"
+    return ""
 
 
 def _run_dir_for(values: dict[str, Any], thread_id: str):

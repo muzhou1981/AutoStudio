@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from auto_studio.config.context import ConfigError
+from auto_studio.config.identifiers import allocate_identifier
 from auto_studio.config.registry import (
     apply_project_form,
     describe_project_directory,
@@ -13,11 +14,13 @@ from auto_studio.config.registry import (
     get_project_yaml,
     get_scenario_yaml,
     list_directory_children,
+    list_directory_entries,
     list_projects,
     list_scenarios,
     project_form_view,
     save_project_yaml,
     settings_status,
+    template_file_error,
 )
 
 router = APIRouter(prefix="/api/config", tags=["config"])
@@ -28,7 +31,8 @@ class SaveProjectBody(BaseModel):
 
 
 class CreateProjectBody(BaseModel):
-    project_id: str = Field(min_length=1)
+    project_id: str = ""
+    title: str = ""
     yaml: str = ""
 
 
@@ -53,6 +57,22 @@ def api_list_projects() -> dict:
 
     items = [p.to_dict() for p in list_projects()]
     return {"projects": items, "nodes": sorted(DEFAULT_GRAPH_NODES)}
+
+
+@router.get("/files")
+def api_list_files(path: str = Query("")) -> dict:
+    try:
+        return list_directory_entries(path)
+    except ConfigError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/files/check")
+def api_check_template_file(path: str = Query("")) -> dict:
+    message = template_file_error(path)
+    if message:
+        raise HTTPException(status_code=400, detail=message)
+    return {"path": path.strip(), "ok": True}
 
 
 @router.get("/directories")
@@ -129,18 +149,28 @@ def api_save_project(project_id: str, body: SaveProjectBody) -> dict:
 
 @router.post("/projects")
 def api_create_project(body: CreateProjectBody) -> dict:
+    project_id = body.project_id.strip()
+    title = body.title.strip()
+    if not project_id:
+        if not title:
+            raise HTTPException(status_code=400, detail="先写标题。")
+        project_id = allocate_identifier(
+            title,
+            prefix="project",
+            taken=[item.project_id for item in list_projects()],
+        )
     yaml_text = body.yaml.strip()
     if not yaml_text:
         yaml_text = (
-            f"project_id: {body.project_id}\n"
-            f"title: {body.project_id}\n"
+            f"project_id: {project_id}\n"
+            f"title: {title or project_id}\n"
             f"scenario_key: npu_operator\n"
         )
     try:
-        save_project_yaml(body.project_id, yaml_text, create=True)
+        save_project_yaml(project_id, yaml_text, create=True)
     except ConfigError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return {"project_id": body.project_id, "created": True}
+    return {"project_id": project_id, "created": True}
 
 
 @router.get("/effective")

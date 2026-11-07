@@ -95,6 +95,7 @@
 |------|------|------|
 | 实现语言 | Python 3.11 及以上 | — |
 | 流程定义方式 | 直接以 Python 编写 LangGraph 图，用 LangGraph Studio 可视化调试 | [ADR 0001](decisions/0001-workflow-in-python-with-langgraph-studio.md) |
+| 所选流程的执行 | 项目选定流程后，当轮的图按该流程的节点编译执行；未选定则走默认图 | [ADR 0005](decisions/0005-selected-workflow-compiles-run-graph.md) |
 | 默认后端 | Cursor SDK（Python 版 `cursor-sdk`） | — |
 | 人类触达 | Web HITL + 飞书（经项目经理语义，共用 HITL API；微信系一期不做） | [ADR 0003](decisions/0003-pm-human-hitl-and-im-channels.md) |
 

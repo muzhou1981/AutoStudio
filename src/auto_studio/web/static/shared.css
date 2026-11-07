@@ -329,13 +329,17 @@ button:focus-visible {
 
 html[data-route="hitl"] .side-group[data-route="hitl"],
 html[data-route="project"] .side-group[data-route="project"],
-html[data-route="config"] .side-group[data-route="config"] {
+html[data-route="workflow"] .side-group[data-route="workflow"],
+html[data-route="config"] .side-group[data-route="config"],
+html[data-route="help"] .side-group[data-route="help"] {
   grid-template-rows: auto 1fr;
 }
 
 html[data-route="hitl"] .side-group[data-route="hitl"] > .sidebar-link,
 html[data-route="project"] .side-group[data-route="project"] > .sidebar-link,
-html[data-route="config"] .side-group[data-route="config"] > .sidebar-link {
+html[data-route="workflow"] .side-group[data-route="workflow"] > .sidebar-link,
+html[data-route="config"] .side-group[data-route="config"] > .sidebar-link,
+html[data-route="help"] .side-group[data-route="help"] > .sidebar-link {
   background: var(--bg-input);
   color: var(--text-primary);
   font-weight: 600;
@@ -343,29 +347,40 @@ html[data-route="config"] .side-group[data-route="config"] > .sidebar-link {
 
 html[data-route="hitl"] .side-group[data-route="hitl"] > .sidebar-link wa-icon,
 html[data-route="project"] .side-group[data-route="project"] > .sidebar-link wa-icon,
-html[data-route="config"] .side-group[data-route="config"] > .sidebar-link wa-icon {
+html[data-route="workflow"] .side-group[data-route="workflow"] > .sidebar-link wa-icon,
+html[data-route="workflow"] .side-group[data-route="workflow"] > .sidebar-link .sidebar-svg,
+html[data-route="config"] .side-group[data-route="config"] > .sidebar-link wa-icon,
+html[data-route="help"] .side-group[data-route="help"] > .sidebar-link .sidebar-svg {
   color: var(--accent);
 }
 
 .app-view { display: contents; }
 
 html[data-route="hitl"] .app-view[data-route="config"],
+html[data-route="hitl"] .app-view[data-route="workflow"],
 html[data-route="project"] .app-view[data-route="hitl"],
-html[data-route="config"] .app-view[data-route="hitl"] {
+html[data-route="project"] .app-view[data-route="workflow"],
+html[data-route="workflow"] .app-view[data-route="hitl"],
+html[data-route="workflow"] .app-view[data-route="config"],
+html[data-route="config"] .app-view[data-route="hitl"],
+html[data-route="config"] .app-view[data-route="workflow"],
+html[data-route="hitl"] .app-view[data-route="help"],
+html[data-route="project"] .app-view[data-route="help"],
+html[data-route="workflow"] .app-view[data-route="help"],
+html[data-route="config"] .app-view[data-route="help"],
+html[data-route="help"] .app-view[data-route="hitl"],
+html[data-route="help"] .app-view[data-route="workflow"],
+html[data-route="help"] .app-view[data-route="config"] {
   display: none !important;
 }
 
 html[data-route="config"] .config-pane-project,
 html[data-route="config"] .config-pane-split,
 html[data-route="config"] .config-pane-scenario,
-html[data-route="config"] .app-view[data-route="config"] > .workspace-inspect,
 html[data-route="project"] .config-pane-runtime,
-html[data-route="project"] .config-pane-split {
+html[data-route="project"] .config-pane-split,
+html[data-route="project"] .config-pane-env {
   display: none !important;
-}
-
-html[data-route="config"] #config-main {
-  grid-column: 2 / -1;
 }
 
 .side-sub {
@@ -394,7 +409,9 @@ html[data-route="config"] #config-main {
 
 html[data-route="hitl"] .side-group[data-route="hitl"] .side-sub,
 html[data-route="project"] .side-group[data-route="project"] .side-sub,
-html[data-route="config"] .side-group[data-route="config"] .side-sub {
+html[data-route="workflow"] .side-group[data-route="workflow"] .side-sub,
+html[data-route="config"] .side-group[data-route="config"] .side-sub,
+html[data-route="help"] .side-group[data-route="help"] .side-sub {
   opacity: 1;
   visibility: visible;
   transition:
@@ -685,7 +702,7 @@ html[data-route="config"] .side-group[data-route="config"] .side-sub {
 }
 
 .inspect-body .settings-list li {
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .composer-block {
@@ -911,36 +928,79 @@ button:disabled {
   color: var(--text-secondary);
 }
 
+.env-group + .env-group { margin-top: 1.25rem; }
+
+.env-group .section-title { margin: 0 0 0.45rem; }
+
+#larkStatusBlock { margin-top: 1.35rem; }
+
+.config-pane-env.inspect-body { padding-bottom: 4.5rem; }
+
+#larkStatusBlock .section-title { margin: 0 0 0.45rem; }
+
+#larkStatusBlock[hidden] { display: none; }
+
 .settings-list {
-  margin: 0.15rem 0 0;
-  padding: 0;
+  margin: 0;
+  padding: 0.15rem 0.75rem;
   list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-base) 40%, var(--bg-elevated));
 }
 
 .settings-list li {
   display: grid;
-  grid-template-columns: minmax(9.5rem, 1.05fr) minmax(0, 1.4fr) auto;
-  align-items: baseline;
-  gap: 0.5rem 0.75rem;
-  padding: 0.45rem 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.75rem;
+  row-gap: 0.12rem;
+  padding: 0.55rem 0;
   border-bottom: 1px solid var(--border);
   font-size: 0.8125rem;
 }
 
+.settings-list li:last-child { border-bottom: none; }
+
 .settings-pending {
   display: block;
+  margin: 0;
   color: var(--text-muted);
+  font-size: 0.8125rem;
 }
 
 .setting-key {
-  font-family: var(--mono);
-  font-size: 0.75rem;
+  min-width: 0;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .setting-value {
-  color: var(--text-secondary);
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.setting-value:empty { display: none; }
+
+.env-notes {
+  margin: 0.7rem 0 0;
+  padding-left: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.env-notes:empty { display: none; }
+
+.env-notes code {
+  font-family: var(--mono);
+  font-size: 0.92em;
 }
 
 .status-chip {
@@ -1037,10 +1097,8 @@ details.raw .mono-block { margin-top: 0.5rem; }
 
 @media (max-width: 720px) {
   .settings-list li {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
-
-  .setting-value { grid-column: 1 / -1; }
 }
 
 @media (hover: hover) and (pointer: fine) {

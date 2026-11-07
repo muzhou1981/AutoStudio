@@ -95,6 +95,14 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert 'id="swimRail"' in text
     assert ">运行状态</p>" in text
     assert "从目录打开" in text
+    assert ">运行状态</span>" in text
+    assert 'href="/workflow#new"' in text
+    assert 'href="/help#overview"' in text
+    assert 'href="/help#guide"' in text
+    assert "入门指南" in text
+    assert 'data-help-article="workflow"' in text
+    assert "帮助只读。" in text
+    assert 'id="flowHeading"' in text
     assert 'class="sidebar-svg"' in text
     assert "M88.7 223.8" in text
     assert 'class="project-modes"' not in text
@@ -103,9 +111,10 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert 'aria-label="选择目录"' in text
     assert 'id="btnSaveProject" appearance="outlined"' in text
     assert ">项目配置</span>" not in text
-    assert 'aria-label="流程泳道"' in text
+    assert 'aria-label="运行泳道"' in text
     assert "renderSwim" in text
-    assert '{ id: "qa", label: "QA" }' in text
+    assert '{ id: "qa", role: "qa" }' in text
+    assert "loadRoleTitles" in text
     assert 'run_start: "decision"' in text
     assert '{ id: "decision", label: "人类" }' in text
     assert "roundedOrth" in text

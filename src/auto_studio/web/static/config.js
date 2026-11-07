@@ -20,8 +20,121 @@ function showSaved(el, msg) {
 function chipFor(item) {
   if (item.name === "AUTO_STUDIO_CURSOR_MODEL" && !item.configured) return ["默认", "is-ok"];
   if (item.name === "AUTO_STUDIO_BACKEND" && !item.configured) return ["自动", "is-ok"];
+  if (item.name === "AUTO_STUDIO_LARK_BACKEND" && !item.configured) return ["默认", "is-ok"];
   if (item.configured) return ["已配置", "is-ok"];
   return ["未配置", "is-missing"];
+}
+
+const GROUP_ORDER = {
+  Agent: ["AUTO_STUDIO_BACKEND", "AUTO_STUDIO_CURSOR_MODEL", "CURSOR_API_KEY", "LANGSMITH_API_KEY", "LANGSMITH_TRACING"],
+  工作区: ["AUTO_STUDIO_TARGET_ROOT"],
+  飞书: [
+    "AUTO_STUDIO_LARK_BACKEND",
+    "AUTO_STUDIO_PUBLIC_BASE_URL",
+    "AUTO_STUDIO_FEISHU_NOTIFY_CHAT_ID",
+    "AUTO_STUDIO_FEISHU_NOTIFY_OPEN_ID",
+    "LARK_APP_ID",
+    "LARK_APP_SECRET",
+    "LARK_VERIFICATION_TOKEN",
+    "LARK_ENCRYPT_KEY",
+  ],
+};
+
+const SETTING_GROUPS = {
+  CURSOR_API_KEY: ["Agent", "Cursor API Key"],
+  AUTO_STUDIO_BACKEND: ["Agent", "后端"],
+  AUTO_STUDIO_CURSOR_MODEL: ["Agent", "模型"],
+  LANGSMITH_API_KEY: ["Agent", "LangSmith API Key"],
+  LANGSMITH_TRACING: ["Agent", "LangSmith 追踪"],
+  AUTO_STUDIO_TARGET_ROOT: ["工作区", "默认工作区"],
+  AUTO_STUDIO_LARK_BACKEND: ["飞书", "飞书后端"],
+  LARK_APP_ID: ["飞书", "应用标识"],
+  LARK_APP_SECRET: ["飞书", "应用密钥"],
+  LARK_VERIFICATION_TOKEN: ["飞书", "校验令牌"],
+  LARK_ENCRYPT_KEY: ["飞书", "加密密钥"],
+  AUTO_STUDIO_PUBLIC_BASE_URL: ["飞书", "Web 地址"],
+  AUTO_STUDIO_FEISHU_NOTIFY_CHAT_ID: ["飞书", "默认通知群"],
+  AUTO_STUDIO_FEISHU_NOTIFY_OPEN_ID: ["飞书", "默认通知人"],
+};
+
+function settingDetail(item) {
+  const hint = (item.value_hint || "").trim();
+  if (!hint || hint === "已设置") return "";
+  if (item.name === "AUTO_STUDIO_CURSOR_MODEL" && hint.startsWith("Auto")) return "Auto";
+  if (item.name === "AUTO_STUDIO_BACKEND" && hint.startsWith("未设置")) {
+    const matched = hint.match(/当前生效\s+([^）)\s]+)/);
+    return matched ? "当前生效 " + matched[1] : "";
+  }
+  if (item.name === "LANGSMITH_TRACING") {
+    if (hint === "true") return "开启";
+    if (hint === "false") return "关闭";
+  }
+  if (item.name === "AUTO_STUDIO_LARK_BACKEND") {
+    return hint.replaceAll("lark_cli", "lark-cli").replaceAll("env_bot", "应用凭据").replace(/^默认\s+/, "");
+  }
+  return hint;
+}
+
+function settingRow(item) {
+  const meta = SETTING_GROUPS[item.name] || ["其他", item.name];
+  const li = document.createElement("li");
+  const name = document.createElement("span");
+  name.className = "setting-key";
+  name.textContent = meta[1];
+  name.title = item.name;
+  const detail = document.createElement("span");
+  detail.className = "setting-value";
+  detail.textContent = settingDetail(item);
+  const [label, tone] = chipFor(item);
+  const chip = document.createElement("span");
+  chip.className = "status-chip " + tone;
+  chip.textContent = label;
+  li.append(name, chip, detail);
+  return li;
+}
+
+function statusRow(label, value, ok) {
+  const li = document.createElement("li");
+  const name = document.createElement("span");
+  name.className = "setting-key";
+  name.textContent = label;
+  const chip = document.createElement("span");
+  chip.className = "status-chip " + (ok ? "is-ok" : "is-missing");
+  chip.textContent = value;
+  li.append(name, chip);
+  return li;
+}
+
+function noteItem(parts) {
+  const li = document.createElement("li");
+  parts.forEach((part) => {
+    if (part && part.code) {
+      const code = document.createElement("code");
+      code.textContent = part.code;
+      li.appendChild(code);
+      return;
+    }
+    li.appendChild(document.createTextNode(part));
+  });
+  return li;
+}
+
+function larkNotes(data) {
+  const cli = data.lark_cli || {};
+  if (data.lark_backend === "env_bot") {
+    return [
+      ["飞书使用应用凭据。在 .env 填写应用标识和应用密钥。"],
+      ["也可以把飞书后端改为 lark-cli。"],
+    ];
+  }
+  const standing = [
+    ["凭据由 lark-cli 管理，不必在这里填写应用密钥。"],
+    ["通知群写在项目的 ", { code: "hitl.feishu.notify_chat_id" }, "。"],
+  ];
+  if (cli.installed && cli.config_ok && cli.bot_ready) {
+    return [["发消息使用 lark-cli 的 bot 身份。"], ...standing];
+  }
+  return [[cli.hint || "先完成 lark-cli 的配置。"], ...standing];
 }
 
 function waOption(value, text) {
@@ -31,11 +144,33 @@ function waOption(value, text) {
   return option;
 }
 
+function fillWorkflowOptions(selected) {
+  const el = $("fieldProfile");
+  if (!el) return;
+  const value = selected || "";
+  if (el.tagName !== "WA-SELECT") {
+    el.value = value;
+    return;
+  }
+  const workflows = window.__workflows || [];
+  el.replaceChildren(waOption("", "不指定"));
+  for (const item of workflows) {
+    el.appendChild(waOption(item.workflow_id, item.title + " (" + item.workflow_id + ")"));
+  }
+  if (value && !workflows.some((item) => item.workflow_id === value)) {
+    el.appendChild(waOption(value, value));
+  }
+  el.value = value;
+}
+
 async function loadLists() {
-  const [sr, pr] = await Promise.all([
+  const [sr, pr, wr] = await Promise.all([
     fetch("/api/config/scenarios").then((r) => r.json()),
     fetch("/api/config/projects").then((r) => r.json()),
+    fetch("/api/workflows").then((r) => r.json()),
   ]);
+  window.__workflows = wr.workflows || [];
+  fillWorkflowOptions($("fieldProfile").value);
   const sp = $("scenarioPick");
   window.__scenarios = sr.scenarios || [];
   fillScenarioOptions(sp, window.__scenarios, sp.value);
@@ -87,7 +222,7 @@ function syncSkipWrap() {
 function setProjectFieldsEnabled(on) {
   document
     .querySelectorAll(
-      "#projectFields wa-input, #projectFields wa-select, #projectFields wa-textarea, #region-scenario wa-select, #region-notify wa-input",
+      "#projectFields wa-input, #projectFields wa-select, #projectFields wa-textarea, #region-scenario wa-select, #region-notify wa-input, #region-extra wa-input, #region-extra wa-select",
     )
     .forEach((el) => {
       el.disabled = !on;
@@ -99,7 +234,7 @@ function fillProjectForm(data) {
   $("fieldTitle").value = data.title || "";
   $("fieldDescription").value = data.description || "";
   $("fieldRemoteUrl").value = data.remote_url || "";
-  $("fieldProfile").value = data.profile_id || "";
+  fillWorkflowOptions(data.profile_id || "");
   $("fieldRetries").value = data.max_dev_retries == null ? "" : String(data.max_dev_retries);
   $("fieldDesign").value = data.design_track_mode || "inherit";
   $("fieldSkipMode").value = data.skip_mode || "inherit";
@@ -224,46 +359,54 @@ function fillRuntime(data) {
 }
 
 async function loadSettings() {
-  const ul = $("settingsList");
+  const root = $("settingsList");
+  const block = $("larkStatusBlock");
   const r = await fetch("/api/config/settings");
   const data = await r.json();
-  ul.replaceChildren();
+  root.replaceChildren();
   if (!r.ok) {
-    const li = document.createElement("li");
-    li.className = "settings-pending";
-    li.textContent = "读不到环境状态。确认服务已启动后再刷新。";
-    ul.appendChild(li);
+    const pending = document.createElement("p");
+    pending.className = "settings-pending";
+    pending.textContent = "读不到环境状态。确认服务已启动后再刷新。";
+    root.appendChild(pending);
+    if (block) block.hidden = true;
     return;
   }
-  for (const k of data.keys || []) {
-    const li = document.createElement("li");
-    const name = document.createElement("span");
-    name.className = "setting-key";
-    name.textContent = k.name;
-    const state = document.createElement("span");
-    state.className = "setting-value";
-    state.textContent = k.value_hint === "已设置" ? "不在页面显示" : (k.value_hint || "—");
-    const [label, tone] = chipFor(k);
-    const chip = document.createElement("span");
-    chip.className = "status-chip " + tone;
-    chip.textContent = label;
-    li.append(name, state, chip);
-    ul.appendChild(li);
+  const grouped = new Map();
+  for (const item of data.keys || []) {
+    const title = (SETTING_GROUPS[item.name] || ["其他"])[0];
+    if (!grouped.has(title)) grouped.set(title, []);
+    grouped.get(title).push(item);
   }
-  $("settingsNote").textContent = data.note || "";
-  const lc = $("larkCliStatus");
-  if (lc && data.lark_cli) {
-    const b = data.lark_backend || "lark_cli";
-    const x = data.lark_cli;
-    lc.textContent = [
-      `飞书后端 ${b}`,
-      `lark-cli ${x.installed ? "已安装" : "未安装"}`,
-      x.config_ok ? "配置已验证" : "配置未验证",
-      x.bot_ready ? "可以发消息" : "还不能发消息",
-      x.hint || "",
-    ]
-      .filter(Boolean)
-      .join("\n");
+  for (const title of ["Agent", "工作区", "飞书", "其他"]) {
+    const items = grouped.get(title);
+    if (!items || !items.length) continue;
+    const order = GROUP_ORDER[title] || [];
+    items.sort((a, b) => (order.indexOf(a.name) + 1 || 99) - (order.indexOf(b.name) + 1 || 99));
+    const section = document.createElement("section");
+    section.className = "env-group";
+    const heading = document.createElement("p");
+    heading.className = "section-title";
+    heading.textContent = title;
+    const list = document.createElement("ul");
+    list.className = "settings-list";
+    items.forEach((item) => list.appendChild(settingRow(item)));
+    section.append(heading, list);
+    root.appendChild(section);
+  }
+  const cli = $("larkCliStatus");
+  const notes = $("settingsNote");
+  if (block && cli && notes && data.lark_cli) {
+    const status = data.lark_cli;
+    block.hidden = false;
+    cli.replaceChildren(
+      statusRow("安装", status.installed ? "已安装" : "未安装", status.installed),
+      statusRow("配置", status.config_ok ? "已验证" : "未验证", status.config_ok),
+      statusRow("发消息", status.bot_ready ? "可发送" : "还不能", status.bot_ready),
+    );
+    notes.replaceChildren(...larkNotes(data).map(noteItem));
+  } else if (block) {
+    block.hidden = true;
   }
   fillRuntime(data);
 }
@@ -301,8 +444,7 @@ function markFormClean() {
 function formIsDirty() {
   if (projectMode === "from-directory") return false;
   if (projectMode === "new") {
-    const id = ($("newProjectId").value || "").trim();
-    return Boolean(id) || formSnapshotNow() !== formSnapshot;
+    return formSnapshotNow() !== formSnapshot;
   }
   if (!loadedProjectId) return false;
   return formSnapshotNow() !== formSnapshot;
@@ -335,10 +477,11 @@ function showProjectPieces(mode) {
   const isDir = mode === "from-directory";
   $("openPicker").hidden = !isOpen;
   $("dirPane").hidden = !isDir;
-  $("newIdRow").hidden = !isNew;
+  if ($("newIdHint")) $("newIdHint").hidden = !isNew;
   $("projectFields").hidden = isDir;
   $("region-scenario").hidden = isDir;
   $("region-notify").hidden = isDir;
+  if ($("region-extra")) $("region-extra").hidden = isDir;
   $("projectActions").hidden = isDir;
   $("btnCreateProject").hidden = !isNew;
   $("btnSaveProject").hidden = !isOpen || !loadedProjectId;
@@ -383,7 +526,6 @@ function enterNew(replace) {
   projectMode = "new";
   showProjectPieces("new");
   clearProjectForm();
-  $("newProjectId").value = "";
   $("projectYaml").value = "";
   setProjectFieldsEnabled(true);
   markFormClean();
@@ -455,7 +597,7 @@ function projectFormPayload() {
     description: $("fieldDescription").value.trim(),
     remote_url: $("fieldRemoteUrl").value.trim(),
     scenario_key: $("fieldScenario").value,
-    profile_id: $("fieldProfile").value.trim(),
+    profile_id: ($("fieldProfile").value || "").trim(),
     max_dev_retries: retries === "" ? null : Number(retries),
     design_track_mode: $("fieldDesign").value,
     skip_mode: $("fieldSkipMode").value,
@@ -523,16 +665,15 @@ $("btnSaveRaw").onclick = async () => {
   refreshEffective();
 };
 
-const PROJECT_ID_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
-
-async function createProjectRecord(id) {
+async function createProjectRecord(title) {
   const r = await fetch("/api/config/projects", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ project_id: id }),
+    body: JSON.stringify({ title: title }),
   });
   const data = await r.json();
-  if (!r.ok) throw new Error(data.detail || "没能创建项目。换一个标识再试。");
+  if (!r.ok) throw new Error(data.detail || "没能创建项目。");
+  return data.project_id;
 }
 
 async function saveProjectForm(id, payload) {
@@ -547,12 +688,12 @@ async function saveProjectForm(id, payload) {
 }
 
 $("btnCreateProject").onclick = async () => {
-  const id = $("newProjectId").value.trim();
+  const title = ($("fieldTitle").value || "").trim();
   showError($("projectError"), "");
   showSaved($("projectSaved"), "");
-  if (!PROJECT_ID_RE.test(id)) {
-    showError($("projectError"), "项目标识要以字母开头，后面只含字母、数字、_ 和 -。");
-    $("newProjectId").focus();
+  if (!title) {
+    showError($("projectError"), "先写标题。");
+    $("fieldTitle").focus();
     return;
   }
   const payload = projectFormPayload();
@@ -561,12 +702,19 @@ $("btnCreateProject").onclick = async () => {
     $("fieldRetries").focus();
     return;
   }
+  const button = $("btnCreateProject");
+  button.loading = true;
+  button.disabled = true;
+  let id = "";
   try {
-    await createProjectRecord(id);
+    id = await createProjectRecord(title);
     await saveProjectForm(id, payload);
   } catch (err) {
     showError($("projectError"), err.message || "没能创建项目。");
     return;
+  } finally {
+    button.loading = false;
+    button.disabled = false;
   }
   await loadLists();
   showSaved($("projectSaved"), "已创建项目 " + id + "。");
@@ -714,27 +862,30 @@ async function openChosenDirectory(path) {
     box.hidden = false;
     return;
   }
-  $("fieldDirId").value = data.suggested_id || "";
+  $("dirPane").dataset.folderName = (data.path || "").split(/[/\\]/).filter(Boolean).pop() || "";
   $("dirCreate").hidden = false;
 }
 
 $("btnCreateFromDir").onclick = async () => {
-  const id = $("fieldDirId").value.trim();
+  const folder = $("dirPane").dataset.folderName || "";
   const scenario = $("fieldDirScenario").value;
   showError($("projectError"), "");
-  if (!PROJECT_ID_RE.test(id)) {
-    showError($("projectError"), "项目标识要以字母开头，后面只含字母、数字、_ 和 -。");
-    $("fieldDirId").focus();
+  if (!folder) {
+    showError($("projectError"), "先填写目录。");
     return;
   }
   if (!scenario) {
     showError($("projectError"), "先选择项目类型。");
     return;
   }
+  const button = $("btnCreateFromDir");
+  button.loading = true;
+  button.disabled = true;
+  let id = "";
   try {
-    await createProjectRecord(id);
+    id = await createProjectRecord(folder);
     await saveProjectForm(id, {
-      title: id,
+      title: folder,
       description: "",
       remote_url: $("dirPane").dataset.remoteUrl || "",
       scenario_key: scenario,
@@ -750,6 +901,9 @@ $("btnCreateFromDir").onclick = async () => {
   } catch (err) {
     showError($("projectError"), err.message || "没能创建项目。");
     return;
+  } finally {
+    button.loading = false;
+    button.disabled = false;
   }
   await loadLists();
   showSaved($("projectSaved"), "已创建项目 " + id + "。");
@@ -785,7 +939,7 @@ $("btnSaveRuntime").onclick = saveRuntime;
     else if ((window.__projects || []).length) await enterOpen("", true);
     else enterNew(true);
   };
-  await window.applyProjectLocation();
+  if (location.pathname === "/project") await window.applyProjectLocation();
   await refreshEffective();
   } catch (err) {
     window.__configInitError = String(err && err.stack || err);
