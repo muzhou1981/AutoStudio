@@ -1,4 +1,4 @@
-"""auto_studio 默认工作流程（第一版骨架）。
+"""AutoStudio 默认工作流程（第一版骨架）。
 
 节点当前为占位实现：只更新图状态中的产物字段，便于在 LangGraph Studio 中联调结构与关卡。
 后续在各节点内接入角色定义（roles/）与后端插件（backends/）。

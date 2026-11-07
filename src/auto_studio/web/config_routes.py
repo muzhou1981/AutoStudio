@@ -8,9 +8,11 @@ from pydantic import BaseModel, Field
 from auto_studio.config.context import ConfigError
 from auto_studio.config.registry import (
     apply_project_form,
+    describe_project_directory,
     effective_config_summary,
     get_project_yaml,
     get_scenario_yaml,
+    list_directory_children,
     list_projects,
     list_scenarios,
     project_form_view,
@@ -47,8 +49,26 @@ def api_get_scenario(scenario_key: str) -> dict:
 
 @router.get("/projects")
 def api_list_projects() -> dict:
+    from auto_studio.config.workflow_nodes import DEFAULT_GRAPH_NODES
+
     items = [p.to_dict() for p in list_projects()]
-    return {"projects": items}
+    return {"projects": items, "nodes": sorted(DEFAULT_GRAPH_NODES)}
+
+
+@router.get("/directories")
+def api_list_directories(path: str = Query("")) -> dict:
+    try:
+        return list_directory_children(path)
+    except ConfigError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/projects/by-workspace")
+def api_projects_by_workspace(path: str = Query("")) -> dict:
+    try:
+        return describe_project_directory(path)
+    except ConfigError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/projects/{project_id}")
@@ -88,7 +108,7 @@ def api_save_project_form(project_id: str, body: ProjectFormBody) -> dict:
     if body.design_track_mode not in {"inherit", "on", "off"}:
         raise HTTPException(status_code=400, detail="设计轨须为沿用、开启或关闭")
     if body.skip_mode not in {"inherit", "custom"}:
-        raise HTTPException(status_code=400, detail="节点裁剪须为沿用场景或自行指定")
+        raise HTTPException(status_code=400, detail="节点裁剪须为沿用项目类型或自行指定")
     try:
         text = apply_project_form(project_id, body.model_dump())
     except ConfigError as e:

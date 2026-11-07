@@ -2,7 +2,7 @@
 artifact: run_record
 producer: engine
 consumers: [process_owner, config_manager]
-template_upstream: auto_studio（本轮运行索引；可参考复盘 Data coverage 表）
+template_upstream: AutoStudio（本轮运行索引；可参考复盘 Data coverage 表）
 template_url: ""
 ---
 

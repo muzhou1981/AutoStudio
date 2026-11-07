@@ -183,6 +183,85 @@ def save_project_yaml(
     build_run_context(scenario_key=scenario_key, project_id=pid, root=root)
 
 
+def list_directory_children(raw: str) -> dict[str, Any]:
+    """列出服务进程能读取的子目录，供目录选择使用。"""
+    from auto_studio.workspace.layout import _expand_workspace
+
+    text = raw.strip()
+    if text:
+        path = _expand_workspace(text)
+    else:
+        path = Path.home().resolve()
+    if not path.exists():
+        raise ConfigError("目录不存在。")
+    if not path.is_dir():
+        raise ConfigError("要选择目录，不能是文件。")
+    try:
+        path = path.resolve()
+        children = list(path.iterdir())
+    except PermissionError as e:
+        raise ConfigError("没有权限读取这个目录。") from e
+    except OSError as e:
+        raise ConfigError("读不到这个目录。") from e
+    dirs: list[dict[str, str]] = []
+    for child in children:
+        try:
+            if not child.is_dir():
+                continue
+            dirs.append({"name": child.name, "path": str(child.resolve())})
+        except OSError:
+            continue
+    dirs.sort(key=lambda item: (item["name"].startswith("."), item["name"].casefold()))
+    limit = 500
+    parent = None if path.parent == path else str(path.parent)
+    return {
+        "path": str(path),
+        "parent": parent,
+        "dirs": dirs[:limit],
+        "truncated": len(dirs) > limit,
+    }
+
+
+def describe_project_directory(raw: str, root: Path | None = None) -> dict[str, Any]:
+    """从服务侧目录找出已绑定的项目，或给出可创建的标识。"""
+    from auto_studio.workspace.layout import (
+        _expand_workspace,
+        _is_git_repo,
+        workspace_config_error,
+    )
+
+    text = raw.strip()
+    if not text:
+        raise ConfigError("先填写目录。")
+    error = workspace_config_error(text)
+    if error:
+        raise ConfigError(error)
+    path = _expand_workspace(text)
+    if not path.exists():
+        raise ConfigError("目录不存在。")
+    if not path.is_dir():
+        raise ConfigError("工作区要填目录，不能是文件。")
+    if not _is_git_repo(path):
+        raise ConfigError("这个目录不是 git 仓库。换一个已有仓库，或先保存到空目录。")
+    matches: list[str] = []
+    for item in list_projects(root):
+        workspace = project_workspace(item.project_id, root)
+        if not workspace:
+            continue
+        try:
+            if _expand_workspace(workspace) == path:
+                matches.append(item.project_id)
+        except OSError:
+            continue
+    suggested = path.name if _PROJECT_ID_RE.match(path.name) else ""
+    return {
+        "path": str(path),
+        "project_ids": matches,
+        "suggested_id": suggested,
+        "remote_url": git_remote_url(path),
+    }
+
+
 def project_workspace(project_id: str, root: Path | None = None) -> str:
     """项目 YAML 里的待开发目录。未配置时返回空字符串。"""
     try:
@@ -232,6 +311,35 @@ def project_form_view(project_id: str, root: Path | None = None) -> dict[str, An
         "workspace_resolved": str(resolve_target_root(project_id.strip())),
         "nodes": sorted(DEFAULT_GRAPH_NODES),
     }
+
+
+def git_remote_url(path: Path) -> str:
+    """读取仓库的 origin。没有 origin 时用第一个远端。地址不符合规则时返回空。"""
+    import subprocess
+
+    def _git(*args: str) -> str:
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(path), *args],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        if proc.returncode != 0:
+            return ""
+        return proc.stdout.strip()
+
+    url = _git("remote", "get-url", "origin")
+    if not url:
+        names = [line.strip() for line in _git("remote").splitlines() if line.strip()]
+        if names:
+            url = _git("remote", "get-url", names[0])
+    if not url or remote_url_error(url):
+        return ""
+    return url
 
 
 def remote_url_error(raw: str) -> str | None:

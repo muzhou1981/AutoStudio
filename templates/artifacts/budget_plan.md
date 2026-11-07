@@ -3,7 +3,7 @@ artifact: budget_plan
 producer: finance
 consumers: [project_manager]
 phase: rough
-template_upstream: auto_studio（无 GitHub 对标；phase: rough | final）
+template_upstream: AutoStudio（无 GitHub 对标；phase: rough | final）
 template_url: ""
 ---
 

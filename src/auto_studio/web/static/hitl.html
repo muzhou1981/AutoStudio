@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
-  <title>auto_studio · Web HITL</title>
+  <title>AutoStudio · Web HITL</title>
   <script>
     (function () {
       var key = "auto_studio_hitl_theme";
@@ -17,15 +17,15 @@
       document.documentElement.classList.toggle("wa-light", theme !== "dark");
       document.documentElement.dataset.route =
         location.pathname === "/config" ? "config" : location.pathname === "/project" ? "project" : "hitl";
-      if (location.pathname === "/config") document.title = "auto_studio · 配置";
-      if (location.pathname === "/project") document.title = "auto_studio · 项目配置";
-      if (location.pathname === "/" || location.pathname === "") document.title = "auto_studio · 运行";
+      if (location.pathname === "/config") document.title = "AutoStudio · 配置";
+      if (location.pathname === "/project") document.title = "AutoStudio · 项目";
+      if (location.pathname === "/" || location.pathname === "") document.title = "AutoStudio · 运行";
     })();
   </script>
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css" />
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/utilities.css" />
-  <link rel="stylesheet" href="/static/shared.css" />
-  <link rel="stylesheet" href="/static/hitl.css" />
+  <link rel="stylesheet" href="/static/shared.css?v=20261107-open" />
+  <link rel="stylesheet" href="/static/hitl.css?v=20261107-dir4" />
   <script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
 </head>
 <body>
@@ -37,21 +37,21 @@
           <div class="side-group" data-route="project">
             <a class="sidebar-link" href="/project">
               <wa-icon name="file" library="system"></wa-icon>
-              <span>项目配置</span>
+              <span>项目</span>
             </a>
             <div class="side-sub">
               <div class="side-sub-inner">
-              <a class="sidebar-link sidebar-sub" href="/project#region-project">
+              <a class="sidebar-link sidebar-sub" data-project-mode="new" href="/project#new">
+                <wa-icon name="plus" library="system"></wa-icon>
+                <span>新建</span>
+              </a>
+              <a class="sidebar-link sidebar-sub" data-project-mode="open" href="/project#open">
                 <wa-icon name="file" library="system"></wa-icon>
-                <span>项目</span>
+                <span>打开</span>
               </a>
-              <a class="sidebar-link sidebar-sub" href="/project#region-scenario">
-                <wa-icon name="table-columns" library="system"></wa-icon>
-                <span>场景</span>
-              </a>
-              <a class="sidebar-link sidebar-sub" href="/project#region-notify">
-                <wa-icon name="user" library="system"></wa-icon>
-                <span>通知</span>
+              <a class="sidebar-link sidebar-sub" data-project-mode="from-directory" href="/project#from-directory">
+                <svg class="sidebar-svg" viewBox="0 0 576 512" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M88.7 223.8L0 375.8 0 96C0 60.7 28.7 32 64 32l117.5 0c17 0 33.3 6.7 45.3 18.7l26.5 26.5c12 12 28.3 18.7 45.3 18.7L416 96c35.3 0 64 28.7 64 64l0 32-336 0c-22.8 0-43.8 12.1-55.3 31.8zm27.6 16.1C122.1 230 132.6 224 144 224l400 0c11.5 0 22 6.1 27.7 16.1s5.7 22.2-.1 32.1l-112 192C453.9 474 443.4 480 432 480L32 480c-11.5 0-22-6.1-27.7-16.1s-5.7-22.2 .1-32.1l112-192z"/></svg>
+                <span>从目录打开</span>
               </a>
               </div>
             </div>
@@ -133,8 +133,8 @@
             <wa-select id="project" label="项目" placeholder="先选择项目"></wa-select>
             <wa-input id="runName" label="Run 命名" placeholder="先选择项目"></wa-input>
           </div>
-          <p class="hint-block" id="runScenarioHint">场景在项目配置里绑定。先选择项目，本轮沿用该项目的场景。命名默认是项目标识加递增序号，可改。</p>
-          <wa-textarea id="req" label="描述本轮交付目标" hint="human_request" rows="5" placeholder="例如：为 npu_operator 场景实现 Mul 算子，含单测与性能基线…"></wa-textarea>
+          <p class="hint-block" id="runScenarioHint">命名默认是项目标识加递增序号，可改。</p>
+          <wa-textarea id="req" label="描述本轮交付目标" rows="5" placeholder="例如：为 npu_operator 场景实现 Mul 算子，含单测与性能基线…"></wa-textarea>
 
           <input id="thread" type="hidden" />
 
@@ -150,7 +150,9 @@
           <hr class="main-divider" />
 
           <div class="func-region" id="region-rail">
+          <p class="section-title" id="railHeading">运行状态</p>
           <p id="railCount" class="rail-count" hidden></p>
+          <div id="swimRail" class="swim-rail" aria-label="流程泳道"></div>
           <ol id="nodeRail" class="node-rail"></ol>
           </div>
 
@@ -211,18 +213,37 @@
           <section class="config-pane-project" aria-labelledby="projectHeading">
             <div class="func-region" id="region-project">
             <p class="section-title" id="projectHeading">项目</p>
-            <p class="panel-lead">先选项目，再填标题、说明、远程仓库和工作区。整份 YAML 在这块末尾。</p>
-            <wa-select id="projectPick" label="选择项目" placeholder="选择项目"></wa-select>
-            <div class="row-actions">
-              <wa-button id="btnNewProject" appearance="outlined" variant="neutral">新建项目</wa-button>
-              <wa-button id="btnSaveProject" variant="brand">保存项目</wa-button>
-            </div>
-            <div id="newProjectRow" hidden>
-              <div class="inline-field">
-                <wa-input id="newProjectId" label="项目标识" placeholder="字母开头，可含 _ 和 -" spellcheck="false"></wa-input>
-                <wa-button id="btnCancelProject" appearance="outlined" variant="neutral">取消</wa-button>
-                <wa-button id="btnCreateProject" variant="brand">创建</wa-button>
+            <div id="openPicker">
+              <wa-select id="projectPick" label="选择项目" placeholder="选择项目"></wa-select>
+              <div class="row-actions" id="openChosenAction">
+                <wa-button id="btnOpenChosen" variant="brand">打开</wa-button>
               </div>
+              <p class="hint-block" id="openHint">先选择要打开的项目。</p>
+              <p class="hint-block" id="openEmpty" hidden>还没有项目。</p>
+              <div class="row-actions" id="openEmptyAction" hidden>
+                <wa-button id="btnGoNew" appearance="outlined" variant="neutral">新建</wa-button>
+              </div>
+              <p class="hint-block" id="openProjectId" hidden></p>
+            </div>
+            <div id="dirPane" hidden>
+              <div class="dir-path-row">
+                <wa-input id="dirPath" label="目录" placeholder="/path/to/repo" spellcheck="false"></wa-input>
+                <wa-button id="btnPickDirectory" appearance="outlined" variant="neutral" aria-label="选择目录">
+                  <svg viewBox="0 0 576 512" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M88.7 223.8L0 375.8 0 96C0 60.7 28.7 32 64 32l117.5 0c17 0 33.3 6.7 45.3 18.7l26.5 26.5c12 12 28.3 18.7 45.3 18.7L416 96c35.3 0 64 28.7 64 64l0 32-336 0c-22.8 0-43.8 12.1-55.3 31.8zm27.6 16.1C122.1 230 132.6 224 144 224l400 0c11.5 0 22 6.1 27.7 16.1s5.7 22.2-.1 32.1l-112 192C453.9 474 443.4 480 432 480L32 480c-11.5 0-22-6.1-27.7-16.1s-5.7-22.2 .1-32.1l112-192z"/></svg>
+                </wa-button>
+              </div>
+              <p class="hint-block">服务进程能读取的 git 目录绝对路径。选定后直接打开，手填时按回车打开。</p>
+              <div id="dirMatches" class="choice-grid" hidden></div>
+              <div id="dirCreate" hidden>
+                <wa-input id="fieldDirId" label="项目标识" placeholder="字母开头，可含 _ 和 -" spellcheck="false"></wa-input>
+                <wa-select id="fieldDirScenario" label="项目类型"></wa-select>
+                <div class="row-actions">
+                  <wa-button id="btnCreateFromDir" variant="brand">创建并打开</wa-button>
+                </div>
+              </div>
+            </div>
+            <div id="newIdRow">
+              <wa-input id="newProjectId" label="项目标识" placeholder="字母开头，可含 _ 和 -" spellcheck="false"></wa-input>
             </div>
             <div id="projectFields">
               <wa-input id="fieldTitle" label="标题"></wa-input>
@@ -231,9 +252,13 @@
               <wa-input id="fieldWorkspace" label="工作区" hint="待开发项目的 git 目录，可空" placeholder="/path/to/repo" spellcheck="false"></wa-input>
               <p class="hint-block" id="workspaceHint"></p>
               <wa-input id="fieldProfile" label="流程配置名" hint="profile_id，可空" spellcheck="false"></wa-input>
-              <wa-input id="fieldRetries" label="开发重试上限" hint="空则沿用场景" type="number" min="0" step="1" inputmode="numeric"></wa-input>
+              <wa-input id="fieldRetries" label="开发重试上限" hint="空则沿用项目类型" type="number" min="0" step="1" inputmode="numeric"></wa-input>
             </div>
-            <wa-details class="raw" summary="原文 project.yaml">
+            <div class="row-actions" id="projectActions">
+              <wa-button id="btnCreateProject" variant="brand">创建</wa-button>
+              <wa-button id="btnSaveProject" appearance="outlined" variant="neutral" hidden>保存</wa-button>
+            </div>
+            <wa-details class="raw" id="projectRaw" summary="原文 project.yaml">
               <wa-textarea id="projectYaml" label="整份 YAML" rows="12" spellcheck="false" placeholder="先选择项目，或新建一个。"></wa-textarea>
               <div class="row-actions">
                 <wa-button id="btnSaveRaw" appearance="outlined" variant="neutral">用原文覆盖</wa-button>
@@ -244,15 +269,15 @@
             </div>
 
             <div class="func-region" id="region-scenario">
-              <p class="section-title" id="scenarioBindHeading">场景</p>
-              <wa-select id="fieldScenario" label="绑定场景"></wa-select>
+              <p class="section-title" id="scenarioBindHeading">项目类型</p>
+              <wa-select id="fieldScenario" label="项目类型"></wa-select>
               <wa-select id="fieldDesign" label="设计轨" value="inherit">
-                <wa-option value="inherit">沿用场景</wa-option>
+                <wa-option value="inherit">沿用项目类型</wa-option>
                 <wa-option value="on">开启</wa-option>
                 <wa-option value="off">关闭</wa-option>
               </wa-select>
               <wa-select id="fieldSkipMode" label="节点裁剪" value="inherit">
-                <wa-option value="inherit">沿用场景</wa-option>
+                <wa-option value="inherit">沿用项目类型</wa-option>
                 <wa-option value="custom">在项目里指定</wa-option>
               </wa-select>
               <div id="skipWrap" hidden>
@@ -316,23 +341,23 @@
         </div>
       </main>
 
-      <aside class="workspace-inspect" aria-label="场景与环境">
+      <aside class="workspace-inspect" aria-label="项目类型与环境">
         <div class="inspect-resize" role="separator" aria-orientation="vertical" aria-label="拖动调整检视栏宽度" tabindex="0"></div>
         <div class="inspect-head config-pane-scenario">
-          <h2 id="scenarioHeading">场景</h2>
+          <h2 id="scenarioHeading">项目类型</h2>
         </div>
         <div class="inspect-body">
           <div class="config-pane-scenario">
-          <p class="panel-lead">场景文件只读。原文和合并 JSON 在下方折叠入口里。</p>
-          <wa-select id="scenarioPick" label="查看场景"></wa-select>
+          <p class="panel-lead">项目类型文件只读。原文和合并 JSON 在下方折叠入口里。</p>
+          <wa-select id="scenarioPick" label="查看项目类型"></wa-select>
           <wa-details class="raw" summary="原文 scenario.yaml">
-            <wa-textarea id="scenarioYaml" label="场景原文" rows="8" readonly></wa-textarea>
+            <wa-textarea id="scenarioYaml" label="项目类型原文" rows="8" readonly></wa-textarea>
           </wa-details>
           <p class="section-title" id="previewHeading">合并结果</p>
-          <p class="panel-lead">场景与项目叠在一起之后，运行时实际采用的值。</p>
+          <p class="panel-lead">项目类型与项目叠在一起之后，运行时实际采用的值。</p>
           <wa-button id="btnEffective" appearance="outlined" variant="neutral">刷新预览</wa-button>
           <wa-details class="raw" summary="原文 JSON">
-            <pre id="effectiveOut" class="mono-block">选择项目或场景后会刷新。</pre>
+            <pre id="effectiveOut" class="mono-block">选择项目或项目类型后会刷新。</pre>
           </wa-details>
           </div>
         </div>
@@ -703,14 +728,92 @@
       return mark;
     }
 
-    function renderRail(rail) {
+    const SWIM_LANES = [
+      { id: "decision", label: "人类" },
+      { id: "project", label: "项目" },
+      { id: "config", label: "配置" },
+      { id: "ux", label: "体验" },
+      { id: "ui", label: "界面" },
+      { id: "visual", label: "视觉" },
+      { id: "architect", label: "架构" },
+      { id: "develop", label: "开发" },
+      { id: "review", label: "评审" },
+      { id: "test", label: "测试" },
+      { id: "qa", label: "QA" },
+      { id: "process", label: "流程" },
+      { id: "finance", label: "财务" },
+    ];
+    const SWIM_LANE_OF = {
+      run_start: "decision",
+      run_end: "decision",
+      project_manager_draft: "project",
+      project_manager_scope: "project",
+      project_manager_delivery: "project",
+      gate_requirement_confirm: "decision",
+      gate_architecture_review: "decision",
+      gate_final_delivery: "decision",
+      config_manager_plan: "config",
+      config_manager_closeout: "config",
+      ux_designer: "ux",
+      ui_designer: "ui",
+      visual_designer: "visual",
+      architect: "architect",
+      developer: "develop",
+      change_control: "develop",
+      code_reviewer: "review",
+      tester_testability: "test",
+      tester_execute: "test",
+      qa: "qa",
+      process_owner_retro: "process",
+      finance_budget_rough: "finance",
+      finance_budget_final: "finance",
+      finance_cost_snapshot: "finance",
+    };
+    function swimLaneId(id) {
+      if (SWIM_LANE_OF[id]) return SWIM_LANE_OF[id];
+      if (String(id).startsWith("gate_")) return "decision";
+      return "develop";
+    }
+
+    let swimObserver = null;
+
+    function swimKind(id) {
+      if (id === "run_start" || id === "run_end") return "marker";
+      if (String(id).startsWith("gate_")) return "gate";
+      return "node";
+    }
+
+    function makeRailButton(cell, current) {
+      const pointed = current && current.id === cell.id;
+      const stateLabel = STATE_LABEL[cell.state] || cell.state;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "rail-cell" + (cell.state === "active" ? " is-live" : "");
+      button.dataset.state = cell.state;
+      button.dataset.id = cell.id;
+      button.title = stateLabel;
+      button.setAttribute("aria-label", cell.label + "，" + stateLabel);
+      if (pointed) button.setAttribute("aria-current", "step");
+      const viewing = nodeParam() || (current && current.id) || "";
+      button.classList.toggle("is-viewed", cell.id === viewing);
+      button.setAttribute("aria-pressed", cell.id === viewing ? "true" : "false");
+      button.addEventListener("click", () => {
+        const liveId = current && current.id;
+        setNodeParam(cell.id === liveId ? "" : cell.id);
+        const nextView = nodeParam() || liveId || "";
+        document.querySelectorAll("#region-rail .rail-cell").forEach((el) => {
+          const on = el.dataset.id === nextView;
+          el.classList.toggle("is-viewed", on);
+          el.setAttribute("aria-pressed", on ? "true" : "false");
+        });
+        renderInspect(lastStatus && lastStatus.rail ? lastStatus : null);
+      });
+      return button;
+    }
+
+    function renderFlatRail(cells, current) {
       const list = $("nodeRail");
-      const count = $("railCount");
-      count.hidden = true;
       list.replaceChildren();
-      const cells = (rail && rail.cells) || [];
-      if (!cells.length) return;
-      const current = currentCell(rail);
       cells.forEach((cell, index) => {
         const pointed = current && current.id === cell.id;
         const li = document.createElement("li");
@@ -719,37 +822,297 @@
           const kind = pointed ? (cell.state === "active" ? "is-live" : "is-mark") : "";
           li.appendChild(railWire(kind));
         }
-        const cellEl = document.createElement("button");
-        cellEl.type = "button";
-        const stateLabel = STATE_LABEL[cell.state] || cell.state;
-        cellEl.className = "rail-cell" + (cell.state === "active" ? " is-live" : "");
-        cellEl.dataset.state = cell.state;
-        cellEl.dataset.id = cell.id;
-        cellEl.title = stateLabel;
-        cellEl.setAttribute("aria-label", cell.label + "，" + stateLabel);
-        if (pointed) cellEl.setAttribute("aria-current", "step");
-        const viewing = nodeParam() || (current && current.id) || "";
-        if (cell.id === viewing) {
-          cellEl.classList.add("is-viewed");
-          cellEl.setAttribute("aria-pressed", "true");
-        } else {
-          cellEl.setAttribute("aria-pressed", "false");
-        }
-        cellEl.textContent = cell.label;
-        cellEl.addEventListener("click", () => {
-          const liveId = current && current.id;
-          setNodeParam(cell.id === liveId ? "" : cell.id);
-          const viewing = nodeParam() || liveId || "";
-          list.querySelectorAll(".rail-cell").forEach((el) => {
-            const on = el.dataset.id === viewing;
-            el.classList.toggle("is-viewed", on);
-            el.setAttribute("aria-pressed", on ? "true" : "false");
-          });
-          renderInspect(lastStatus && lastStatus.rail ? lastStatus : null);
-        });
-        li.appendChild(cellEl);
+        const button = makeRailButton(cell, current);
+        button.textContent = cell.label;
+        li.appendChild(button);
         list.appendChild(li);
       });
+    }
+
+    function renderSwim(cells, current) {
+      const host = $("swimRail");
+      host.replaceChildren();
+      const lanes = SWIM_LANES.filter((lane) => cells.some((cell) => swimLaneId(cell.id) === lane.id));
+      const grid = document.createElement("div");
+      grid.className = "swim-grid";
+      const laterDone = current
+        ? cells.some((cell, index) => index > cells.findIndex((item) => item.id === current.id) && cell.state === "done")
+        : false;
+      if (laterDone) grid.classList.add("has-return");
+      lanes.forEach((lane) => {
+        const row = document.createElement("div");
+        row.className = "swim-lane";
+        const label = document.createElement("div");
+        label.className = "swim-label";
+        label.textContent = lane.label;
+        const track = document.createElement("div");
+        track.className = "swim-track";
+        cells.forEach((cell, index) => {
+          if (swimLaneId(cell.id) !== lane.id) return;
+          const kind = swimKind(cell.id);
+          const button = makeRailButton(cell, current);
+          button.classList.add("swim-cell", "is-" + kind);
+          button.dataset.seq = String(index);
+          button.title = cell.label + "，" + (STATE_LABEL[cell.state] || cell.state);
+          const name = document.createElement("span");
+          name.className = "swim-name";
+          name.textContent = cell.label;
+          if (kind === "gate") {
+            const mark = document.createElement("img");
+            mark.className = "swim-decision";
+            mark.src = "/static/fork-sign.png";
+            mark.alt = "";
+            button.append(mark, name);
+          } else {
+            button.append(name);
+          }
+          track.appendChild(button);
+        });
+        row.append(label, track);
+        grid.appendChild(row);
+      });
+      const scroller = document.createElement("div");
+      scroller.className = "swim-scroll";
+      scroller.appendChild(grid);
+      host.appendChild(scroller);
+      if (swimObserver) swimObserver.disconnect();
+      swimObserver = new ResizeObserver(() => layoutSwimEdges());
+      swimObserver.observe(scroller);
+      layoutSwimEdges();
+    }
+
+    let swimLaying = false;
+
+    function swimMarker(id, color) {
+      const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+      marker.setAttribute("id", id);
+      marker.setAttribute("viewBox", "0 0 8 8");
+      marker.setAttribute("refX", "7");
+      marker.setAttribute("refY", "4");
+      marker.setAttribute("markerWidth", "7");
+      marker.setAttribute("markerHeight", "7");
+      marker.setAttribute("orient", "auto");
+      const head = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      head.setAttribute("d", "M1 1 L7 4 L1 7");
+      head.setAttribute("fill", "none");
+      head.setAttribute("stroke", color);
+      head.setAttribute("stroke-width", "1.4");
+      head.setAttribute("stroke-linecap", "round");
+      head.setAttribute("stroke-linejoin", "round");
+      marker.appendChild(head);
+      return marker;
+    }
+
+    function layoutSwimTimeline(grid) {
+      const track = grid.querySelector(".swim-track");
+      if (!track) return;
+      const width = track.clientWidth;
+      if (width < 2) return;
+      const buttons = [...grid.querySelectorAll(".swim-cell")].sort(
+        (a, b) => Number(a.dataset.seq) - Number(b.dataset.seq)
+      );
+      const n = buttons.length;
+      if (!n) return;
+      const widths = buttons.map((el) => el.offsetWidth);
+      const gap = 6;
+      const left = new Array(n).fill(0);
+      if (n > 1) {
+        const start = widths[0] / 2;
+        const end = Math.max(start, width - widths[n - 1] / 2);
+        for (let i = 0; i < n; i += 1) {
+          left[i] = start + ((end - start) * i) / (n - 1) - widths[i] / 2;
+        }
+      }
+      const groups = new Map();
+      buttons.forEach((el, index) => {
+        const lane = el.closest(".swim-lane");
+        if (!groups.has(lane)) groups.set(lane, []);
+        groups.get(lane).push(index);
+      });
+      const separate = () => {
+        groups.forEach((indices) => {
+          for (let k = 1; k < indices.length; k += 1) {
+            const prev = indices[k - 1];
+            const next = indices[k];
+            const minLeft = left[prev] + widths[prev] + gap;
+            if (left[next] < minLeft) left[next] = minLeft;
+          }
+        });
+        const minStep = Math.max(14, width / (n + 2));
+        for (let i = 1; i < n; i += 1) {
+          const prevCenter = left[i - 1] + widths[i - 1] / 2;
+          const center = left[i] + widths[i] / 2;
+          if (center < prevCenter + minStep) left[i] += prevCenter + minStep - center;
+        }
+      };
+      separate();
+      const overflow = left[n - 1] + widths[n - 1] - width;
+      if (overflow > 1 && left[n - 1] > 0) {
+        const scale = (width - widths[n - 1]) / left[n - 1];
+        for (let i = 0; i < n; i += 1) left[i] *= scale;
+      }
+      buttons.forEach((el, index) => {
+        const maxLeft = Math.max(0, width - widths[index]);
+        el.style.left = Math.min(Math.max(0, left[index]), maxLeft) + "px";
+      });
+    }
+
+    function layoutSwimEdges() {
+      if (swimLaying || !window.matchMedia("(min-width: 900px)").matches) return;
+      swimLaying = true;
+      const grid = document.querySelector("#swimRail .swim-grid");
+      if (!grid) {
+        swimLaying = false;
+        return;
+      }
+      const buttons = [...grid.querySelectorAll(".swim-cell")].sort(
+        (a, b) => Number(a.dataset.seq) - Number(b.dataset.seq)
+      );
+      if (buttons.length < 2) {
+        swimLaying = false;
+        return;
+      }
+      const box = grid.getBoundingClientRect();
+      if (box.width < 2) {
+        swimLaying = false;
+        return;
+      }
+      layoutSwimTimeline(grid);
+      let svg = grid.querySelector(".swim-edges");
+      if (!svg) {
+        svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("class", "swim-edges");
+        svg.setAttribute("aria-hidden", "true");
+        grid.appendChild(svg);
+      }
+      svg.setAttribute("viewBox", "0 0 " + grid.scrollWidth + " " + grid.scrollHeight);
+      svg.replaceChildren();
+      const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+      const accent = getComputedStyle(grid).getPropertyValue("--accent").trim() || "#2563eb";
+      defs.append(swimMarker("swimHead", "#71717a"), swimMarker("swimHeadHot", accent));
+      svg.appendChild(defs);
+      const spot = (el) => {
+        const rect = el.getBoundingClientRect();
+        return {
+          x: rect.left - box.left + rect.width / 2,
+          y: rect.top - box.top + rect.height / 2,
+          left: rect.left - box.left,
+          right: rect.right - box.left,
+          top: rect.top - box.top,
+          bottom: rect.bottom - box.top,
+        };
+      };
+      const roundedOrth = (points, radius) => {
+        if (points.length < 2) return "";
+        let d = "M " + points[0].x + " " + points[0].y;
+        for (let i = 1; i < points.length - 1; i += 1) {
+          const prev = points[i - 1];
+          const cur = points[i];
+          const next = points[i + 1];
+          const inLen = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+          const outLen = Math.hypot(next.x - cur.x, next.y - cur.y);
+          const rad = Math.min(radius, inLen / 2, outLen / 2);
+          if (rad < 1) {
+            d += " L " + cur.x + " " + cur.y;
+            continue;
+          }
+          const inX = cur.x - ((cur.x - prev.x) / inLen) * rad;
+          const inY = cur.y - ((cur.y - prev.y) / inLen) * rad;
+          const outX = cur.x + ((next.x - cur.x) / outLen) * rad;
+          const outY = cur.y + ((next.y - cur.y) / outLen) * rad;
+          d += " L " + inX + " " + inY + " Q " + cur.x + " " + cur.y + " " + outX + " " + outY;
+        }
+        const last = points[points.length - 1];
+        return d + " L " + last.x + " " + last.y;
+      };
+      const sideLink = (a, b) => {
+        const x1 = a.right + 1;
+        const y1 = a.y;
+        const x2 = b.left - 2;
+        const y2 = b.y;
+        if (Math.abs(y1 - y2) < 8 && x2 > x1) {
+          return "M " + x1 + " " + y1 + " L " + x2 + " " + y2;
+        }
+        if (x2 > x1 + 12) {
+          const mid = (x1 + x2) / 2;
+          return roundedOrth(
+            [{ x: x1, y: y1 }, { x: mid, y: y1 }, { x: mid, y: y2 }, { x: x2, y: y2 }],
+            8
+          );
+        }
+        const xOut = a.right + 14;
+        const xIn = b.left - 14;
+        const midY = y1 + (y2 - y1) / 2;
+        return roundedOrth(
+          [
+            { x: x1, y: y1 },
+            { x: xOut, y: y1 },
+            { x: xOut, y: midY },
+            { x: xIn, y: midY },
+            { x: xIn, y: y2 },
+            { x: x2, y: y2 },
+          ],
+          8
+        );
+      };
+      const points = buttons.map(spot);
+      const current = buttons.find((el) => el.getAttribute("aria-current") === "step");
+      const currentIndex = current ? buttons.indexOf(current) : -1;
+      let returnFrom = -1;
+      if (currentIndex >= 0) {
+        for (let index = buttons.length - 1; index > currentIndex; index -= 1) {
+          if (buttons[index].dataset.state === "done") {
+            returnFrom = index;
+            break;
+          }
+        }
+      }
+      const hot = !current
+        ? ""
+        : current.dataset.state === "active"
+          ? "is-live"
+          : (current.dataset.state === "waiting" || current.dataset.state === "paused" || current.dataset.state === "stopped")
+            ? "is-mark"
+            : "";
+      const add = (d, kind) => {
+        if (!d) return;
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", d);
+        path.setAttribute("class", "swim-edge" + (kind ? " " + kind : ""));
+        path.setAttribute("marker-end", kind ? "url(#swimHeadHot)" : "url(#swimHead)");
+        svg.appendChild(path);
+      };
+      for (let index = 0; index < points.length - 1; index += 1) {
+        const intoCurrent = returnFrom < 0 && index + 1 === currentIndex;
+        add(sideLink(points[index], points[index + 1]), intoCurrent ? hot : "");
+      }
+      if (returnFrom > currentIndex && currentIndex >= 0) {
+        const from = points[returnFrom];
+        const to = points[currentIndex];
+        const y = Math.max(8, Math.min(from.top, to.top) - 16);
+        add(sideLink(from, to), hot);
+        const note = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        note.setAttribute("class", "swim-return");
+        note.setAttribute("x", String((from.x + to.x) / 2));
+        note.setAttribute("y", String(y - 3));
+        note.textContent = "退回";
+        svg.appendChild(note);
+      }
+      swimLaying = false;
+    }
+
+    function renderRail(rail) {
+      const count = $("railCount");
+      count.hidden = true;
+      const cells = (rail && rail.cells) || [];
+      const current = currentCell(rail);
+      if (!cells.length) {
+        $("nodeRail").replaceChildren();
+        $("swimRail").replaceChildren();
+        return;
+      }
+      renderFlatRail(cells, current);
+      renderSwim(cells, current);
     }
 
     function renderInspect(data) {
@@ -794,9 +1157,23 @@
         row.append(dt, dd);
         dl.appendChild(row);
       }
-      const artifactLines = [];
-      for (const key of cell.artifacts || []) {
-        if (vals[key]) artifactLines.push(key + "\n" + String(vals[key]).slice(0, 400));
+      const artifactSection = document.createElement("section");
+      artifactSection.className = "inspect-block";
+      const artifactHeading = document.createElement("h3");
+      artifactHeading.textContent = "产物";
+      const artifactCards = document.createElement("div");
+      artifactCards.className = "artifact-stack";
+      artifactSection.append(artifactHeading, artifactCards);
+      const artifactKeys = (cell.artifacts || []).filter((key) => key !== "cost_ledger" && vals[key]);
+      if (!artifactKeys.length) {
+        const empty = document.createElement("p");
+        empty.className = "artifact-empty";
+        empty.textContent = "这一步还没有产物。";
+        artifactCards.appendChild(empty);
+      } else {
+        for (const key of artifactKeys) {
+          artifactCards.appendChild(artifactCard(key, String(vals[key])));
+        }
       }
       const costLines = String(vals.cost_ledger || "").split("\n").filter((line) => {
         if (!line.trim()) return false;
@@ -807,12 +1184,251 @@
       const retryText = Number.isFinite(limit)
         ? "已用 " + used + " / 上限 " + limit + (used >= limit ? "。已碰到开发重试上限。" : "。未碰到开发重试上限。")
         : "已用 " + used + "。";
+      const session = conversations[cell.id]
+        ? formatConversation(conversations[cell.id])
+        : "<p class=\"artifact-empty\">这一步还没有会话。</p>";
       box.replaceChildren(
         dl,
-        inspectSection("产物", artifactLines.length ? artifactLines.join("\n\n") : "这一步还没有产物。"),
-        inspectSection("调用次数", costLines.length ? String(costLines.length) + " 次\n" + costLines.slice(-3).join("\n") : "0 次"),
+        conversationSection(cell.id, session),
+        artifactSection,
+        inspectSection("调用次数", (costLines.length || 0) + " 次"),
         inspectSection("开发重试", retryText)
       );
+      if (cell.role) loadCellConversation(data.thread_id, cell.id);
+      if (data.thread_id) loadArtifactTexts(data.thread_id, artifactCards);
+    }
+
+    const ARTIFACT_LABELS = {
+      requirement_spec: "需求说明",
+      testability_review: "可测性",
+      test_cases: "测试用例",
+      test_report: "测试报告",
+      config_plan: "配置计划",
+      baseline_log: "基线记录",
+      config_baseline: "交付基线",
+      config_retro: "配置复盘",
+      budget_plan: "预算",
+      cost_report: "成本报告",
+      cost_ledger: "成本账本",
+      ux_spec: "体验说明",
+      ui_spec: "界面规格",
+      visual_assets: "视觉资源",
+      architecture_design: "架构设计",
+      task_plan: "任务计划",
+      code_change: "代码变更",
+      change_request: "变更请求",
+      review_report: "评审意见",
+      qa_report: "质量报告",
+      delivery_report: "交付报告",
+      retro_report: "复盘",
+      process_proposals: "改进提案",
+    };
+
+    function escapeHtml(text) {
+      return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function inlineMarkdown(text) {
+      let html = escapeHtml(text);
+      html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+      html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, href) => {
+        if (/["'<>]/.test(href) || href.startsWith("//")) return match;
+        if (!/^(https?:\/\/|[^:]*$)/.test(href)) return match;
+        return '<a href="' + href + '">' + label + "</a>";
+      });
+      html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+      return html;
+    }
+
+    function renderMarkdown(src) {
+      const lines = String(src || "").replace(/\r\n/g, "\n").split("\n");
+      const blocks = [];
+      let i = 0;
+      const isFence = (line) => line.startsWith("```");
+      const isHeading = (line) => /^#{1,3}\s/.test(line);
+      const isBullet = (line) => /^[-*]\s/.test(line);
+      const isNumber = (line) => /^\d+\.\s/.test(line);
+      const isTable = (index) => /^\s*\|/.test(lines[index] || "") && /^\s*\|?\s*:?-{3,}/.test(lines[index + 1] || "");
+      while (i < lines.length) {
+        if (isFence(lines[i])) {
+          const buf = [];
+          i += 1;
+          while (i < lines.length && !isFence(lines[i])) {
+            buf.push(lines[i]);
+            i += 1;
+          }
+          if (i < lines.length) i += 1;
+          blocks.push("<pre class=\"artifact-code\"><code>" + escapeHtml(buf.join("\n")) + "</code></pre>");
+          continue;
+        }
+        if (isTable(i)) {
+          const header = lines[i].split("|").slice(1, -1).map((cell) => cell.trim());
+          i += 2;
+          const body = [];
+          while (i < lines.length && /^\s*\|/.test(lines[i])) {
+            body.push(lines[i].split("|").slice(1, -1).map((cell) => cell.trim()));
+            i += 1;
+          }
+          let table = "<div class=\"artifact-table\"><table><thead><tr>";
+          header.forEach((cell) => { table += "<th>" + inlineMarkdown(cell) + "</th>"; });
+          table += "</tr></thead><tbody>";
+          body.forEach((row) => {
+            table += "<tr>";
+            row.forEach((cell) => { table += "<td>" + inlineMarkdown(cell) + "</td>"; });
+            table += "</tr>";
+          });
+          table += "</tbody></table></div>";
+          blocks.push(table);
+          continue;
+        }
+        if (isHeading(lines[i])) {
+          const level = Math.min(lines[i].match(/^#+/)[0].length + 2, 5);
+          const text = lines[i].replace(/^#{1,3}\s+/, "");
+          blocks.push("<h" + level + ">" + inlineMarkdown(text) + "</h" + level + ">");
+          i += 1;
+          continue;
+        }
+        if (isBullet(lines[i])) {
+          const items = [];
+          while (i < lines.length && isBullet(lines[i])) {
+            items.push("<li>" + inlineMarkdown(lines[i].replace(/^[-*]\s+/, "")) + "</li>");
+            i += 1;
+          }
+          blocks.push("<ul>" + items.join("") + "</ul>");
+          continue;
+        }
+        if (isNumber(lines[i])) {
+          const items = [];
+          while (i < lines.length && isNumber(lines[i])) {
+            items.push("<li>" + inlineMarkdown(lines[i].replace(/^\d+\.\s+/, "")) + "</li>");
+            i += 1;
+          }
+          blocks.push("<ol>" + items.join("") + "</ol>");
+          continue;
+        }
+        if (!lines[i].trim() || /^---+$/.test(lines[i].trim())) {
+          i += 1;
+          continue;
+        }
+        const para = [];
+        while (
+          i < lines.length &&
+          lines[i].trim() &&
+          !isFence(lines[i]) &&
+          !isHeading(lines[i]) &&
+          !isBullet(lines[i]) &&
+          !isNumber(lines[i]) &&
+          !isTable(i)
+        ) {
+          para.push(lines[i]);
+          i += 1;
+        }
+        blocks.push("<p>" + inlineMarkdown(para.join(" ")) + "</p>");
+      }
+      return blocks.join("");
+    }
+
+    function artifactCard(key, text) {
+      const card = document.createElement("article");
+      card.className = "artifact-card";
+      card.dataset.artifact = key;
+      const head = document.createElement("header");
+      const title = document.createElement("h3");
+      title.textContent = ARTIFACT_LABELS[key] || key;
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "artifact-toggle";
+      toggle.textContent = "展开全文";
+      toggle.addEventListener("click", () => {
+        const open = card.classList.toggle("is-open");
+        toggle.textContent = open ? "收起" : "展开全文";
+      });
+      head.append(title, toggle);
+      const body = document.createElement("div");
+      body.className = "artifact-body";
+      body.innerHTML = renderMarkdown(text);
+      card.append(head, body);
+      return card;
+    }
+
+    async function loadArtifactTexts(tid, stack) {
+      const cards = [...stack.querySelectorAll(".artifact-card")];
+      await Promise.all(cards.map(async (card) => {
+        const key = card.dataset.artifact;
+        try {
+          const r = await fetch("/api/runs/" + encodeURIComponent(tid) + "/artifacts/" + encodeURIComponent(key));
+          if (!r.ok) return;
+          const data = await r.json();
+          if (!data.text) return;
+          const body = card.querySelector(".artifact-body");
+          if (body) body.innerHTML = renderMarkdown(data.text);
+        } catch (_) { /* 全文读不到时保留状态里的节选 */ }
+      }));
+    }
+
+    const conversations = {};
+
+    function formatConversation(payload) {
+      const turns = (payload && payload.turns) || [];
+      if (!turns.length) return "<p class=\"artifact-empty\">这一步还没有会话。</p>";
+      return turns.map((turn) => {
+        const tools = [];
+        let html = "<article class=\"conv-turn\"><h4>第 " + escapeHtml(turn.seq) + " 次</h4>";
+        for (const event of turn.events || []) {
+          if (event.kind === "turn") {
+            html += "<details><summary>提示</summary><pre class=\"artifact-code\"><code>" + escapeHtml(String(event.prompt || "").slice(0, 4000)) + "</code></pre></details>";
+          } else if (event.kind === "result") {
+            html += "<div class=\"artifact-body is-open\">" + renderMarkdown(event.text || "") + "</div>";
+          } else if (event.kind === "step") {
+            const step = event.step || {};
+            const type = String(step.type || "step");
+            const message = typeof step.message === "string" ? step.message : JSON.stringify(step.message || "");
+            const body = escapeHtml(message).slice(0, 2000);
+            if (type === "thinkingMessage") {
+              html += "<details><summary>思考</summary><p>" + body + "</p></details>";
+            } else if (type === "toolCall") {
+              tools.push("<li><pre class=\"artifact-code\"><code>" + body + "</code></pre></li>");
+            } else {
+              html += "<p>" + body + "</p>";
+            }
+          }
+        }
+        if (tools.length) {
+          html += "<details><summary>工具调用 " + tools.length + "</summary><ul class=\"conv-tools\">" + tools.join("") + "</ul></details>";
+        }
+        return html + "</article>";
+      }).join("");
+    }
+
+    function conversationSection(nodeId, html) {
+      const section = document.createElement("section");
+      section.className = "inspect-block";
+      section.dataset.node = nodeId;
+      const heading = document.createElement("h3");
+      heading.textContent = "会话";
+      const body = document.createElement("div");
+      body.className = "conversation-body";
+      body.innerHTML = html;
+      section.append(heading, body);
+      return section;
+    }
+
+    function rememberConversation(payload) {
+      if (payload && payload.node) conversations[payload.node] = payload;
+    }
+
+    async function loadCellConversation(tid, nodeId) {
+      try {
+        const r = await fetch("/api/runs/" + encodeURIComponent(tid) + "/conversations/" + encodeURIComponent(nodeId));
+        if (!r.ok) return;
+        const payload = await r.json();
+        rememberConversation(payload);
+        const section = document.querySelector('.inspect-block[data-node="' + nodeId + '"] .conversation-body');
+        if (section) section.innerHTML = formatConversation(payload);
+      } catch (_) { /* 会话读不到时保留上一帧 */ }
     }
 
     function inspectSection(title, body) {
@@ -857,7 +1473,7 @@
       const el = $("runScenarioHint");
       const pid = String($("project").value || "").trim();
       if (!pid) {
-        el.textContent = "场景在项目配置里绑定。先选择项目，本轮沿用该项目的场景。";
+        el.textContent = "命名默认是项目标识加递增序号，可改。";
         return;
       }
       try {
@@ -865,10 +1481,10 @@
         const data = await r.json();
         const key = String((data && data.scenario_key) || "").trim();
         el.textContent = key
-          ? "本轮使用项目绑定的场景：" + key + "。"
-          : "该项目尚未绑定场景。请先到项目配置里绑定。";
+          ? "项目类型：" + key + "。"
+          : "该项目尚未设置项目类型。请先到项目配置里设置。";
       } catch (_) {
-        el.textContent = "场景在项目配置里绑定，本轮沿用所选项目。";
+        el.textContent = "项目类型在项目配置里设置，本轮沿用所选项目。";
       }
     }
 
@@ -1027,6 +1643,12 @@
       pushSource.addEventListener("status", (ev) => {
         try { ingestStatus(JSON.parse(ev.data)); } catch (_) { /* 忽略坏帧 */ }
       });
+      pushSource.addEventListener("conversation", (ev) => {
+        try {
+          rememberConversation(JSON.parse(ev.data));
+          if (lastStatus) renderInspect(lastStatus);
+        } catch (_) { /* 忽略坏帧 */ }
+      });
       pushSource.addEventListener("end", () => { stopPoll(); });
       pushSource.onerror = () => { stopPoll(); };
     }
@@ -1128,7 +1750,7 @@
         run_name: String($("runName").value || "").trim(),
       };
       if (!body.project_id) {
-        showError($("startError"), "请先选择项目。场景沿用该项目在项目配置里的绑定。");
+        showError($("startError"), "请先选择项目。项目类型沿用项目配置里的设置。");
         $("project").focus();
         return;
       }
@@ -1160,7 +1782,7 @@
         if (!r.ok) {
           $("thread").value = previousThread;
           syncUrlThread(previousThread);
-          showError($("startError"), data.detail || "启动失败，请检查场景或项目配置。");
+          showError($("startError"), data.detail || "启动失败，请检查项目类型或项目配置。");
           syncStartButton(lastStatus && lastStatus.phase);
           syncStopButton(lastStatus && lastStatus.phase);
           return;
@@ -1519,9 +2141,9 @@
       const historyMode = options && options.historyMode;
       const route = routeFromPath(path);
       const titles = {
-        hitl: "auto_studio · 运行",
-        project: "auto_studio · 项目配置",
-        config: "auto_studio · 配置",
+        hitl: "AutoStudio · 运行",
+        project: "AutoStudio · 项目",
+        config: "AutoStudio · 配置",
       };
       document.documentElement.dataset.route = route;
       document.title = titles[route];
@@ -1534,11 +2156,14 @@
       if (historyMode === "push" || historyMode === "replace") {
         let base = "/" + hitlSearch;
         if (route === "config") base = "/config";
-        if (route === "project") base = "/project";
+        if (route === "project") {
+          const pid = new URLSearchParams(location.search).get("project");
+          base = "/project" + (pid ? "?project=" + encodeURIComponent(pid) : "");
+        }
         const method = historyMode === "push" ? "pushState" : "replaceState";
         history[method]({ route }, "", base + (hash || ""));
       }
-      if (!hash) return;
+      if (!hash || route === "project") return;
       const target = document.getElementById(decodeURIComponent(hash.slice(1)));
       const region = markRegion(target);
       if (region) scrollRegion(region, options);
@@ -1556,6 +2181,10 @@
       if (url.origin !== location.origin) return;
       if (url.pathname !== "/" && url.pathname !== "/config" && url.pathname !== "/project") return;
       event.preventDefault();
+      if (link.dataset.projectMode && window.requestProjectMode) {
+        window.requestProjectMode(link.dataset.projectMode);
+        return;
+      }
       if (link.id === "btnSidebarNew") return;
       const route = routeFromPath(url.pathname);
       const same = document.documentElement.dataset.route === route;
@@ -1570,10 +2199,25 @@
     window.addEventListener("popstate", () => {
       if (location.pathname !== "/config") hitlSearch = location.search;
       applyRoute(location.pathname, location.hash);
+      if (location.pathname === "/project" && window.applyProjectLocation) window.applyProjectLocation();
     });
 
     applyRoute(location.pathname, location.hash, { historyMode: "replace" });
   </script>
-  <script src="/static/config.js"></script>
+  <div id="dirPicker" class="dir-picker" hidden>
+    <div class="dir-picker-card" role="dialog" aria-modal="true" aria-labelledby="dirPickerTitle">
+      <p class="section-title" id="dirPickerTitle">选择目录</p>
+      <p class="dir-picker-path" id="dirPickerPath"></p>
+      <div class="row-actions">
+        <wa-button id="btnDirUp" appearance="outlined" variant="neutral">上一级</wa-button>
+        <wa-button id="btnDirUse" variant="brand">使用此目录</wa-button>
+        <wa-button id="btnDirCancel" appearance="outlined" variant="neutral">取消</wa-button>
+      </div>
+      <div id="dirPickerList" class="dir-picker-list"></div>
+      <p class="hint-block" id="dirPickerNote" hidden></p>
+      <wa-callout id="dirPickerError" variant="danger" hidden></wa-callout>
+    </div>
+  </div>
+  <script src="/static/config.js?v=20261107-dir4"></script>
 </body>
 </html>

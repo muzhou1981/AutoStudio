@@ -46,7 +46,7 @@ def test_cursor_defaults_to_auto_route_and_worktree_tools(tmp_path, monkeypatch)
             return "ok"
 
     class _Agent:
-        def send(self, prompt: str):
+        def send(self, prompt: str, options=None):
             return _Run()
 
     class _Client:

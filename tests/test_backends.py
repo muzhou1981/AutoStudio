@@ -56,7 +56,7 @@ def test_cursor_complete_records_token_usage(monkeypatch):
             return "ok"
 
     class _Agent:
-        def send(self, prompt: str) -> _Run:
+        def send(self, prompt: str, options=None) -> _Run:
             return _Run()
 
     class _Client:
@@ -74,6 +74,40 @@ def test_cursor_complete_records_token_usage(monkeypatch):
     finally:
         end_cost_log(token)
     assert any("input_tokens=3" in line and "output_tokens=5" in line for line in lines)
+
+
+def test_role_md_is_sent_once_per_live_agent(monkeypatch):
+    monkeypatch.setenv("CURSOR_API_KEY", "test-key")
+    monkeypatch.setenv("AUTO_STUDIO_CURSOR_VERIFY", "0")
+    prompts: list[str] = []
+
+    class _Run:
+        def text(self) -> str:
+            return "ok"
+
+    class _Agent:
+        def send(self, prompt: str, options=None) -> _Run:
+            prompts.append(prompt)
+            if options is not None and getattr(options, "on_step", None):
+                options.on_step({"type": "assistantMessage", "message": "一段回复"})
+            return _Run()
+
+    class _Client:
+        def create_agent(self, opts, api_key=None):
+            return _Agent()
+
+    monkeypatch.setattr("cursor_sdk._client._default_client", lambda: _Client())
+    from auto_studio.backends.cursor_backend import CursorBackend
+
+    backend = CursorBackend()
+    backend.complete(role_name="architect", system_prompt="角色定义", user_prompt="写设计")
+    backend.complete(role_name="architect", system_prompt="角色定义", user_prompt="写计划")
+    backend.complete(role_name="developer", system_prompt="程序员定义", user_prompt="写代码")
+    assert prompts[0].startswith("角色定义")
+    assert "写设计" in prompts[0]
+    assert prompts[1] == "## 本轮任务\n\n写计划"
+    assert "角色定义" not in prompts[1]
+    assert prompts[2].startswith("程序员定义")
 
 
 def test_uppercase_proxy_is_copied_for_the_bridge(monkeypatch):

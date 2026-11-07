@@ -8,7 +8,9 @@ from fastapi.testclient import TestClient
 from auto_studio.config.context import ConfigError
 from auto_studio.config.registry import (
     apply_project_form,
+    describe_project_directory,
     effective_config_summary,
+    list_directory_children,
     list_projects,
     list_scenarios,
     project_form_view,
@@ -38,6 +40,55 @@ def test_config_api_lists():
     r2 = client.get("/api/config/projects")
     assert r2.status_code == 200
     assert "_example" in {x["project_id"] for x in r2.json()["projects"]}
+
+
+def test_describe_project_directory_matches_workspace(tmp_path: Path) -> None:
+    import subprocess
+
+    repo = tmp_path / "widget"
+    repo.mkdir()
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    proj = tmp_path / "projects" / "widget"
+    proj.mkdir(parents=True)
+    (proj / "project.yaml").write_text(
+        "project_id: widget\ntitle: Widget\nscenario_key: npu_operator\nworkspace: "
+        + str(repo)
+        + "\n",
+        encoding="utf-8",
+    )
+    found = describe_project_directory(str(repo), root=tmp_path)
+    assert found["project_ids"] == ["widget"]
+    assert found["suggested_id"] == "widget"
+    assert found["remote_url"] == ""
+    subprocess.run(
+        ["git", "-C", str(repo), "remote", "add", "origin", "https://github.com/org/widget.git"],
+        check=True,
+        capture_output=True,
+    )
+    with_remote = describe_project_directory(str(repo), root=tmp_path)
+    assert with_remote["remote_url"] == "https://github.com/org/widget.git"
+    with pytest.raises(ConfigError, match="目录不存在"):
+        describe_project_directory(str(tmp_path / "missing"), root=tmp_path)
+
+
+def test_list_directory_children_lists_dirs_only(tmp_path: Path) -> None:
+    (tmp_path / "b-dir").mkdir()
+    (tmp_path / "a-dir").mkdir()
+    (tmp_path / ".hidden").mkdir()
+    (tmp_path / "note.txt").write_text("x", encoding="utf-8")
+    found = list_directory_children(str(tmp_path))
+    assert found["path"] == str(tmp_path.resolve())
+    assert [item["name"] for item in found["dirs"]] == ["a-dir", "b-dir", ".hidden"]
+    assert found["parent"] == str(tmp_path.resolve().parent)
+    with pytest.raises(ConfigError, match="目录不存在"):
+        list_directory_children(str(tmp_path / "missing"))
+    note = tmp_path / "note.txt"
+    with pytest.raises(ConfigError, match="不能是文件"):
+        list_directory_children(str(note))
+    client = TestClient(app)
+    response = client.get("/api/config/directories", params={"path": str(tmp_path)})
+    assert response.status_code == 200
+    assert response.json()["dirs"][0]["name"] == "a-dir"
 
 
 def test_config_api_settings():

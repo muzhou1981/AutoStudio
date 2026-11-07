@@ -163,7 +163,7 @@ def _initial_commit(path: Path) -> None:
     keep.touch()
     subprocess.run(["git", "-C", os.fspath(path), "add", ".gitignore", ".auto_studio/.gitkeep"], check=True)
     subprocess.run(
-        ["git", "-C", os.fspath(path), "commit", "-q", "-m", "init auto_studio target"],
+        ["git", "-C", os.fspath(path), "commit", "-q", "-m", "init AutoStudio target"],
         check=True,
-        env={**os.environ, "GIT_AUTHOR_NAME": "auto_studio", "GIT_AUTHOR_EMAIL": "auto_studio@local", "GIT_COMMITTER_NAME": "auto_studio", "GIT_COMMITTER_EMAIL": "auto_studio@local"},
+        env={**os.environ, "GIT_AUTHOR_NAME": "AutoStudio", "GIT_AUTHOR_EMAIL": "auto_studio@local", "GIT_COMMITTER_NAME": "AutoStudio", "GIT_COMMITTER_EMAIL": "auto_studio@local"},
     )

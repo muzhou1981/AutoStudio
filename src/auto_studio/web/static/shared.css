@@ -302,8 +302,12 @@ button:focus-visible {
   border-bottom: 1px solid var(--border);
 }
 
-.sidebar-link wa-icon {
+.sidebar-link wa-icon,
+.sidebar-link .sidebar-svg {
   font-size: 1rem;
+  width: 1rem;
+  height: 1rem;
+  flex: none;
   color: var(--text-muted);
 }
 
@@ -313,7 +317,8 @@ button:focus-visible {
   font-weight: 600;
 }
 
-.sidebar-link.is-active wa-icon { color: var(--accent); }
+.sidebar-link.is-active wa-icon,
+.sidebar-link.is-active .sidebar-svg { color: var(--accent); }
 
 .side-group {
   display: grid;

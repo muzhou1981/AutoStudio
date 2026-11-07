@@ -22,7 +22,7 @@ from auto_studio.web.feishu_routes import bind_run_service
 from auto_studio.web.feishu_routes import router as feishu_router
 from auto_studio.workflows.default import graph
 
-app = FastAPI(title="auto_studio", version="0.1.0")
+app = FastAPI(title="AutoStudio", version="0.1.0")
 app.include_router(config_router)
 app.include_router(feishu_router)
 _static_dir = Path(__file__).with_name("static")
@@ -135,6 +135,7 @@ def api_run_events(thread_id: str, once: int = 0):
 
     def generate():
         previous = ""
+        previous_conversation = ""
         while True:
             try:
                 data = _run_service.status_dict(thread_id)
@@ -145,6 +146,10 @@ def api_run_events(thread_id: str, once: int = 0):
             if payload != previous:
                 yield f"event: status\ndata: {payload}\n\n"
                 previous = payload
+            conv = _conversation_event(thread_id, data)
+            if conv and conv != previous_conversation:
+                yield f"event: conversation\ndata: {conv}\n\n"
+                previous_conversation = conv
             if once or data.get("phase") not in ("running", "awaiting_human"):
                 yield "event: end\ndata: {}\n\n"
                 return
@@ -155,6 +160,59 @@ def api_run_events(thread_id: str, once: int = 0):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.get("/api/runs/{thread_id}/artifacts/{key}")
+def api_run_artifact(thread_id: str, key: str) -> dict:
+    from auto_studio.hitl.conversation import read_artifact_text
+    from auto_studio.workspace.persist import ARTIFACT_KEYS
+
+    if key not in ARTIFACT_KEYS:
+        raise HTTPException(status_code=404, detail="没有这份产物。")
+    try:
+        st = _run_service.status(thread_id)
+    except HitlError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    workspace = str(st.values.get("workspace_path") or "")
+    text = read_artifact_text(thread_id, key, workspace_path=workspace)
+    if not text:
+        raw = st.values.get(key)
+        text = raw if isinstance(raw, str) else ""
+    return {"key": key, "text": text}
+
+
+@app.get("/api/runs/{thread_id}/conversations/{node_id}")
+def api_run_conversation(thread_id: str, node_id: str) -> dict:
+    try:
+        data = _run_service.status_dict(thread_id)
+    except HitlError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    from auto_studio.hitl.conversation import conversation_view
+    from auto_studio.hitl.rail import NODE_ROLE
+
+    role = NODE_ROLE.get(node_id, "")
+    workspace = str((data.get("values") or {}).get("workspace_path") or "")
+    view = conversation_view(thread_id, role, workspace_path=workspace) if role else {"role": "", "turns": []}
+    view["node"] = node_id
+    return view
+
+
+def _conversation_event(thread_id: str, data: dict) -> str:
+    import json
+
+    from auto_studio.hitl.conversation import conversation_view
+    from auto_studio.hitl.rail import NODE_ROLE
+
+    node = str((data.get("rail") or {}).get("current") or "")
+    role = NODE_ROLE.get(node, "")
+    if not role:
+        return ""
+    workspace = str((data.get("values") or {}).get("workspace_path") or "")
+    view = conversation_view(thread_id, role, workspace_path=workspace)
+    if not view["turns"]:
+        return ""
+    view["node"] = node
+    return json.dumps(view, ensure_ascii=False, default=str)
 
 
 @app.get("/api/runs/{thread_id}")

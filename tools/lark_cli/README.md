@@ -8,7 +8,7 @@
 ## 卡片回调（入站 HITL）
 
 1. 开放平台启用 **事件订阅 → 回调配置**（长连接），订阅 `card.action.trigger`。
-2. 本地消费并转发到 auto_studio（推荐内置桥接）：
+2. 本地消费并转发到 AutoStudio（推荐内置桥接）：
 
 ```bash
 auto-studio-web   # 另开终端

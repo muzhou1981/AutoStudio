@@ -41,7 +41,7 @@
 ### 5. 实现边界（一期）
 
 - 引擎提供 **通道无关** 的 HITL 接口；飞书适配层为 **通知 + inbound 消息映射**，不重复实现流程逻辑。
-- 飞书出站优先 **官方 lark-cli**（Bot）；企业凭据直连见 [ADR 0004](0004-feishu-hitl-via-lark-cli.md)。lark-tools 不作为 auto_studio 产品主路径。
+- 飞书出站优先 **官方 lark-cli**（Bot）；企业凭据直连见 [ADR 0004](0004-feishu-hitl-via-lark-cli.md)。lark-tools 不作为 AutoStudio 产品主路径。
 - 配置：项目级绑定飞书会话（如 `feishu_chat_id` / 发起人 open_id）与 Run；密钥不进仓库。
 - **不做**：多角色 Bot 群、在 IM 内直接修改未过模板的产物全文、IM 与 Web 双源冲突（以最后一次 **经 HITL API 校验** 的提交为准）。
 - **一期不做**：微信、企业微信及任何微信系回调；后续若需另写 ADR。

@@ -89,6 +89,35 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert ">Run列表</span>" in text
     assert 'value="all"' in text
     assert "runListSeq" in text
+    assert "conversationSection" in text
+    assert "展开全文" in text
+    assert "renderMarkdown" in text
+    assert 'id="swimRail"' in text
+    assert ">运行状态</p>" in text
+    assert "从目录打开" in text
+    assert 'class="sidebar-svg"' in text
+    assert "M88.7 223.8" in text
+    assert 'class="project-modes"' not in text
+    assert 'id="btnOpenChosen"' in text
+    assert 'id="btnPickDirectory"' in text
+    assert 'aria-label="选择目录"' in text
+    assert 'id="btnSaveProject" appearance="outlined"' in text
+    assert ">项目配置</span>" not in text
+    assert 'aria-label="流程泳道"' in text
+    assert "renderSwim" in text
+    assert '{ id: "qa", label: "QA" }' in text
+    assert 'run_start: "decision"' in text
+    assert '{ id: "decision", label: "人类" }' in text
+    assert "roundedOrth" in text
+    assert "layoutSwimTimeline" in text
+    assert "sideLink" in text
+    assert "swim-decision" in text
+    assert "/static/fork-sign.png" in text
+    css = TestClient(app).get("/static/hitl.css").text
+    assert ".swim-lane:nth-child(odd)" in css
+    assert "is-compact" not in text
+    assert 'className = "swim-state"' not in text
+    assert 'addEventListener("conversation"' in text
     assert 'id="runList"' in text
     assert 'name.className = "run-name"' in text
     assert "PHASE_ICON" in text

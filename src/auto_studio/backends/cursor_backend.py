@@ -39,7 +39,8 @@ class CursorBackend:
             raise RuntimeError("缺少 CURSOR_API_KEY")
         self._api_key = api_key
         self._client = _default_client()
-        self._agents: dict[tuple[str, str], object] = {}
+        self._agents: dict[tuple[str, str, str, str], object] = {}
+        self._role_sent: set[tuple[str, str, str, str]] = set()
         # 需求 7：未显式指定时使用 SDK 的 Auto 路由（模型 ID 为 default）。
         self._model = os.environ.get("AUTO_STUDIO_CURSOR_MODEL", "").strip() or "default"
 
@@ -51,13 +52,15 @@ class CursorBackend:
     def _agent_for_role(self, role_name: str, model: str):
         from cursor_sdk.types import AgentOptions, LocalAgentOptions
 
+        from auto_studio.hitl.control import current_thread_id
+
         cwd = self._cwd()
-        key = (role_name, cwd, model)
+        key = (current_thread_id() or "", role_name, cwd, model)
         if key not in self._agents:
             # tools 保持 SDK 默认，以便复用 Cursor 已有的 MCP、规则与 Skill。
             # 工作目录指向目标项目工作树，而不是工厂仓库。
             opts = AgentOptions(
-                name=f"auto_studio:{role_name}",
+                name=f"AutoStudio:{role_name}",
                 local=LocalAgentOptions(cwd=cwd),
                 model=model,
             )
@@ -65,7 +68,13 @@ class CursorBackend:
                 opts,
                 api_key=self._api_key,
             )
-        return self._agents[key]
+        return key, self._agents[key]
+
+    def _message(self, key: tuple[str, str, str, str], system_prompt: str, user_prompt: str) -> str:
+        task = f"## 本轮任务\n\n{user_prompt.strip()}"
+        if key in self._role_sent:
+            return task
+        return f"{system_prompt.strip()}\n\n---\n\n{task}"
 
     def complete(
         self,
@@ -75,12 +84,31 @@ class CursorBackend:
         user_prompt: str,
         model: str | None = None,
     ) -> str:
-        agent = self._agent_for_role(role_name, model or self._model)
-        prompt = (
-            f"{system_prompt.strip()}\n\n---\n\n"
-            f"## 本轮任务\n\n{user_prompt.strip()}"
-        )
-        run = agent.send(prompt)  # type: ignore[attr-defined]
+        from auto_studio.hitl.control import current_thread_id
+        from auto_studio.hitl.conversation import append_step, begin_turn, finish_turn
+        from auto_studio.workspace.context import current_worktree
+
+        key, agent = self._agent_for_role(role_name, model or self._model)
+        prompt = self._message(key, system_prompt, user_prompt)
+        thread_id = current_thread_id()
+        turn_path = None
+        if thread_id:
+            turn_path = begin_turn(
+                thread_id,
+                role_name,
+                agent_id=str(getattr(agent, "agent_id", "") or ""),
+                model=model or self._model,
+                prompt=prompt,
+                workspace_path=current_worktree(),
+            )
+
+        def on_step(step: object) -> None:
+            if turn_path is not None:
+                append_step(turn_path, step)
+
+        from cursor_sdk.types import SendOptions
+
+        run = agent.send(prompt, SendOptions(on_step=on_step))  # type: ignore[attr-defined]
         from auto_studio.hitl.control import (
             RunStopped,
             current_thread_id,
@@ -97,6 +125,9 @@ class CursorBackend:
                 run.cancel()
                 raise RunStopped("本轮已停止")
             text = run.text().strip()
+            self._role_sent.add(key)
+            if turn_path is not None:
+                finish_turn(turn_path, text)
         finally:
             if thread_id:
                 unregister_active_run(thread_id, run)

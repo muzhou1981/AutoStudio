@@ -1,6 +1,6 @@
-# auto_studio · Agent 协作说明
+# AutoStudio · Agent 协作说明
 
-本文件是在 Cursor 中开发 auto_studio 自身时的入口。
+本文件是在 Cursor 中开发 AutoStudio 自身时的入口。
 
 ## 开始任务前
 

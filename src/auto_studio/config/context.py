@@ -19,7 +19,7 @@ class ConfigError(ValueError):
 
 
 def factory_root() -> Path:
-    """auto_studio 仓库根目录（含 scenarios/、projects/）。"""
+    """AutoStudio 仓库根目录（含 scenarios/、projects/）。"""
     return Path(__file__).resolve().parents[3]
 
 

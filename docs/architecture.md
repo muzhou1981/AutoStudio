@@ -1,4 +1,4 @@
-# auto_studio 架构
+# AutoStudio 架构
 
 > 待默认流程第一版完成后补充其余章节。
 
@@ -84,7 +84,7 @@
 
 启动本地 Web：`auto-studio-web` 或 `python -m auto_studio.web.app`（默认 `127.0.0.1:8765`）。飞书 **入站**（卡片/消息 → HITL）仍待接；**出站**通知见 [ADR 0004](decisions/0004-feishu-hitl-via-lark-cli.md)。
 
-#### 飞书接到 auto_studio（推荐：官方 lark-cli）
+#### 飞书接到 AutoStudio（推荐：官方 lark-cli）
 
 适用：**公司租户未开开放平台**，用 **个人开发者账号** 创建应用。
 
@@ -107,7 +107,7 @@
    ```
 
 4. **行为**  
-   - Run 进入 `awaiting_human` 时，auto_studio 调用 `lark-cli im +messages-send --as bot` 推送 PM 文本 + Web 链接。  
+   - Run 进入 `awaiting_human` 时，AutoStudio 调用 `lark-cli im +messages-send --as bot` 推送 PM 文本 + Web 链接。  
    - 人类在 Web 提交 `gate_decision`；与飞书入站回调等价的路径后续再接。
 
 5. **备选 `env_bot`**  

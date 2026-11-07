@@ -1,4 +1,4 @@
-"""将 lark-cli event consume 输出转发到 auto_studio Webhook。"""
+"""将 lark-cli event consume 输出转发到 AutoStudio Webhook。"""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def _consume_loop(webhook_url: str, event_key: str, env: dict[str, str]) -> None
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="飞书 event consume → auto_studio Webhook")
+    parser = argparse.ArgumentParser(description="飞书 event consume → AutoStudio Webhook")
     parser.add_argument(
         "--webhook",
         default=os.environ.get(

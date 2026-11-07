@@ -41,10 +41,15 @@ async function loadLists() {
   fillScenarioOptions(sp, window.__scenarios, sp.value);
   fillScenarioOptions($("fieldScenario"), window.__scenarios, $("fieldScenario").value);
   const pp = $("projectPick");
+  const selected = pp.value;
   pp.replaceChildren(waOption("", "— 选择 —"));
-  for (const p of pr.projects || []) {
+  window.__projects = pr.projects || [];
+  window.__nodes = pr.nodes || [];
+  for (const p of window.__projects) {
     pp.appendChild(waOption(p.project_id, `${p.title} (${p.project_id})`));
   }
+  if (selected) pp.value = selected;
+  fillScenarioOptions($("fieldDirScenario"), window.__scenarios, $("fieldDirScenario").value);
 }
 
 async function loadScenarioYaml(key) {
@@ -121,9 +126,8 @@ function clearProjectForm() {
   $("workspaceHint").textContent = "";
   $("fieldDesign").value = "inherit";
   $("fieldSkipMode").value = "inherit";
-  renderSkipNodes([], []);
+  renderSkipNodes(window.__nodes || [], []);
   syncSkipWrap();
-  setProjectFieldsEnabled(false);
 }
 
 async function loadProjectYaml(id) {
@@ -139,7 +143,7 @@ async function loadProjectYaml(id) {
   if (raw.yaml) $("projectYaml").value = raw.yaml;
   if (form.project_id) {
     fillProjectForm(form);
-    if (form.scenario_key && [...$("scenarioPick").options].some((o) => o.value === form.scenario_key)) {
+    if (form.scenario_key && [...$("scenarioPick").querySelectorAll("wa-option")].some((o) => o.value === form.scenario_key)) {
       $("scenarioPick").value = form.scenario_key;
       await loadScenarioYaml(form.scenario_key);
     }
@@ -266,7 +270,7 @@ async function loadSettings() {
 
 async function refreshEffective() {
   const scenario_key = $("scenarioPick").value;
-  const project_id = $("projectPick").value;
+  const project_id = loadedProjectId;
   const q = new URLSearchParams();
   if (scenario_key) q.set("scenario_key", scenario_key);
   if (project_id) q.set("project_id", project_id);
@@ -282,10 +286,164 @@ $("scenarioPick").addEventListener("change", (e) => {
   refreshEffective();
 });
 
-$("projectPick").addEventListener("change", async (e) => {
-  await loadProjectYaml(e.target.value);
+let projectMode = "";
+let formSnapshot = "";
+let loadedProjectId = "";
+
+function formSnapshotNow() {
+  return JSON.stringify(projectFormPayload()) + "\n" + ($("projectYaml").value || "");
+}
+
+function markFormClean() {
+  formSnapshot = formSnapshotNow();
+}
+
+function formIsDirty() {
+  if (projectMode === "from-directory") return false;
+  if (projectMode === "new") {
+    const id = ($("newProjectId").value || "").trim();
+    return Boolean(id) || formSnapshotNow() !== formSnapshot;
+  }
+  if (!loadedProjectId) return false;
+  return formSnapshotNow() !== formSnapshot;
+}
+
+function confirmLeave() {
+  if (!formIsDirty()) return true;
+  return window.confirm("放弃未保存的修改？");
+}
+
+function writeProjectUrl(mode, id, replace) {
+  let url = "/project";
+  if (mode === "open" && id) url += "?project=" + encodeURIComponent(id);
+  const hash = mode === "from-directory" ? "#from-directory" : mode === "new" ? "#new" : "#open";
+  const next = url + hash;
+  if (location.pathname + location.search + location.hash === next) return;
+  const method = replace ? "replaceState" : "pushState";
+  history[method]({ route: "project" }, "", next);
+}
+
+function highlightProjectMode(mode) {
+  document.querySelectorAll("[data-project-mode]").forEach((el) => {
+    el.classList.toggle("is-active", el.dataset.projectMode === mode);
+  });
+}
+
+function showProjectPieces(mode) {
+  const isNew = mode === "new";
+  const isOpen = mode === "open";
+  const isDir = mode === "from-directory";
+  $("openPicker").hidden = !isOpen;
+  $("dirPane").hidden = !isDir;
+  $("newIdRow").hidden = !isNew;
+  $("projectFields").hidden = isDir;
+  $("region-scenario").hidden = isDir;
+  $("region-notify").hidden = isDir;
+  $("projectActions").hidden = isDir;
+  $("btnCreateProject").hidden = !isNew;
+  $("btnSaveProject").hidden = !isOpen || !loadedProjectId;
+  $("projectRaw").hidden = !isOpen;
+  if ($("dirPicker")) $("dirPicker").hidden = true;
+  highlightProjectMode(mode);
+}
+
+async function enterOpen(id, replace) {
+  projectMode = "open";
+  if (!id) loadedProjectId = "";
+  showProjectPieces("open");
+  const none = !(window.__projects || []).length;
+  $("openEmpty").hidden = !none;
+  $("openEmptyAction").hidden = !none;
+  $("projectPick").hidden = none;
+  if ($("openChosenAction")) $("openChosenAction").hidden = none;
+  $("openHint").hidden = none || Boolean(id);
+  if (!id) {
+    $("projectPick").value = "";
+    $("openProjectId").hidden = true;
+    clearProjectForm();
+    setProjectFieldsEnabled(false);
+    $("projectYaml").value = "";
+    markFormClean();
+    writeProjectUrl("open", "", replace);
+    return;
+  }
+  $("projectPick").value = id;
+  await loadProjectYaml(id);
+  loadedProjectId = id;
+  $("btnSaveProject").hidden = false;
+  $("openProjectId").hidden = false;
+  $("openProjectId").textContent = "项目标识：" + id;
+  $("openHint").hidden = true;
+  markFormClean();
+  writeProjectUrl("open", id, replace);
   await refreshEffective();
-});
+}
+
+function enterNew(replace) {
+  projectMode = "new";
+  showProjectPieces("new");
+  clearProjectForm();
+  $("newProjectId").value = "";
+  $("projectYaml").value = "";
+  setProjectFieldsEnabled(true);
+  markFormClean();
+  writeProjectUrl("new", "", replace);
+}
+
+function enterDirectory(replace) {
+  projectMode = "from-directory";
+  showProjectPieces("from-directory");
+  $("dirCreate").hidden = true;
+  $("dirMatches").hidden = true;
+  markFormClean();
+  writeProjectUrl("from-directory", "", replace);
+}
+
+async function requestProjectMode(mode, options) {
+  const opts = options || {};
+  if (!opts.force && mode === projectMode && !(mode === "open" && opts.project)) return;
+  if (!opts.skipDirty && !confirmLeave()) return;
+  if (mode === "new") enterNew(opts.replace);
+  else if (mode === "from-directory") enterDirectory(opts.replace);
+  else await enterOpen(opts.project || "", opts.replace);
+}
+
+window.requestProjectMode = requestProjectMode;
+
+window.setProjectMode = (mode, options) => {
+  const opts = options || {};
+  const params = new URLSearchParams(location.search);
+  const fromUrl = params.get("project") || "";
+  if (!mode) {
+    if (fromUrl) mode = "open";
+    else if ((window.__projects || []).length) mode = "open";
+    else mode = "new";
+  }
+  const project = mode === "open" ? (opts.project || fromUrl) : "";
+  return requestProjectMode(mode, {
+    project,
+    replace: true,
+    force: Boolean(project) || mode !== projectMode,
+    skipDirty: true,
+  });
+};
+
+if ($("btnOpenChosen")) $("btnOpenChosen").onclick = async () => {
+  const next = $("projectPick").value;
+  showError($("projectError"), "");
+  showSaved($("projectSaved"), "");
+  if (!next) {
+    showError($("projectError"), "先选择要打开的项目。");
+    $("projectPick").focus();
+    return;
+  }
+  if (next === loadedProjectId) return;
+  if (!confirmLeave()) {
+    $("projectPick").value = loadedProjectId;
+    return;
+  }
+  await enterOpen(next, false);
+};
 
 function projectFormPayload() {
   const retries = $("fieldRetries").value.trim();
@@ -311,17 +469,17 @@ function projectFormPayload() {
 $("fieldSkipMode").addEventListener("change", syncSkipWrap);
 
 $("btnSaveProject").onclick = async () => {
-  const id = $("projectPick").value;
+  const id = loadedProjectId;
   showError($("projectError"), "");
   showSaved($("projectSaved"), "");
   if (!id) {
-    showError($("projectError"), "先选择一个项目，或在下面新建。");
+    showError($("projectError"), "先选择要打开的项目。");
     $("projectPick").focus();
     return;
   }
   const payload = projectFormPayload();
   if (payload.max_dev_retries != null && !Number.isInteger(payload.max_dev_retries)) {
-    showError($("projectError"), "开发重试上限要填整数，或留空沿用场景。");
+    showError($("projectError"), "开发重试上限要填整数，或留空沿用项目类型。");
     $("fieldRetries").focus();
     return;
   }
@@ -337,11 +495,12 @@ $("btnSaveProject").onclick = async () => {
   }
   if (data.yaml) $("projectYaml").value = data.yaml;
   showSaved($("projectSaved"), "已写入 " + id + " 的项目字段。");
+  markFormClean();
   refreshEffective();
 };
 
 $("btnSaveRaw").onclick = async () => {
-  const id = $("projectPick").value;
+  const id = loadedProjectId;
   showError($("projectError"), "");
   showSaved($("projectSaved"), "");
   if (!id) {
@@ -359,54 +518,249 @@ $("btnSaveRaw").onclick = async () => {
     return;
   }
   await loadProjectYaml(id);
+  markFormClean();
   showSaved($("projectSaved"), "已用原文覆盖 " + id + "。");
   refreshEffective();
 };
 
-$("btnNewProject").onclick = () => {
-  const row = $("newProjectRow");
-  row.hidden = false;
-  $("newProjectId").focus();
-};
+const PROJECT_ID_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
-$("btnCancelProject").onclick = () => {
-  $("newProjectRow").hidden = true;
-  $("newProjectId").value = "";
-  showError($("projectError"), "");
-};
-
-$("btnCreateProject").onclick = async () => {
-  const id = $("newProjectId").value.trim();
-  showError($("projectError"), "");
-  showSaved($("projectSaved"), "");
-  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) {
-    showError($("projectError"), "项目标识要以字母开头，后面只含字母、数字、_ 和 -。");
-    $("newProjectId").focus();
-    return;
-  }
+async function createProjectRecord(id) {
   const r = await fetch("/api/config/projects", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ project_id: id }),
   });
   const data = await r.json();
-  if (!r.ok) {
-    showError($("projectError"), data.detail || "没能创建项目。换一个标识再试。");
+  if (!r.ok) throw new Error(data.detail || "没能创建项目。换一个标识再试。");
+}
+
+async function saveProjectForm(id, payload) {
+  const r = await fetch("/api/config/projects/" + encodeURIComponent(id) + "/form", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.detail || "没能写入项目。检查选项后再试。");
+  return data;
+}
+
+$("btnCreateProject").onclick = async () => {
+  const id = $("newProjectId").value.trim();
+  showError($("projectError"), "");
+  showSaved($("projectSaved"), "");
+  if (!PROJECT_ID_RE.test(id)) {
+    showError($("projectError"), "项目标识要以字母开头，后面只含字母、数字、_ 和 -。");
+    $("newProjectId").focus();
+    return;
+  }
+  const payload = projectFormPayload();
+  if (payload.max_dev_retries != null && !Number.isInteger(payload.max_dev_retries)) {
+    showError($("projectError"), "开发重试上限要填整数，或留空沿用项目类型。");
+    $("fieldRetries").focus();
+    return;
+  }
+  try {
+    await createProjectRecord(id);
+    await saveProjectForm(id, payload);
+  } catch (err) {
+    showError($("projectError"), err.message || "没能创建项目。");
     return;
   }
   await loadLists();
-  $("projectPick").value = id;
-  $("newProjectId").value = "";
-  $("newProjectRow").hidden = true;
-  await loadProjectYaml(id);
   showSaved($("projectSaved"), "已创建项目 " + id + "。");
-  refreshEffective();
+  await enterOpen(id, false);
+};
+
+$("btnGoNew").onclick = () => requestProjectMode("new");
+
+let dirPickerPath = "";
+
+function closeDirPicker() {
+  const picker = $("dirPicker");
+  if (picker) picker.hidden = true;
+}
+
+async function loadDirPicker(path) {
+  const note = $("dirPickerNote");
+  const err = $("dirPickerError");
+  showError(err, "");
+  note.hidden = true;
+  note.textContent = "";
+  const q = new URLSearchParams();
+  if (path) q.set("path", path);
+  const r = await fetch("/api/config/directories?" + q.toString());
+  const data = await r.json();
+  if (!r.ok) {
+    showError(err, data.detail || "读不到这个目录。");
+    return false;
+  }
+  dirPickerPath = data.path || "";
+  $("dirPickerPath").textContent = dirPickerPath;
+  const up = $("btnDirUp");
+  up.hidden = !data.parent;
+  up.dataset.path = data.parent || "";
+  const list = $("dirPickerList");
+  list.replaceChildren();
+  const dirs = data.dirs || [];
+  if (!dirs.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint-block";
+    empty.textContent = "这个目录下没有子目录。";
+    list.appendChild(empty);
+  } else {
+    for (const dir of dirs) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "dir-picker-item";
+      btn.textContent = dir.name;
+      btn.addEventListener("click", () => loadDirPicker(dir.path));
+      list.appendChild(btn);
+    }
+  }
+  if (data.truncated) {
+    note.hidden = false;
+    note.textContent = "子目录较多，只显示前 500 个。";
+  }
+  return true;
+}
+
+if ($("btnPickDirectory")) {
+  $("btnPickDirectory").onclick = async () => {
+    $("dirPicker").hidden = false;
+    const current = ($("dirPath").value || "").trim();
+    const ok = await loadDirPicker(current);
+    if (!ok && current) await loadDirPicker("");
+  };
+  $("btnDirUp").onclick = () => loadDirPicker($("btnDirUp").dataset.path || "");
+  $("btnDirUse").onclick = async () => {
+    const path = dirPickerPath;
+    closeDirPicker();
+    if (!path) return;
+    $("dirPath").value = path;
+    await openChosenDirectory(path);
+  };
+  $("dirPath").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    openChosenDirectory(($("dirPath").value || "").trim());
+  });
+  $("btnDirCancel").onclick = closeDirPicker;
+  $("dirPicker").addEventListener("click", (event) => {
+    if (event.target === $("dirPicker")) closeDirPicker();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && $("dirPicker") && !$("dirPicker").hidden) closeDirPicker();
+  });
+}
+
+async function fillRemoteFromGit(remote) {
+  const url = (remote || "").trim();
+  if (!url || ($("fieldRemoteUrl").value || "").trim() || !loadedProjectId) return false;
+  $("fieldRemoteUrl").value = url;
+  const r = await fetch("/api/config/projects/" + encodeURIComponent(loadedProjectId) + "/form", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(projectFormPayload()),
+  });
+  const data = await r.json();
+  if (!r.ok) {
+    showError($("projectError"), data.detail || "没能写入远程仓库。");
+    return false;
+  }
+  if (data.yaml) $("projectYaml").value = data.yaml;
+  markFormClean();
+  return true;
+}
+
+async function openChosenDirectory(path) {
+  showError($("projectError"), "");
+  showSaved($("projectSaved"), "");
+  $("dirCreate").hidden = true;
+  $("dirMatches").hidden = true;
+  const r = await fetch("/api/config/projects/by-workspace?path=" + encodeURIComponent(path || ""));
+  const data = await r.json();
+  if (!r.ok) {
+    showError($("projectError"), data.detail || "打不开这个目录。");
+    return;
+  }
+  $("dirPane").dataset.path = data.path || path;
+  $("dirPane").dataset.remoteUrl = data.remote_url || "";
+  const ids = data.project_ids || [];
+  if (ids.length === 1) {
+    await enterOpen(ids[0], false);
+    const wrote = await fillRemoteFromGit(data.remote_url);
+    showSaved(
+      $("projectSaved"),
+      "这个目录已经是项目 " + ids[0] + "。" + (wrote ? "已从 git 写入远程仓库。" : ""),
+    );
+    return;
+  }
+  if (ids.length > 1) {
+    const box = $("dirMatches");
+    box.replaceChildren();
+    ids.forEach((pid) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "project-mode";
+      btn.textContent = pid;
+      btn.addEventListener("click", async () => {
+        await enterOpen(pid, false);
+        await fillRemoteFromGit($("dirPane").dataset.remoteUrl || "");
+      });
+      box.appendChild(btn);
+    });
+    box.hidden = false;
+    return;
+  }
+  $("fieldDirId").value = data.suggested_id || "";
+  $("dirCreate").hidden = false;
+}
+
+$("btnCreateFromDir").onclick = async () => {
+  const id = $("fieldDirId").value.trim();
+  const scenario = $("fieldDirScenario").value;
+  showError($("projectError"), "");
+  if (!PROJECT_ID_RE.test(id)) {
+    showError($("projectError"), "项目标识要以字母开头，后面只含字母、数字、_ 和 -。");
+    $("fieldDirId").focus();
+    return;
+  }
+  if (!scenario) {
+    showError($("projectError"), "先选择项目类型。");
+    return;
+  }
+  try {
+    await createProjectRecord(id);
+    await saveProjectForm(id, {
+      title: id,
+      description: "",
+      remote_url: $("dirPane").dataset.remoteUrl || "",
+      scenario_key: scenario,
+      profile_id: "",
+      max_dev_retries: null,
+      design_track_mode: "inherit",
+      skip_mode: "inherit",
+      skip_nodes: [],
+      notify_chat_id: "",
+      notify_open_id: "",
+      workspace: $("dirPane").dataset.path || ($("dirPath").value || "").trim(),
+    });
+  } catch (err) {
+    showError($("projectError"), err.message || "没能创建项目。");
+    return;
+  }
+  await loadLists();
+  showSaved($("projectSaved"), "已创建项目 " + id + "。");
+  await enterOpen(id, false);
 };
 
 $("btnEffective").onclick = refreshEffective;
 $("btnSaveRuntime").onclick = saveRuntime;
 
 (async function init() {
+  try {
   await customElements.whenDefined("wa-select");
   await customElements.whenDefined("wa-option");
   await loadLists();
@@ -416,7 +770,25 @@ $("btnSaveRuntime").onclick = saveRuntime;
     await loadScenarioYaml(first.value);
   }
   await loadSettings();
-  if (!$("projectPick").value) setProjectFieldsEnabled(false);
+  document.querySelectorAll(".project-mode").forEach((el) => {
+    el.addEventListener("click", (event) => {
+      event.preventDefault();
+      requestProjectMode(el.dataset.projectMode);
+    });
+  });
+  window.applyProjectLocation = async () => {
+    const hashMode = { "#new": "new", "#open": "open", "#from-directory": "from-directory" }[location.hash] || "";
+    const opened = new URLSearchParams(location.search).get("project") || "";
+    if (opened) await enterOpen(opened, true);
+    else if (hashMode === "from-directory") enterDirectory(true);
+    else if (hashMode === "new") enterNew(true);
+    else if ((window.__projects || []).length) await enterOpen("", true);
+    else enterNew(true);
+  };
+  await window.applyProjectLocation();
   await refreshEffective();
+  } catch (err) {
+    window.__configInitError = String(err && err.stack || err);
+  }
 })();
 })();

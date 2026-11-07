@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
-  <title>auto_studio · 配置</title>
+  <title>AutoStudio · 配置</title>
   <script>
     (function () {
       var key = "auto_studio_hitl_theme";
@@ -56,7 +56,7 @@
               </a>
               <a class="sidebar-link sidebar-sub" href="#scenarioHeading">
                 <wa-icon name="table-columns" library="system"></wa-icon>
-                <span>场景</span>
+                <span>项目类型</span>
               </a>
               <a class="sidebar-link sidebar-sub" href="#envHeading">
                 <wa-icon name="file-code" library="system"></wa-icon>
@@ -71,7 +71,7 @@
         <div class="composer-block">
           <section aria-labelledby="projectHeading">
             <p class="section-title" id="projectHeading">项目</p>
-            <p class="panel-lead">先选场景和开关，再填单行。整份 YAML 在文末的原文里。</p>
+            <p class="panel-lead">先选项目类型和开关，再填单行。整份 YAML 在文末的原文里。</p>
             <wa-select id="projectPick" label="选择项目" placeholder="选择项目"></wa-select>
             <div class="row-actions">
               <wa-button id="btnNewProject" appearance="outlined" variant="neutral">新建项目</wa-button>
@@ -86,14 +86,14 @@
             </div>
 
             <div id="projectFields">
-              <wa-select id="fieldScenario" label="绑定场景"></wa-select>
+              <wa-select id="fieldScenario" label="项目类型"></wa-select>
               <wa-select id="fieldDesign" label="设计轨" value="inherit">
-                <wa-option value="inherit">沿用场景</wa-option>
+                <wa-option value="inherit">沿用项目类型</wa-option>
                 <wa-option value="on">开启</wa-option>
                 <wa-option value="off">关闭</wa-option>
               </wa-select>
               <wa-select id="fieldSkipMode" label="节点裁剪" value="inherit">
-                <wa-option value="inherit">沿用场景</wa-option>
+                <wa-option value="inherit">沿用项目类型</wa-option>
                 <wa-option value="custom">在项目里指定</wa-option>
               </wa-select>
               <div id="skipWrap" hidden>
@@ -105,7 +105,7 @@
                   <wa-input id="fieldTitle" label="标题"></wa-input>
                 </div>
                 <div>
-                  <wa-input id="fieldRetries" label="开发重试上限" hint="空则沿用场景" type="number" min="0" step="1" inputmode="numeric"></wa-input>
+                  <wa-input id="fieldRetries" label="开发重试上限" hint="空则沿用项目类型" type="number" min="0" step="1" inputmode="numeric"></wa-input>
                 </div>
               </div>
               <wa-input id="fieldDescription" label="说明"></wa-input>
@@ -154,21 +154,21 @@
         </div>
       </main>
 
-      <aside class="workspace-inspect" aria-label="场景与环境">
+      <aside class="workspace-inspect" aria-label="项目类型与环境">
         <div class="inspect-head">
-          <h2 id="scenarioHeading">场景</h2>
+          <h2 id="scenarioHeading">项目类型</h2>
         </div>
         <div class="inspect-body">
-          <p class="panel-lead">场景文件只读。原文和合并 JSON 在下方折叠入口里。</p>
-          <wa-select id="scenarioPick" label="查看场景"></wa-select>
+          <p class="panel-lead">项目类型文件只读。原文和合并 JSON 在下方折叠入口里。</p>
+          <wa-select id="scenarioPick" label="查看项目类型"></wa-select>
           <wa-details class="raw" summary="原文 scenario.yaml">
-            <wa-textarea id="scenarioYaml" label="场景原文" rows="8" readonly></wa-textarea>
+            <wa-textarea id="scenarioYaml" label="项目类型原文" rows="8" readonly></wa-textarea>
           </wa-details>
           <p class="section-title" id="previewHeading">合并结果</p>
-          <p class="panel-lead">场景与项目叠在一起之后，运行时实际采用的值。</p>
+          <p class="panel-lead">项目类型与项目叠在一起之后，运行时实际采用的值。</p>
           <wa-button id="btnEffective" appearance="outlined" variant="neutral">刷新预览</wa-button>
           <wa-details class="raw" summary="原文 JSON">
-            <pre id="effectiveOut" class="mono-block">选择项目或场景后会刷新。</pre>
+            <pre id="effectiveOut" class="mono-block">选择项目或项目类型后会刷新。</pre>
           </wa-details>
 
           <hr class="main-divider" />
