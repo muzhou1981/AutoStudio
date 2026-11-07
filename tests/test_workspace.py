@@ -1,6 +1,8 @@
 import os
 import subprocess
 
+import pytest
+
 from auto_studio.backends.cursor_backend import CursorBackend
 from auto_studio.hitl.service import GraphRunService
 from auto_studio.workflows.default import compile_graph, graph
@@ -36,6 +38,7 @@ def test_sqlite_checkpoint_resumes(tmp_path, monkeypatch):
 
 
 def test_cursor_defaults_to_auto_route_and_worktree_tools(tmp_path, monkeypatch):
+    pytest.importorskip("cursor_sdk")
     monkeypatch.setenv("CURSOR_API_KEY", "test-key")
     monkeypatch.setenv("AUTO_STUDIO_CURSOR_VERIFY", "0")
     monkeypatch.delenv("AUTO_STUDIO_CURSOR_MODEL", raising=False)

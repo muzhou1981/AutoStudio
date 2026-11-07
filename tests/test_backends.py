@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from auto_studio.backends.base import StubBackend, get_default_backend
 
 
@@ -41,6 +43,7 @@ def test_auto_studio_backend_stub_overrides_key(monkeypatch):
 
 
 def test_cursor_complete_records_token_usage(monkeypatch):
+    pytest.importorskip("cursor_sdk")
     monkeypatch.setenv("CURSOR_API_KEY", "test-key")
     monkeypatch.setenv("AUTO_STUDIO_CURSOR_VERIFY", "0")
 
@@ -77,6 +80,7 @@ def test_cursor_complete_records_token_usage(monkeypatch):
 
 
 def test_role_md_is_sent_once_per_live_agent(monkeypatch):
+    pytest.importorskip("cursor_sdk")
     monkeypatch.setenv("CURSOR_API_KEY", "test-key")
     monkeypatch.setenv("AUTO_STUDIO_CURSOR_VERIFY", "0")
     prompts: list[str] = []
