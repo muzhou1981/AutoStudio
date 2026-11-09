@@ -139,13 +139,13 @@ curl -fsS http://127.0.0.1:8765/ | grep -o 'GeniStudio · 运行' | head -n 1
 
 1. 本机完成 `lark-cli config init`，凭据留在 lark-cli 自己的配置里，不写入仓库。
 2. `.env` 中 `GENI_STUDIO_LARK_BACKEND=lark_cli`。`GENI_STUDIO_PUBLIC_BASE_URL` 写成实际打开页面的地址，默认是 `http://127.0.0.1:8765`。
-3. 一个终端运行 `geni-studio-web`，另一个终端运行：
+3. 在飞书开放平台为这个应用订阅回调 `card.action.trigger`，否则决策点按钮没有入站事件。`im.message.receive_v1` 用于文字批复。`geni-studio-web` 默认会在本机有 `lark-cli` 时启动事件桥接，不必再开第二个进程。要关掉桥接，启动前设置 `GENI_STUDIO_FEISHU_BRIDGE=0`，再单独运行：
 
 ```bash
 .venv/bin/geni-studio-feishu-bridge --webhook http://127.0.0.1:8765/api/webhooks/feishu
 ```
 
-Web 端口如果改过，webhook 地址里的端口一并改。项目里的通知群或通知人优先于 `.env` 里的 `GENI_STUDIO_FEISHU_NOTIFY_CHAT_ID` 与 `GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID`。
+Web 端口如果改过，把 `GENI_STUDIO_FEISHU_WEBHOOK` 和 `GENI_STUDIO_PUBLIC_BASE_URL` 改成同一个端口。若设置了 `GENI_STUDIO_FEISHU_WEBHOOK_TOKEN`，桥接会带上这个请求头，Webhook 拒绝没有该头的批复。项目里的通知群或通知人优先于 `.env` 里的 `GENI_STUDIO_FEISHU_NOTIFY_CHAT_ID` 与 `GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID`。
 
 ## 开发这个仓库时
 

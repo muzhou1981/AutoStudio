@@ -82,7 +82,7 @@
 | GET | `/api/runs/{thread_id}` | 状态、`phase`、`awaiting_human`、state 摘要 |
 | POST | `/api/runs/{thread_id}/hitl` | 提交 `gate_decision` + `human_reply`，续跑至下一 interrupt 或结束 |
 
-启动本地 Web：`geni-studio-web` 或 `python -m geni_studio.web.app`（默认 `127.0.0.1:8765`）。飞书 **入站**（卡片/消息 → HITL）仍待接；**出站**通知见 [ADR 0004](decisions/0004-feishu-hitl-via-lark-cli.md)。
+启动本地 Web：`geni-studio-web` 或 `python -m geni_studio.web.app`（默认 `127.0.0.1:8765`）。`geni-studio-web` 会在本机有 `lark-cli` 时一并消费飞书事件，把决策点卡片和文字批复送到 HITL。出站通知见 [ADR 0004](decisions/0004-feishu-hitl-via-lark-cli.md)。
 
 #### 飞书接到 GeniStudio（推荐：官方 lark-cli）
 

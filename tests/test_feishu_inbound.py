@@ -54,6 +54,127 @@ def test_clarification_card_has_reply_input():
     assert "thread_id=tid" in blob
 
 
+def test_gate_card_names_the_reject_target():
+    card = build_gate_interactive_card(
+        thread_id="tid",
+        summary="确认 CCA",
+        gate_id="confirm_cca",
+        web_url="http://127.0.0.1:8765/?thread_id=tid",
+        node_label="确认 CCA",
+        reject_label="确认 AOM",
+        excerpt="**算子合同**\n先写清接口。",
+    )
+    body = str(card)
+    assert "确认 CCA" in body
+    assert "不通过将前往「确认 AOM」" in body
+    assert "算子合同" in body
+
+
+def test_settled_gate_card_has_no_decision_buttons():
+    from geni_studio.hitl.feishu_cards import build_settled_gate_card
+
+    card = build_settled_gate_card(node_label="确认 CCA", decision_line="已记录：不通过，前往「确认 AOM」。")
+    blob = str(card)
+    assert "已记录：不通过" in blob
+    assert "gate_decision" not in blob
+
+
+def test_repeated_gate_card_is_a_toast_not_an_error():
+    client = TestClient(app)
+    started = client.post(
+        "/api/runs",
+        json={"human_request": "twice", "scenario_key": "npu_operator"},
+    )
+    tid = started.json()["thread_id"]
+    body = {
+        "header": {"event_type": "card.action.trigger"},
+        "event": {
+            "action": {
+                "value": {
+                    "thread_id": tid,
+                    "hitl_action": "gate",
+                    "gate_decision": "approved",
+                }
+            }
+        },
+    }
+    first = client.post("/api/webhooks/feishu", json=body)
+    assert first.status_code == 200
+    assert first.json()["card"]["type"] == "raw"
+    stopped = client.post(f"/api/runs/{tid}/stop")
+    assert stopped.status_code == 200
+    second = client.post("/api/webhooks/feishu", json=body)
+    assert second.status_code == 200
+    assert second.json()["ignored"] == "not_awaiting"
+
+
+def test_text_approval_does_not_guess_among_several_waiting_runs():
+    client = TestClient(app)
+    first = client.post(
+        "/api/runs",
+        json={"human_request": "one", "scenario_key": "npu_operator"},
+    ).json()["thread_id"]
+    second = client.post(
+        "/api/runs",
+        json={"human_request": "two", "scenario_key": "npu_operator"},
+    ).json()["thread_id"]
+    from geni_studio.hitl.feishu_session import register_awaiting_thread
+
+    chat = "oc_multi_wait"
+    register_awaiting_thread(thread_id=first, chat_id=chat)
+    register_awaiting_thread(thread_id=second, chat_id=chat)
+    replied = client.post(
+        "/api/webhooks/feishu",
+        json={
+            "header": {"event_type": "im.message.receive_v1"},
+            "event": {
+                "message": {
+                    "chat_id": chat,
+                    "message_type": "text",
+                    "content": '{"text":"批准"}',
+                },
+                "sender": {"sender_id": {"open_id": "ou_multi"}},
+            },
+        },
+    )
+    assert replied.status_code == 200
+    assert replied.json()["ignored"] == "multiple_awaiting"
+
+
+def test_start_surfaces_a_feishu_send_failure(monkeypatch):
+    from geni_studio.hitl.feishu_notify import NotifyResult
+
+    monkeypatch.setattr(
+        "geni_studio.web.app.notify_awaiting_human_via_lark_cli",
+        lambda *_args, **_kwargs: NotifyResult(False, "lark-cli 未就绪。"),
+    )
+    client = TestClient(app)
+    started = client.post(
+        "/api/runs",
+        json={"human_request": "notice", "scenario_key": "npu_operator"},
+    )
+    assert started.status_code == 200
+    notice = started.json()["feishu_notice"]
+    assert notice["sent"] is False
+    assert "未就绪" in notice["detail"]
+
+
+def test_webhook_token_rejects_a_missing_header(monkeypatch):
+    monkeypatch.setenv("GENI_STUDIO_FEISHU_WEBHOOK_TOKEN", "secret-token")
+    client = TestClient(app)
+    denied = client.post(
+        "/api/webhooks/feishu",
+        json={"header": {"event_type": "im.message.receive_v1"}, "event": {}},
+    )
+    assert denied.status_code == 401
+    allowed = client.post(
+        "/api/webhooks/feishu",
+        json={"header": {"event_type": "im.message.receive_v1"}, "event": {}},
+        headers={"X-Geni-Studio-Webhook-Token": "secret-token"},
+    )
+    assert allowed.status_code == 200
+
+
 def test_gate_card_has_buttons():
     card = build_gate_interactive_card(
         thread_id="tid",
@@ -64,6 +185,8 @@ def test_gate_card_has_buttons():
     assert card["schema"] == "2.0"
     body = str(card)
     assert "approved" in body and "rejected" in body
+    assert "不通过" in body
+    assert "不通过将结束本轮" in body
     assert "需求确认" in body
     assert "待批复 · 需求确认" in body
 

@@ -18,10 +18,14 @@ def forward_line(webhook_url: str, line: str) -> None:
     line = line.strip()
     if not line:
         return
+    headers = {"Content-Type": "application/json"}
+    token = os.environ.get("GENI_STUDIO_FEISHU_WEBHOOK_TOKEN", "").strip()
+    if token:
+        headers["X-Geni-Studio-Webhook-Token"] = token
     req = urllib.request.Request(
         webhook_url,
         data=line.encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:
@@ -35,6 +39,7 @@ def forward_line(webhook_url: str, line: str) -> None:
 def _consume_loop(webhook_url: str, event_key: str, env: dict[str, str]) -> None:
     proc = subprocess.Popen(
         ["lark-cli", "event", "consume", event_key, "--as", "bot"],
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=sys.stderr,
         text=True,
@@ -48,6 +53,41 @@ def _consume_loop(webhook_url: str, event_key: str, env: dict[str, str]) -> None
             continue
         forward_line(webhook_url, line)
     proc.wait()
+
+
+_bridge_started = False
+
+
+def start_background() -> None:
+    """在 Web 进程里消费飞书事件。仅当 GENI_STUDIO_FEISHU_BRIDGE=1 且本机有 lark-cli。"""
+    global _bridge_started
+    if os.environ.get("GENI_STUDIO_FEISHU_BRIDGE", "").strip() != "1":
+        return
+    if _bridge_started:
+        return
+    if not shutil_which("lark-cli"):
+        print("[feishu-bridge] 未启动：找不到 lark-cli", file=sys.stderr)
+        return
+    _bridge_started = True
+    webhook = os.environ.get("GENI_STUDIO_FEISHU_WEBHOOK", "http://127.0.0.1:8765/api/webhooks/feishu")
+    env = {
+        **os.environ,
+        "LARKSUITE_CLI_NO_UPDATE_NOTIFIER": "1",
+        "LARKSUITE_CLI_NO_SKILLS_NOTIFIER": "1",
+    }
+    for key in DEFAULT_EVENT_KEYS:
+        threading.Thread(
+            target=_consume_loop,
+            args=(webhook, key, env),
+            name=f"feishu-bridge:{key}",
+            daemon=True,
+        ).start()
+
+
+def shutil_which(name: str) -> str | None:
+    import shutil
+
+    return shutil.which(name)
 
 
 def main() -> None:

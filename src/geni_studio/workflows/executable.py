@@ -127,6 +127,7 @@ def run_state(workflow: dict[str, Any]) -> dict[str, Any]:
                 "role": node["role"],
                 "kind": node["kind"],
                 "artifacts": list(outputs) if node["kind"] == "activity" else [],
+                "reject_to": str(node.get("reject_to") or "") if node["kind"] == "gate" else "",
             }
         )
     return {

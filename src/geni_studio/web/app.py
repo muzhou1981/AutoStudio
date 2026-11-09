@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -24,7 +25,16 @@ from geni_studio.web.role_routes import router as role_router
 from geni_studio.web.workflow_routes import router as workflow_router
 from geni_studio.workflows.default import graph
 
-app = FastAPI(title="GeniStudio", version="0.1.0")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    from geni_studio.hitl.feishu_bridge import start_background
+
+    start_background()
+    yield
+
+
+app = FastAPI(title="GeniStudio", version="0.1.0", lifespan=_lifespan)
 app.include_router(config_router)
 app.include_router(workflow_router)
 app.include_router(role_router)
@@ -33,6 +43,14 @@ _static_dir = Path(__file__).with_name("static")
 app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 _run_service = GraphRunService(graph)
 bind_run_service(_run_service)
+
+
+def _with_feishu(payload: dict, thread_id: str, project_id: str) -> dict:
+    result = notify_awaiting_human_via_lark_cli(_run_service, thread_id, project_id)
+    if result.sent or result.detail:
+        payload = dict(payload)
+        payload["feishu_notice"] = {"sent": result.sent, "detail": result.detail}
+    return payload
 
 
 class NodeToolChoice(BaseModel):
@@ -291,8 +309,7 @@ def api_start_run(body: StartRunBody) -> dict:
         )
     except (ConfigError, HitlError, ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    notify_awaiting_human_via_lark_cli(_run_service, st.thread_id, body.project_id)
-    return _run_service.status_dict(st.thread_id)
+    return _with_feishu(_run_service.status_dict(st.thread_id), st.thread_id, body.project_id)
 
 
 class RoleModelsBody(BaseModel):
@@ -448,7 +465,11 @@ def api_continue_run(thread_id: str) -> dict:
     except HitlError as e:
         code = 404 if "未知" in str(e) else 409
         raise HTTPException(status_code=code, detail=str(e)) from e
-    return _run_service.status_dict(st.thread_id)
+    return _with_feishu(
+        _run_service.status_dict(st.thread_id),
+        st.thread_id,
+        str(st.values.get("project_id") or ""),
+    )
 
 
 @app.post("/api/runs/{thread_id}/resume")
@@ -458,7 +479,11 @@ def api_resume_run(thread_id: str) -> dict:
     except HitlError as e:
         code = 404 if "未知" in str(e) else 409
         raise HTTPException(status_code=code, detail=str(e)) from e
-    return _run_service.status_dict(st.thread_id)
+    return _with_feishu(
+        _run_service.status_dict(st.thread_id),
+        st.thread_id,
+        str(st.values.get("project_id") or ""),
+    )
 
 
 @app.post("/api/runs/{thread_id}/stop")
@@ -499,13 +524,15 @@ def api_submit_hitl(thread_id: str, body: HitlSubmitBody) -> dict:
     except HitlError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     project_id = str(st.values.get("project_id") or "")
-    notify_awaiting_human_via_lark_cli(_run_service, thread_id, project_id)
-    return _run_service.status_dict(thread_id)
+    return _with_feishu(_run_service.status_dict(thread_id), thread_id, project_id)
 
 
 def main() -> None:
+    import os
+
     import uvicorn
 
+    os.environ.setdefault("GENI_STUDIO_FEISHU_BRIDGE", "1")
     uvicorn.run(
         "geni_studio.web.app:app",
         host="127.0.0.1",

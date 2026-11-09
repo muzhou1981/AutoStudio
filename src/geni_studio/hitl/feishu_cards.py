@@ -30,19 +30,28 @@ def build_gate_interactive_card(
     summary: str,
     gate_id: str | None,
     web_url: str,
+    node_label: str = "",
+    reject_label: str = "",
+    excerpt: str = "",
 ) -> dict[str, Any]:
     title = "软件工厂 · 项目经理"
-    node_label = _node_label(gate_id)
-    body_md = _awaiting_lines(kind="gate", node_label=node_label)
+    shown = node_label.strip() or _node_label(gate_id)
+    body_md = _awaiting_lines(kind="gate", node_label=shown)
+    if reject_label.strip():
+        body_md += f"\n不通过将前往「{reject_label.strip()}」，然后继续。"
+    else:
+        body_md += "\n不通过将结束本轮。"
     if summary:
         body_md += f"\n\n{summary}"
+    if excerpt.strip():
+        body_md += f"\n\n{excerpt.strip()}"
     body_md += f"\n\nRun：`{thread_id}`"
     return {
         "schema": "2.0",
         "config": {"update_multi": True, "width_mode": "default"},
         "header": {
             "title": {"tag": "plain_text", "content": title},
-            "subtitle": {"tag": "plain_text", "content": node_label},
+            "subtitle": {"tag": "plain_text", "content": shown},
             "template": "blue",
         },
         "body": {
@@ -87,7 +96,7 @@ def build_gate_interactive_card(
                             "elements": [
                                 {
                                     "tag": "button",
-                                    "text": {"tag": "plain_text", "content": "驳回"},
+                                    "text": {"tag": "plain_text", "content": "不通过"},
                                     "type": "danger",
                                     "width": "fill",
                                     "behaviors": [
@@ -248,6 +257,26 @@ def build_escalation_interactive_card(
                     "width": "fill",
                     "behaviors": [{"type": "open_url", "default_url": web_url}],
                 },
+            ],
+        },
+    }
+
+
+def build_settled_gate_card(*, node_label: str, decision_line: str) -> dict[str, Any]:
+    """批复之后替换原卡片，去掉还能再点的按钮。"""
+    return {
+        "schema": "2.0",
+        "config": {"update_multi": True, "width_mode": "default"},
+        "header": {
+            "title": {"tag": "plain_text", "content": "软件工厂 · 项目经理"},
+            "subtitle": {"tag": "plain_text", "content": node_label or "决策点"},
+            "template": "green",
+        },
+        "body": {
+            "direction": "vertical",
+            "padding": "12px 12px 20px 12px",
+            "elements": [
+                {"tag": "markdown", "content": decision_line, "text_align": "left"},
             ],
         },
     }

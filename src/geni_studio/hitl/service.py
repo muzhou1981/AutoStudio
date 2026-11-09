@@ -943,7 +943,16 @@ def _workflow_gate_summary(values: dict[str, Any], gate_id: str) -> str:
     for item in raw:
         if isinstance(item, dict) and str(item.get("id") or "") == gate_id:
             name = str(item.get("label") or gate_id)
-            return f"{name}：请批准或驳回。"
+            reject_id = str(item.get("reject_to") or "").strip()
+            reject_name = ""
+            if reject_id:
+                for other in raw:
+                    if isinstance(other, dict) and str(other.get("id") or "") == reject_id:
+                        reject_name = str(other.get("label") or reject_id)
+                        break
+            if reject_name:
+                return f"{name}：请批准，或不通过并前往「{reject_name}」。"
+            return f"{name}：请批准，或不通过以结束本轮。"
     return ""
 
 

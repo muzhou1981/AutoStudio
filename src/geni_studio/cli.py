@@ -86,6 +86,7 @@ def cmd_run(args: argparse.Namespace, root: Path) -> int:
     if st.awaiting_human:
         print(f"awaiting={st.awaiting_human.kind}")
         print(f"summary={st.awaiting_human.summary}")
+    _print_feishu(st.thread_id, str(st.values.get("project_id") or args.project))
     work = st.values.get("workspace_path") or ""
     if work:
         print(f"worktree={work}")
@@ -108,7 +109,20 @@ def cmd_hitl(args: argparse.Namespace) -> int:
         raise SystemExit(str(exc)) from exc
     print(f"thread_id={st.thread_id}")
     print(f"phase={st.phase}")
+    _print_feishu(st.thread_id, str(st.values.get("project_id") or ""))
     return 0
+
+
+def _print_feishu(thread_id: str, project_id: str) -> None:
+    from geni_studio.hitl.feishu_notify import notify_awaiting_human_via_lark_cli
+    from geni_studio.hitl.service import GraphRunService
+    from geni_studio.workflows.default import graph
+
+    result = notify_awaiting_human_via_lark_cli(GraphRunService(graph), thread_id, project_id)
+    if result.sent:
+        print("feishu=sent")
+    elif result.detail:
+        print(f"feishu={result.detail}")
 
 
 def cmd_proposal(args: argparse.Namespace, root: Path) -> int:

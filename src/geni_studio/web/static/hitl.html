@@ -270,6 +270,7 @@
           <p class="hint-block" id="pauseNote" hidden>本轮已暂停。已完成的节点不会重做。</p>
           <p class="hint-block" id="interruptHint" hidden>这一轮在中途中断。已完成的节点不会重做。</p>
           <p class="save-note" id="runSaved" hidden aria-live="polite"></p>
+          <p class="hint-block" id="feishuNote" hidden></p>
           <wa-callout id="startError" variant="danger" hidden></wa-callout>
         </div>
       </main>
@@ -1125,6 +1126,19 @@
       if (name) input.value = name;
       const projectId = data && data.values && data.values.project_id;
       if (projectId) $("project").value = projectId;
+    }
+
+    function noteFeishu(data) {
+      const el = $("feishuNote");
+      if (!el) return;
+      const notice = data && data.feishu_notice;
+      if (notice && !notice.sent && notice.detail) {
+        el.hidden = false;
+        el.textContent = "飞书通知没有发出：" + notice.detail;
+      } else {
+        el.hidden = true;
+        el.textContent = "";
+      }
     }
 
     function roleModelsFromList() {
@@ -2848,6 +2862,7 @@
           }).catch(() => {});
         }
         showRunSaved("");
+        noteFeishu(data);
         pendingNodeTools = {};
         clearAttachments();
         roleModelStamp = "";
@@ -2920,6 +2935,7 @@
           return;
         }
         lastStatus = data;
+        noteFeishu(data);
         ingestStatus(data);
       } catch (err) {
         showError($("startError"), "续跑没有返回。检查服务是否还在，然后刷新。");
@@ -2989,6 +3005,7 @@
           return;
         }
         $("reply").value = "";
+        noteFeishu(data);
         await refresh();
       } finally {
         setLoading(btn, false);
