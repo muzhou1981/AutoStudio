@@ -33,7 +33,7 @@
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css" />
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/utilities.css" />
   <link rel="stylesheet" href="/static/shared.css?v=20261109-roleicon" />
-  <link rel="stylesheet" href="/static/hitl.css?v=20261109-tools3" />
+  <link rel="stylesheet" href="/static/hitl.css?v=20261109-helpimg3" />
   <script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
 </head>
 <body>
@@ -188,27 +188,15 @@
       </aside>
 
       <div class="app-view" data-route="hitl">
-      <main id="workspace" class="workspace-main" aria-label="操作区">
-        <div class="composer-block">
+      <main id="workspace" class="workspace-main run-board" aria-label="操作区">
+        <div class="run-board-scroll">
           <div class="func-region" id="region-new">
           <div class="field-row">
             <wa-select id="project" label="项目" placeholder="先选择项目"></wa-select>
             <wa-input id="runName" label="Run 命名" placeholder="先选择项目"></wa-input>
           </div>
           <p class="hint-block" id="runScenarioHint">命名默认是项目标识加递增序号，可改。</p>
-          <wa-textarea id="req" label="描述本轮交付目标" rows="5" placeholder="例如：为 npu_operator 场景实现 Mul 算子，含单测与性能基线…"></wa-textarea>
-
           <input id="thread" type="hidden" />
-
-          <div class="row-actions">
-            <wa-button id="btnStart" variant="brand">启动</wa-button>
-            <wa-button id="btnContinueRun" appearance="outlined" variant="neutral" hidden>续跑</wa-button>
-            <wa-button id="btnPause" appearance="outlined" variant="neutral" hidden>暂停</wa-button>
-            <wa-button id="btnStop" appearance="outlined" variant="neutral" hidden>停止</wa-button>
-          </div>
-          <p class="hint-block" id="pauseNote" hidden>本轮已暂停。已完成的节点不会重做。</p>
-          <p class="hint-block" id="interruptHint" hidden>这一轮在中途中断。已完成的节点不会重做。</p>
-          <wa-callout id="startError" variant="danger" hidden></wa-callout>
           </div>
 
           <hr class="main-divider" />
@@ -249,6 +237,30 @@
           </wa-card>
           <p class="status-empty" id="gateIdleHint">本轮还没有待办。启动后，关卡、澄清或升级会停在这里。</p>
           </div>
+        </div>
+        <div class="run-composer" id="region-prompt">
+          <div class="prompt-box" id="promptBox">
+            <div id="attachList" class="attach-list" hidden></div>
+            <wa-textarea id="req" label="描述本轮交付目标" rows="3" placeholder="例如：为 npu_operator 场景实现 Mul 算子，含单测与性能基线…"></wa-textarea>
+            <div class="prompt-toolbar">
+              <button type="button" id="btnAttach" class="prompt-attach" aria-label="上传附件">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></svg>
+                <span>上传附件</span>
+              </button>
+              <input id="attachInput" type="file" multiple hidden />
+            </div>
+          </div>
+          <div class="row-actions">
+            <wa-button id="btnSaveRun" appearance="outlined" variant="neutral">保存</wa-button>
+            <wa-button id="btnStart" variant="brand">启动</wa-button>
+            <wa-button id="btnContinueRun" appearance="outlined" variant="neutral" hidden>续跑</wa-button>
+            <wa-button id="btnPause" appearance="outlined" variant="neutral" hidden>暂停</wa-button>
+            <wa-button id="btnStop" appearance="outlined" variant="neutral" hidden>停止</wa-button>
+          </div>
+          <p class="hint-block" id="pauseNote" hidden>本轮已暂停。已完成的节点不会重做。</p>
+          <p class="hint-block" id="interruptHint" hidden>这一轮在中途中断。已完成的节点不会重做。</p>
+          <p class="save-note" id="runSaved" hidden aria-live="polite"></p>
+          <wa-callout id="startError" variant="danger" hidden></wa-callout>
         </div>
       </main>
 
@@ -635,6 +647,9 @@
           <p class="section-title" id="helpHeading">概览</p>
           <p class="hint-block" id="helpMissing" hidden>没有这一节，改看概览。</p>
           <article class="help-copy" data-help-article="overview">
+            <figure class="help-hero">
+              <img src="/static/help-overview.jpg?v=20261109" alt="GeniStudio 概览：项目经理居中协调，架构、前端、后端、测试和运维各就各位。" />
+            </figure>
             <ul>
               <li>GeniStudio 接收人的交付目标，按项目绑定的流程让各角色写出文档和代码，并在决策点停下来等人批复。</li>
               <li>工厂自身和待开发项目分开。</li>
@@ -844,6 +859,7 @@
       interrupted: "中断",
       rejected: "已驳回",
       stopped: "已停止",
+      saved: "已保存",
     };
 
     const PHASE_VARIANT = {
@@ -862,6 +878,7 @@
       interrupted: "triangle-exclamation",
       completed: "check",
       rejected: "circle-xmark",
+      saved: "file",
     };
 
     function phaseMark(phase) {
@@ -971,15 +988,118 @@
       });
     }
 
-    function syncUrlThread(tid) {
+    let draftId = "";
+    let draftName = "";
+    let loadedDraftProject = "";
+    let ignoreProjectChange = false;
+
+    function syncHitlQuery(patch) {
       const params = new URLSearchParams(hitlSearch.startsWith("?") ? hitlSearch.slice(1) : hitlSearch);
-      if (tid) params.set("thread_id", tid);
-      else params.delete("thread_id");
-      params.delete("thread");
+      Object.keys(patch).forEach((key) => {
+        const value = patch[key];
+        if (value) params.set(key, value);
+        else params.delete(key);
+      });
       const query = params.toString();
       hitlSearch = query ? "?" + query : "";
       if (document.documentElement.dataset.route !== "config") {
         history.replaceState({ route: "hitl" }, "", "/" + hitlSearch);
+      }
+    }
+
+    function syncUrlThread(tid) {
+      const patch = { thread_id: tid || "", thread: "" };
+      if (tid) patch.draft = "";
+      syncHitlQuery(patch);
+    }
+
+    function syncUrlDraft(id) {
+      syncHitlQuery({ draft: id || "", thread_id: "", thread: "" });
+    }
+
+    function showRunSaved(msg) {
+      const el = $("runSaved");
+      if (!el) return;
+      el.hidden = !msg;
+      el.textContent = msg || "";
+    }
+
+    function clearDraftBinding() {
+      draftId = "";
+      draftName = "";
+      loadedDraftProject = "";
+    }
+
+    let runAttachments = [];
+
+    function formatAttachSize(bytes) {
+      const size = Number(bytes) || 0;
+      if (size < 1024) return size + " B";
+      if (size < 1024 * 1024) return Math.round(size / 1024) + " KB";
+      return (size / (1024 * 1024)).toFixed(1) + " MB";
+    }
+
+    function renderAttachments() {
+      const box = $("attachList");
+      if (!box) return;
+      box.replaceChildren();
+      box.hidden = !runAttachments.length;
+      runAttachments.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "attach-chip";
+        const name = document.createElement("span");
+        name.className = "attach-name";
+        name.textContent = item.name;
+        const size = document.createElement("span");
+        size.className = "attach-size";
+        size.textContent = formatAttachSize(item.size);
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "删除";
+        remove.addEventListener("click", () => {
+          runAttachments = runAttachments.filter((entry) => entry.id !== item.id);
+          renderAttachments();
+        });
+        row.append(name, size, remove);
+        box.appendChild(row);
+      });
+    }
+
+    function clearAttachments() {
+      runAttachments = [];
+      renderAttachments();
+    }
+
+    async function uploadAttachmentFiles(fileList) {
+      const files = [...(fileList || [])];
+      if (!files.length) return;
+      if (runAttachments.length + files.length > 8) {
+        showError($("startError"), "一次最多 8 个附件。");
+        return;
+      }
+      showError($("startError"), "");
+      for (const file of files) {
+        if (runAttachments.some((item) => item.name === file.name)) {
+          showError($("startError"), "已经添加过「" + file.name + "」。");
+          continue;
+        }
+        try {
+          const r = await fetch("/api/runs/attachments", {
+            method: "POST",
+            headers: { "X-Filename": encodeURIComponent(file.name) },
+            body: file,
+          });
+          const data = await r.json();
+          if (!r.ok) {
+            showError($("startError"), data.detail || "附件没有上传。");
+            return;
+          }
+          runAttachments.push({ id: data.id, name: data.name, size: data.size });
+          renderAttachments();
+        } catch (_) {
+          showError($("startError"), "附件没有上传。检查服务是否还在，然后重试。");
+          return;
+        }
       }
     }
 
@@ -1008,15 +1128,61 @@
     function clearCurrentRun() {
       stopPoll();
       $("thread").value = "";
+      clearDraftBinding();
       syncUrlThread("");
+      syncUrlDraft("");
+      showRunSaved("");
       syncThreadChrome("");
       applyBoundRunName(null);
       if ($("runName")) $("runName").disabled = false;
       syncStartButton("idle");
       syncStopButton("idle");
       pendingNodeTools = {};
+      clearAttachments();
       renderInspect(null);
       loadIdleRail();
+    }
+
+    async function openDraft(id) {
+      showError($("startError"), "");
+      showRunSaved("");
+      stopPoll();
+      try {
+        const r = await fetch("/api/runs/drafts/" + encodeURIComponent(id));
+        const data = await r.json();
+        if (!r.ok) {
+          showError($("startError"), data.detail || "读不到这份草稿。");
+          return;
+        }
+        $("thread").value = "";
+        draftId = data.draft_id;
+        draftName = data.run_name || "";
+        loadedDraftProject = String(data.project_id || "");
+        ignoreProjectChange = true;
+        $("project").value = loadedDraftProject;
+        ignoreProjectChange = false;
+        runNameTouched = true;
+        $("runName").value = data.run_name || "";
+        $("runName").disabled = false;
+        $("req").value = data.human_request || "";
+        runAttachments = (data.attachments || []).map((item) => ({
+          id: item.id,
+          name: item.name,
+          size: item.size,
+        }));
+        renderAttachments();
+        pendingNodeTools = data.node_tools || {};
+        syncUrlDraft(draftId);
+        syncThreadChrome("");
+        applyBoundRunName(null);
+        syncStartButton("saved");
+        syncStopButton("idle");
+        await syncRunScenarioHint();
+        await loadIdleRail();
+        await loadRunList();
+      } catch (_) {
+        showError($("startError"), "读不到这份草稿。检查服务是否还在，然后刷新。");
+      }
     }
 
     function armDelete(row, item) {
@@ -1038,7 +1204,11 @@
       cancel.addEventListener("click", () => panel.remove());
       ok.addEventListener("click", async () => {
         ok.disabled = true;
-        const r = await fetch("/api/runs/" + encodeURIComponent(item.thread_id) + "/delete", {
+        const draft = item.kind === "draft";
+        const url = draft
+          ? "/api/runs/drafts/" + encodeURIComponent(item.draft_id) + "/delete"
+          : "/api/runs/" + encodeURIComponent(item.thread_id) + "/delete";
+        const r = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ confirm_name: label }),
@@ -1049,7 +1219,8 @@
           ok.disabled = false;
           return;
         }
-        if ($("thread").value.trim() === item.thread_id) clearCurrentRun();
+        if (draft && draftId === item.draft_id) clearCurrentRun();
+        if (!draft && $("thread").value.trim() === item.thread_id) clearCurrentRun();
         await loadRunList();
       });
       panel.append(text, ok, cancel);
@@ -1082,7 +1253,7 @@
           box.appendChild(empty);
           return;
         }
-        const current = $("thread").value.trim();
+        const current = $("thread").value.trim() || draftId;
         for (const item of runs) {
           const label = item.run_name || item.thread_id;
           const row = document.createElement("div");
@@ -1101,6 +1272,12 @@
           btn.title = label + " · " + phaseLabel;
           btn.append(name, meta, phaseText);
           btn.addEventListener("click", () => {
+            if (item.kind === "draft") {
+              openDraft(item.draft_id);
+              return;
+            }
+            clearDraftBinding();
+            clearAttachments();
             $("thread").value = item.thread_id;
             syncUrlThread(item.thread_id);
             refresh();
@@ -1666,7 +1843,7 @@
           p.textContent = "还没有运行记录。填写交付目标并启动后，阶段和产物会显示在这里。";
           box.appendChild(p);
         }
-        setPhase("idle");
+        setPhase(draftId ? "saved" : "idle");
         return;
       }
       setPhase(data.phase);
@@ -2268,6 +2445,11 @@
       const open = roundIsOpen(phase);
       btn.disabled = open;
       btn.textContent = open ? "进行中" : "启动";
+      const save = $("btnSaveRun");
+      if (save) {
+        save.hidden = !!$("thread").value.trim();
+        save.disabled = startInFlight;
+      }
     }
 
     function syncPauseButton(phase) {
@@ -2479,6 +2661,7 @@
         project_id: String($("project").value || "").trim(),
         run_name: String($("runName").value || "").trim(),
         node_tools: pendingNodeTools,
+        attachments: runAttachments.map((item) => ({ id: item.id, name: item.name, size: item.size })),
       };
       if (!body.project_id) {
         showError($("startError"), "先选择项目。");
@@ -2521,6 +2704,7 @@
         if (!r.ok) {
           $("thread").value = previousThread;
           syncUrlThread(previousThread);
+          if (!previousThread && draftId) syncUrlDraft(draftId);
           showError($("startError"), data.detail || "启动失败，请检查项目类型或项目配置。");
           syncStartButton(lastStatus && lastStatus.phase);
           syncStopButton(lastStatus && lastStatus.phase);
@@ -2528,12 +2712,25 @@
         }
         $("thread").value = data.thread_id;
         syncUrlThread(data.thread_id);
+        if (draftId) {
+          const savedId = draftId;
+          const savedName = draftName;
+          clearDraftBinding();
+          fetch("/api/runs/drafts/" + encodeURIComponent(savedId) + "/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirm_name: savedName }),
+          }).catch(() => {});
+        }
+        showRunSaved("");
         pendingNodeTools = {};
+        clearAttachments();
         await refresh();
       } catch (err) {
         if (!$("thread").value.trim() || $("thread").value.trim() === tid) {
           $("thread").value = previousThread;
           syncUrlThread(previousThread);
+          if (!previousThread && draftId) syncUrlDraft(draftId);
         }
         showError($("startError"), "启动没有返回。检查服务是否还在，然后重试。");
         syncStartButton(lastStatus && lastStatus.phase);
@@ -2674,6 +2871,85 @@
 
     $("btnRefresh").onclick = refresh;
 
+    $("btnAttach").addEventListener("click", () => $("attachInput").click());
+    $("attachInput").addEventListener("change", () => {
+      uploadAttachmentFiles($("attachInput").files);
+      $("attachInput").value = "";
+    });
+    const promptBox = $("promptBox");
+    if (promptBox) {
+      ["dragenter", "dragover"].forEach((name) => {
+        promptBox.addEventListener(name, (event) => {
+          event.preventDefault();
+          promptBox.classList.add("is-dropping");
+        });
+      });
+      ["dragleave", "drop"].forEach((name) => {
+        promptBox.addEventListener(name, (event) => {
+          event.preventDefault();
+          promptBox.classList.remove("is-dropping");
+        });
+      });
+      promptBox.addEventListener("drop", (event) => {
+        uploadAttachmentFiles(event.dataTransfer && event.dataTransfer.files);
+      });
+    }
+
+    $("btnSaveRun").onclick = async () => {
+      showError($("startError"), "");
+      showRunSaved("");
+      const projectId = String($("project").value || "").trim();
+      if (!projectId) {
+        showError($("startError"), "先选择项目。");
+        $("project").focus();
+        return;
+      }
+      const btn = $("btnSaveRun");
+      setLoading(btn, true);
+      try {
+        const r = await fetch("/api/runs/drafts", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            draft_id: draftId,
+            project_id: projectId,
+            run_name: String($("runName").value || "").trim(),
+            human_request: $("req").value.trim(),
+            node_tools: pendingNodeTools,
+            attachments: runAttachments.map((item) => ({ id: item.id, name: item.name, size: item.size })),
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          showError($("startError"), data.detail || "没有保存。");
+          return;
+        }
+        draftId = data.draft_id;
+        draftName = data.run_name || "";
+        loadedDraftProject = String(data.project_id || projectId);
+        runNameTouched = true;
+        if (data.run_name) $("runName").value = data.run_name;
+        pendingNodeTools = data.node_tools || {};
+        if (data.attachments) {
+          runAttachments = data.attachments.map((item) => ({
+            id: item.id,
+            name: item.name,
+            size: item.size,
+          }));
+          renderAttachments();
+        }
+        syncUrlDraft(draftId);
+        setPhase("saved");
+        showRunSaved("已保存 " + (data.run_name || "") + "。");
+        await loadRunList();
+      } catch (_) {
+        showError($("startError"), "保存没有返回。检查服务是否还在，然后重试。");
+      } finally {
+        setLoading(btn, false);
+        syncStartButton(draftId ? "saved" : "idle");
+      }
+    };
+
     $("btnSidebarNew").addEventListener("click", (event) => {
       event.preventDefault();
       const here = document.documentElement.dataset.route === "hitl";
@@ -2682,8 +2958,12 @@
         smooth: true,
       });
       $("thread").value = "";
+      clearDraftBinding();
       syncUrlThread("");
+      syncUrlDraft("");
+      showRunSaved("");
       pendingNodeTools = {};
+      clearAttachments();
       syncThreadChrome("");
       stopPoll();
       runNameTouched = false;
@@ -2723,7 +3003,13 @@
     }
 
     $("project").addEventListener("change", () => {
+      const next = String($("project").value || "").trim();
+      if (ignoreProjectChange || (draftId && next === loadedDraftProject)) {
+        syncRunScenarioHint();
+        return;
+      }
       pendingNodeTools = {};
+      loadedDraftProject = "";
       syncRunScenarioHint();
       if (!$("thread").value.trim()) {
         runNameTouched = false;
@@ -2740,13 +3026,17 @@
       customElements.whenDefined("wa-select").then(() => loadRoleTitles()).then(() => loadRunConfigOptions()).then(() => {
         const params = new URLSearchParams(window.location.search);
         const tid = params.get("thread_id") || params.get("thread");
+        const draft = params.get("draft") || "";
         if (tid) {
           $("thread").value = tid;
           if (params.get("thread") && !params.get("thread_id")) syncUrlThread(tid);
           refresh();
+        } else if (draft) {
+          openDraft(draft);
         } else {
           loadIdleRail();
           loadRunList();
+          syncStartButton("idle");
         }
       });
     })();
@@ -2909,7 +3199,7 @@
     }
 
     function scrollRegion(region, options) {
-      const scroller = region.closest(".workspace-main");
+      const scroller = region.closest(".run-board-scroll") || region.closest(".workspace-main");
       if (!scroller) return;
       const top = region.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
       scroller.scrollTo({ top: Math.max(0, top), behavior: scrollBehavior(options) });

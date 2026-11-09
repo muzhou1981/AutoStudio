@@ -293,6 +293,7 @@ class GraphRunService:
         thread_id: str | None = None,
         run_name: str = "",
         node_tools: dict[str, dict[str, list[str]]] | None = None,
+        attachment_ids: list[str] | None = None,
     ) -> RunStatus:
         from geni_studio.config.context import build_run_context, factory_root
         from geni_studio.config.precheck import precheck_scenario_materials
@@ -333,6 +334,17 @@ class GraphRunService:
             initial["workspace_path"] = str(layout.worktree)
         if node_tools:
             initial["node_tools"] = node_tools
+        if attachment_ids:
+            from pathlib import Path
+
+            from geni_studio.hitl.attachments import stage_attachments
+
+            base = Path(initial["workspace_path"]) if initial.get("workspace_path") else root / "runs" / "inbox" / tid
+            relative = stage_attachments(attachment_ids, base / "attachments")
+            if initial.get("workspace_path"):
+                initial["attachments"] = relative
+            else:
+                initial["attachments"] = [str(base / "attachments" / Path(item).name) for item in relative]
         self._invoke(tid, initial)
         return self._done(tid)
 

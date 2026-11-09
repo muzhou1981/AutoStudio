@@ -38,6 +38,7 @@ class FactoryState(TypedDict, total=False):
 
     # 引擎 / 人类输入
     human_request: str
+    attachments: list[str]
     scenario_key: str
     project_id: str
     run_name: str
@@ -172,12 +173,15 @@ def project_manager_draft(state: FactoryState) -> dict:
     build_run_context_from_state(state)
     req = state.get("human_request", "")
     from geni_studio.backends.runner import invoke_role
+    from geni_studio.hitl.attachments import prompt_section
 
+    attached = prompt_section(state.get("attachments"))
     body = invoke_role(
         role_name="project_manager",
         user_prompt=(
             f"人类原始需求：\n{req}\n\n"
-            "请按 role.md 产出 `requirement_spec` 正文（Markdown），"
+            + (f"{attached}\n\n" if attached else "")
+            + "请按 role.md 产出 `requirement_spec` 正文（Markdown），"
             "须含可检验验收标准 AC-*。"
         ),
         stub_note=f"需求说明草稿 input_len={len(req)}",
@@ -362,6 +366,7 @@ def gate_architecture_review(state: FactoryState) -> dict:
 @skip_if_disabled("developer")
 def developer(state: FactoryState) -> dict:
     from geni_studio.backends.runner import invoke_role
+    from geni_studio.hitl.attachments import prompt_section
 
     retries = state.get("dev_retry_count", 0)
     task = state.get("task_plan") or ""
@@ -370,12 +375,14 @@ def developer(state: FactoryState) -> dict:
     scope = ""
     if worktree:
         scope = f"只能修改这个工作树中的文件：{worktree}\n不要修改工作树以外的路径，也不要合并到其他分支。\n"
+    attached = prompt_section(state.get("attachments"))
     body = invoke_role(
         role_name="developer",
         user_prompt=(
             f"{scope}"
             f"人类要求：\n{request[:2000]}\n\n"
-            f"任务计划：\n{task[:6000]}\n\n"
+            + (f"{attached}\n\n" if attached else "")
+            + f"任务计划：\n{task[:6000]}\n\n"
             f"请产出本轮 `code_change` 说明（attempt={retries + 1}）。"
         ),
         stub_note=f"代码变更 attempt={retries + 1}",

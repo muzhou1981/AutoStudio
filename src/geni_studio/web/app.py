@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -40,6 +40,12 @@ class NodeToolChoice(BaseModel):
     mcp: list[str] = Field(default_factory=list)
 
 
+class AttachmentRef(BaseModel):
+    id: str
+    name: str = ""
+    size: int = 0
+
+
 class StartRunBody(BaseModel):
     human_request: str = Field(min_length=1)
     scenario_key: str = ""
@@ -47,6 +53,7 @@ class StartRunBody(BaseModel):
     thread_id: str | None = None
     run_name: str = ""
     node_tools: dict[str, NodeToolChoice] = Field(default_factory=dict)
+    attachments: list[AttachmentRef] = Field(default_factory=list)
 
 
 class DeleteRunBody(BaseModel):
@@ -136,9 +143,88 @@ def _preview_catalog(workflow: dict) -> tuple[tuple[tuple[str, str], ...], dict]
     return tuple(items), meta
 
 
+class SaveRunDraftBody(BaseModel):
+    draft_id: str = ""
+    project_id: str = ""
+    run_name: str = ""
+    human_request: str = ""
+    node_tools: dict[str, NodeToolChoice] = Field(default_factory=dict)
+    attachments: list[AttachmentRef] = Field(default_factory=list)
+
+
 @app.get("/api/runs")
 def api_list_runs(project_id: str = "", phase: str = "") -> dict:
-    return {"runs": _run_service.list_runs(project_id=project_id, phase=phase)}
+    from geni_studio.hitl.drafts import list_drafts
+
+    want = phase.strip()
+    runs = [] if want == "saved" else _run_service.list_runs(project_id=project_id, phase=phase)
+    if not want or want == "saved":
+        runs = list_drafts(project_id=project_id) + runs
+    return {"runs": runs}
+
+
+@app.put("/api/runs/drafts")
+def api_save_run_draft(body: SaveRunDraftBody) -> dict:
+    from geni_studio.hitl.drafts import save_draft
+    from geni_studio.hitl.run_name import taken_names_for_project
+    from geni_studio.hitl.service import latest_run_records
+
+    try:
+        tools = _clean_node_tools(body.node_tools)
+        taken = taken_names_for_project(latest_run_records(graph), body.project_id.strip())
+        from geni_studio.hitl.attachments import clean_attachment_ids
+
+        saved = save_draft(
+            draft_id=body.draft_id,
+            project_id=body.project_id,
+            run_name=body.run_name,
+            human_request=body.human_request,
+            node_tools=tools,
+            taken_names=taken,
+            attachments=clean_attachment_ids(body.attachments),
+        )
+    except HitlError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return saved
+
+
+@app.get("/api/runs/drafts/{draft_id}")
+def api_get_run_draft(draft_id: str) -> dict:
+    from geni_studio.hitl.drafts import load_draft
+
+    try:
+        return load_draft(draft_id)
+    except HitlError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@app.post("/api/runs/drafts/{draft_id}/delete")
+def api_delete_run_draft(draft_id: str, body: DeleteRunBody) -> dict:
+    from geni_studio.hitl.drafts import delete_draft
+
+    try:
+        delete_draft(draft_id, confirm_name=body.confirm_name)
+    except HitlError as e:
+        missing = "未知" in str(e) or "无法识别" in str(e)
+        code = 409 if "不一致" in str(e) else (404 if missing else 400)
+        raise HTTPException(status_code=code, detail=str(e)) from e
+    return {"deleted": True, "draft_id": draft_id}
+
+
+@app.post("/api/runs/attachments")
+async def api_upload_attachment(request: Request) -> dict:
+    from urllib.parse import unquote
+
+    from geni_studio.hitl.attachments import store_upload
+
+    filename = unquote(request.headers.get("x-filename") or "")
+    data = await request.body()
+    try:
+        return store_upload(filename, data)
+    except HitlError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/api/runs/next-name")
@@ -172,7 +258,10 @@ def _clean_node_tools(raw: dict[str, NodeToolChoice]) -> dict[str, dict[str, lis
 @app.post("/api/runs")
 def api_start_run(body: StartRunBody) -> dict:
     try:
+        from geni_studio.hitl.attachments import clean_attachment_ids
+
         tools = _clean_node_tools(body.node_tools)
+        attachment_ids = clean_attachment_ids(body.attachments)
         st = _run_service.start(
             human_request=body.human_request,
             scenario_key=body.scenario_key,
@@ -180,6 +269,7 @@ def api_start_run(body: StartRunBody) -> dict:
             thread_id=body.thread_id,
             run_name=body.run_name,
             node_tools=tools,
+            attachment_ids=attachment_ids,
         )
     except (ConfigError, HitlError, ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

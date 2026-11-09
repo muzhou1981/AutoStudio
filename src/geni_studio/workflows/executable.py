@@ -201,11 +201,15 @@ def _activity(node: dict[str, Any]):
 
     def fn(state: FactoryState) -> dict[str, Any]:
         from geni_studio.backends.runner import invoke_role
+        from geni_studio.hitl.attachments import prompt_section
 
         sections = [f"活动：{node['name']}"]
         request = str(state.get("human_request") or "")
         if request and "human_request" not in inputs:
             sections.append(f"人类原始需求：\n{request}")
+        attached = prompt_section(state.get("attachments"))
+        if attached:
+            sections.append(attached)
         for key in inputs:
             sections.append(f"{key}：\n{state.get(key) or ''}")
         for spec in node.get("output_specs") or []:
