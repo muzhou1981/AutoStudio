@@ -25,10 +25,10 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from auto_studio.hitl.rail import build_rail
-from auto_studio.hitl.service import GraphRunService, HitlError
-from auto_studio.web.app import app
-from auto_studio.workflows.default import graph
+from geni_studio.hitl.rail import build_rail
+from geni_studio.hitl.service import GraphRunService, HitlError
+from geni_studio.web.app import app
+from geni_studio.workflows.default import graph
 
 
 @pytest.fixture
@@ -42,8 +42,8 @@ def _cells(svc: GraphRunService, thread_id: str) -> tuple[dict, dict[str, str]]:
 
 
 def _pause_before(monkeypatch: pytest.MonkeyPatch, role_name: str) -> None:
-    from auto_studio.backends.runner import invoke_role
-    from auto_studio.hitl.control import RunPaused, current_thread_id, request_pause
+    from geni_studio.backends.runner import invoke_role
+    from geni_studio.hitl.control import RunPaused, current_thread_id, request_pause
 
     once = {"done": False}
 
@@ -54,7 +54,7 @@ def _pause_before(monkeypatch: pytest.MonkeyPatch, role_name: str) -> None:
             raise RunPaused("本轮已暂停")
         return invoke_role(**kwargs)
 
-    monkeypatch.setattr("auto_studio.backends.runner.invoke_role", wrapped)
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", wrapped)
 
 
 def _drive_to_completed(svc: GraphRunService, thread_id: str):

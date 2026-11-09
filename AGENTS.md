@@ -1,6 +1,6 @@
-# AutoStudio · Agent 协作说明
+# GeniStudio · Agent 协作说明
 
-本文件是在 Cursor 中开发 AutoStudio 自身时的入口。
+本文件是在 Cursor 中开发 GeniStudio 自身时的入口。
 
 ## 开始任务前
 
@@ -11,6 +11,6 @@
 ## 约束
 
 - 本目录上下文自包含：新的需求、计划、决策写入 `docs/`，不依赖会话记忆。
-- `roles/` 下的角色定义与 `src/auto_studio/workflows/default.py` 由人工编写；未经明确要求，Agent 不得创建或改写。
+- `roles/` 下的角色定义与 `src/geni_studio/workflows/default.py` 由人工编写；未经明确要求，Agent 不得创建或改写。
 - 重要技术决策新增一篇 `docs/decisions/NNNN-<slug>.md`。
 - 改动 `src/` 后运行 `pytest` 与 `ruff check`。

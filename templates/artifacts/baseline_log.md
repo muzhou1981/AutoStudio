@@ -2,7 +2,7 @@
 artifact: baseline_log
 producer: config_manager
 consumers: [qa, project_manager]
-template_upstream: AutoStudio（追加式单条登记；无 GitHub 对标）
+template_upstream: GeniStudio（追加式单条登记；无 GitHub 对标）
 template_url: ""
 ---
 

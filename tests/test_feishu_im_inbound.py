@@ -1,14 +1,14 @@
 from fastapi.testclient import TestClient
 
-from auto_studio.hitl.feishu_inbound import (
+from geni_studio.hitl.feishu_inbound import (
     normalize_im_hitl_reply,
     parse_im_message_receive,
     parse_thread_id_from_text,
 )
-from auto_studio.hitl.feishu_session import register_awaiting_thread, resolve_thread_id
-from auto_studio.hitl.service import GraphRunService
-from auto_studio.web.app import app
-from auto_studio.workflows.default import graph
+from geni_studio.hitl.feishu_session import register_awaiting_thread, resolve_thread_id
+from geni_studio.hitl.service import GraphRunService
+from geni_studio.web.app import app
+from geni_studio.workflows.default import graph
 
 
 def test_parse_im_message_receive_text():

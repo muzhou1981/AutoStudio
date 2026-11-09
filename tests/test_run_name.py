@@ -3,15 +3,15 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from auto_studio.hitl.run_name import (
+from geni_studio.hitl.run_name import (
     assign_run_name,
     clean_run_name,
     next_run_name,
     taken_names_for_project,
 )
-from auto_studio.hitl.service import GraphRunService, HitlError, latest_run_records
-from auto_studio.web.app import app
-from auto_studio.workflows.default import graph
+from geni_studio.hitl.service import GraphRunService, HitlError, latest_run_records
+from geni_studio.web.app import app
+from geni_studio.workflows.default import graph
 
 
 def test_next_number_follows_the_highest_suffix():

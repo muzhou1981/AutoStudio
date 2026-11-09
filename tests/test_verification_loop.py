@@ -3,14 +3,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from auto_studio.backends.runner import CapabilityError, invoke_role
-from auto_studio.cli import cmd_show, main
-from auto_studio.config.context import factory_root
-from auto_studio.hitl.service import GraphRunService
-from auto_studio.verification.acceptance import missing_acceptance_ids
-from auto_studio.verification.retro import scorecard
-from auto_studio.workflows.default import graph, qa
-from auto_studio.workspace.layout import WorkspaceError, prepare_run_layout
+from geni_studio.backends.runner import CapabilityError, invoke_role
+from geni_studio.cli import cmd_show, main
+from geni_studio.config.context import factory_root
+from geni_studio.hitl.service import GraphRunService
+from geni_studio.verification.acceptance import missing_acceptance_ids
+from geni_studio.verification.retro import scorecard
+from geni_studio.workflows.default import graph, qa
+from geni_studio.workspace.layout import WorkspaceError, prepare_run_layout
 
 
 def test_missing_acceptance_blocks_qa():
@@ -50,15 +50,15 @@ def test_cursor_backend_must_declare_shell_for_tester(monkeypatch):
         def complete(self, **kwargs: object) -> str:
             return "x"
 
-    monkeypatch.setattr("auto_studio.backends.runner.get_default_backend", lambda: _Bare())
+    monkeypatch.setattr("geni_studio.backends.runner.get_default_backend", lambda: _Bare())
     with pytest.raises(CapabilityError, match="shell"):
         invoke_role(role_name="tester", user_prompt="u", stub_note="n")
 
 
 def test_cli_config_roundtrip(tmp_path: Path):
     env = tmp_path / ".env"
-    assert main(["--root", str(tmp_path), "config", "set", "AUTO_STUDIO_BACKEND", "stub"]) == 0
-    assert "AUTO_STUDIO_BACKEND=stub" in env.read_text(encoding="utf-8")
+    assert main(["--root", str(tmp_path), "config", "set", "GENI_STUDIO_BACKEND", "stub"]) == 0
+    assert "GENI_STUDIO_BACKEND=stub" in env.read_text(encoding="utf-8")
     assert main(["--root", str(tmp_path), "config", "set", "CURSOR_API_KEY", "secret-value"]) == 0
     assert cmd_show(tmp_path) == 0
 
@@ -84,9 +84,9 @@ def test_project_yaml_selects_role_model(tmp_path: Path, monkeypatch):
         "project_id: demo\nbackends:\n  developer:\n    model: composer-2\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("auto_studio.backends.runner.factory_root", lambda: tmp_path)
-    from auto_studio.backends.cost import reset_project_id, set_project_id
-    from auto_studio.backends.runner import model_for_role
+    monkeypatch.setattr("geni_studio.backends.runner.factory_root", lambda: tmp_path)
+    from geni_studio.backends.cost import reset_project_id, set_project_id
+    from geni_studio.backends.runner import model_for_role
 
     token = set_project_id("demo")
     try:
@@ -96,7 +96,7 @@ def test_project_yaml_selects_role_model(tmp_path: Path, monkeypatch):
 
 
 def test_worktree_test_command_is_evidence(tmp_path):
-    from auto_studio.verification.command import run_test_command
+    from geni_studio.verification.command import run_test_command
 
     script = tmp_path / "check.py"
     script.write_text("print('AC-1 passed')\n", encoding="utf-8")
@@ -109,14 +109,14 @@ def test_worktree_test_command_is_evidence(tmp_path):
 
 
 def test_disallowed_test_command_is_rejected():
-    from auto_studio.verification.command import TestCommandError, resolve_test_command
+    from geni_studio.verification.command import TestCommandError, resolve_test_command
 
     with pytest.raises(TestCommandError):
         resolve_test_command({"test_command": "bash -c echo"})
 
 
 def test_test_command_must_stay_inside_the_worktree(tmp_path):
-    from auto_studio.verification.command import (
+    from geni_studio.verification.command import (
         TestCommandError,
         assert_command_cwd,
         run_test_command,
@@ -133,17 +133,17 @@ def test_test_command_must_stay_inside_the_worktree(tmp_path):
 
 
 def test_cli_hitl_approves_gate():
-    from auto_studio.cli import main
-    from auto_studio.hitl.service import GraphRunService
-    from auto_studio.workflows.default import graph
+    from geni_studio.cli import main
+    from geni_studio.hitl.service import GraphRunService
+    from geni_studio.workflows.default import graph
 
     st = GraphRunService(graph).start(human_request="cli", scenario_key="npu_operator")
     assert main(["hitl", st.thread_id, "--decision", "approved", "--reply", "cli"]) == 0
 
 
 def test_benchmark_before_and_after_command(tmp_path: Path):
-    from auto_studio.config.context import factory_root
-    from auto_studio.retro.benchmark import improved, run_task, write_score
+    from geni_studio.config.context import factory_root
+    from geni_studio.retro.benchmark import improved, run_task, write_score
 
     task = factory_root() / "evals" / "tasks" / "npu_mul.yaml"
     script = tmp_path / "check.py"
@@ -185,8 +185,8 @@ def test_graph_reaches_final_gate_when_command_prints_acceptance(tmp_path: Path)
 
 
 def test_unapproved_proposal_does_not_change_role(tmp_path: Path):
-    from auto_studio.cli import main
-    from auto_studio.evolution.proposals import ProposalError, apply_proposal
+    from geni_studio.cli import main
+    from geni_studio.evolution.proposals import ProposalError, apply_proposal
 
     role = tmp_path / "roles" / "developer" / "role.md"
     role.parent.mkdir(parents=True)
@@ -219,10 +219,10 @@ def test_unapproved_proposal_does_not_change_role(tmp_path: Path):
 
 
 def test_retro_writes_pending_proposal_without_editing_role(tmp_path: Path):
-    from auto_studio.evolution.proposals import load_proposal
-    from auto_studio.workflows.default import process_owner_retro
+    from geni_studio.evolution.proposals import load_proposal
+    from geni_studio.workflows.default import process_owner_retro
 
-    worktree = tmp_path / ".auto_studio" / "worktrees" / "run1"
+    worktree = tmp_path / ".geni_studio" / "worktrees" / "run1"
     worktree.mkdir(parents=True)
     role = tmp_path / "roles" / "process_owner" / "role.md"
     role.parent.mkdir(parents=True)
@@ -241,7 +241,7 @@ def test_role_can_select_stub_backend(tmp_path: Path, monkeypatch):
         "project_id: demo\nbackends:\n  developer:\n    backend: stub\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("auto_studio.backends.runner.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.backends.runner.factory_root", lambda: tmp_path)
 
     class _CursorLike:
         capabilities = frozenset({"text", "file_write", "shell", "mcp"})
@@ -249,8 +249,8 @@ def test_role_can_select_stub_backend(tmp_path: Path, monkeypatch):
         def complete(self, **kwargs: object) -> str:
             return "from-cursor"
 
-    monkeypatch.setattr("auto_studio.backends.runner.get_default_backend", lambda: _CursorLike())
-    from auto_studio.backends.cost import reset_project_id, set_project_id
+    monkeypatch.setattr("geni_studio.backends.runner.get_default_backend", lambda: _CursorLike())
+    from geni_studio.backends.cost import reset_project_id, set_project_id
 
     token = set_project_id("demo")
     try:
@@ -262,16 +262,16 @@ def test_role_can_select_stub_backend(tmp_path: Path, monkeypatch):
 
 
 def test_self_improve_does_not_start_when_bridge_is_down():
-    from auto_studio.workspace.self_improve import self_improve_block_reason
+    from geni_studio.workspace.self_improve import self_improve_block_reason
 
     assert self_improve_block_reason(False) == 2
     assert self_improve_block_reason(True) is None
 
 
 def test_cli_status_shows_gate_and_cost(capsys):
-    from auto_studio.cli import cmd_status
-    from auto_studio.hitl.service import GraphRunService
-    from auto_studio.workflows.default import graph
+    from geni_studio.cli import cmd_status
+    from geni_studio.hitl.service import GraphRunService
+    from geni_studio.workflows.default import graph
 
     st = GraphRunService(graph).start(human_request="看状态", scenario_key="npu_operator")
     assert cmd_status(st.thread_id) == 0
@@ -298,8 +298,8 @@ def test_developer_prompt_limits_edits_to_worktree(monkeypatch):
         seen["user_prompt"] = str(kwargs.get("user_prompt") or "")
         return "ok"
 
-    monkeypatch.setattr("auto_studio.backends.runner.invoke_role", _fake)
-    from auto_studio.workflows.default import developer
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", _fake)
+    from geni_studio.workflows.default import developer
 
     developer(
         {
@@ -332,7 +332,7 @@ def test_self_improve_main_does_not_launch_graph_when_bridge_is_down(monkeypatch
 
 
 def test_persist_records_template_gaps(tmp_path: Path):
-    from auto_studio.workspace.persist import persist_values
+    from geni_studio.workspace.persist import persist_values
 
     persist_values(
         run_dir=tmp_path,
@@ -346,24 +346,24 @@ def test_persist_records_template_gaps(tmp_path: Path):
 
 
 def test_test_command_path_rejects_git_push():
-    from auto_studio.verification.command import resolve_test_command
-    from auto_studio.workspace.layout import WorkspaceError
+    from geni_studio.verification.command import resolve_test_command
+    from geni_studio.workspace.layout import WorkspaceError
 
     with pytest.raises(WorkspaceError, match="禁止推送"):
         resolve_test_command({"test_command": "git push origin main"})
 
 
 def test_git_push_is_forbidden():
-    from auto_studio.workspace.layout import WorkspaceError
-    from auto_studio.workspace.policy import reject_remote_push
+    from geni_studio.workspace.layout import WorkspaceError
+    from geni_studio.workspace.policy import reject_remote_push
 
     with pytest.raises(WorkspaceError, match="禁止推送"):
         reject_remote_push(["git", "-C", "/tmp/wt", "push", "origin", "main"])
 
 
 def test_second_writer_is_rejected(tmp_path: Path):
-    from auto_studio.workspace.layout import WorkspaceError
-    from auto_studio.workspace.policy import exclusive_write
+    from geni_studio.workspace.layout import WorkspaceError
+    from geni_studio.workspace.policy import exclusive_write
 
     held = exclusive_write(tmp_path)
     held.__enter__()
@@ -375,7 +375,7 @@ def test_second_writer_is_rejected(tmp_path: Path):
 
 
 def test_template_gap_lists_missing_section():
-    from auto_studio.verification.template_check import missing_headings
+    from geni_studio.verification.template_check import missing_headings
 
     template = "## 1. 目的与范围\n## 2. 术语\n"
     assert missing_headings(template, "只有正文") == ["1. 目的与范围", "2. 术语"]
@@ -401,7 +401,7 @@ def test_architecture_change_returns_to_architecture_gate():
 
 
 def test_cli_run_reports_waiting_gate(capsys):
-    from auto_studio.cli import main
+    from geni_studio.cli import main
 
     assert main(["run", "观测一下", "--scenario", "self_improve"]) == 0
     out = capsys.readouterr().out

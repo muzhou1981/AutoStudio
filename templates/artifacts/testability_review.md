@@ -3,7 +3,7 @@ artifact: testability_review
 producer: tester
 consumers: [project_manager]
 phase: draft
-template_upstream: AutoStudio（无专用 GitHub 模板；列结构见 artifact-template-sources.md）
+template_upstream: GeniStudio（无专用 GitHub 模板；列结构见 artifact-template-sources.md）
 template_url: ""
 ---
 

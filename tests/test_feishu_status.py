@@ -4,8 +4,8 @@ import json
 
 from fastapi.testclient import TestClient
 
-from auto_studio.hitl.feishu_session import register_awaiting_thread
-from auto_studio.web.app import app
+from geni_studio.hitl.feishu_session import register_awaiting_thread
+from geni_studio.web.app import app
 
 
 def _im(text: str, chat_id: str) -> dict:
@@ -35,7 +35,7 @@ def _capture_send(monkeypatch):
         )
         return True
 
-    monkeypatch.setattr("auto_studio.hitl.feishu_status.deliver_status_card", fake)
+    monkeypatch.setattr("geni_studio.hitl.feishu_status.deliver_status_card", fake)
     return sent
 
 
@@ -142,17 +142,17 @@ def test_status_query_reports_stopped(monkeypatch):
 
 
 def test_status_lines_for_paused_round(monkeypatch):
-    from auto_studio.backends.runner import invoke_role
-    from auto_studio.hitl.control import current_thread_id, request_pause
-    from auto_studio.hitl.feishu_status import status_lines_for_thread
-    from auto_studio.hitl.service import GraphRunService
-    from auto_studio.workflows.default import graph
+    from geni_studio.backends.runner import invoke_role
+    from geni_studio.hitl.control import current_thread_id, request_pause
+    from geni_studio.hitl.feishu_status import status_lines_for_thread
+    from geni_studio.hitl.service import GraphRunService
+    from geni_studio.workflows.default import graph
 
     def wrapped(**kwargs):
         request_pause(current_thread_id())
         return invoke_role(**kwargs)
 
-    monkeypatch.setattr("auto_studio.backends.runner.invoke_role", wrapped)
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", wrapped)
     svc = GraphRunService(graph)
     st = svc.start(human_request="paused card", scenario_key="npu_operator")
     assert st.phase == "paused"

@@ -1,4 +1,4 @@
-"""Cursor SDK 连通性 smoke（需 CURSOR_API_KEY；可选 AUTO_STUDIO_CURSOR_SMOKE_RUN=1 跑短 completion）。"""
+"""Cursor SDK 连通性 smoke（需 CURSOR_API_KEY；可选 GENI_STUDIO_CURSOR_SMOKE_RUN=1 跑短 completion）。"""
 
 from __future__ import annotations
 
@@ -7,17 +7,17 @@ import sys
 
 
 def main() -> int:
-    from auto_studio.config.env_loader import apply_env_file
+    from geni_studio.config.env_loader import apply_env_file
 
     apply_env_file(
-        override=os.environ.get("AUTO_STUDIO_DOTENV_OVERRIDE", "1").strip().lower()
+        override=os.environ.get("GENI_STUDIO_DOTENV_OVERRIDE", "1").strip().lower()
         in ("1", "true", "yes")
     )
     if not os.environ.get("CURSOR_API_KEY", "").strip():
         print("SKIP: 未设置 CURSOR_API_KEY", file=sys.stderr)
         return 2
-    os.environ.pop("AUTO_STUDIO_BACKEND", None)
-    from auto_studio.backends.base import StubBackend, get_default_backend
+    os.environ.pop("GENI_STUDIO_BACKEND", None)
+    from geni_studio.backends.base import StubBackend, get_default_backend
 
     backend = get_default_backend()
     if isinstance(backend, StubBackend):
@@ -25,7 +25,7 @@ def main() -> int:
             from cursor_sdk import Cursor
             from cursor_sdk.errors import AuthenticationError, ConfigurationError
 
-            from auto_studio.backends.cursor_backend import CursorBackend
+            from geni_studio.backends.cursor_backend import CursorBackend
 
             inst = CursorBackend()
             Cursor.me(client=inst._client, api_key=inst._api_key)
@@ -57,12 +57,12 @@ def main() -> int:
     except CursorSDKError as e:
         print(f"WARN: Cursor SDK: {e}", file=sys.stderr)
         return 1
-    if os.environ.get("AUTO_STUDIO_CURSOR_SMOKE_RUN", "").strip() not in (
+    if os.environ.get("GENI_STUDIO_CURSOR_SMOKE_RUN", "").strip() not in (
         "1",
         "true",
         "yes",
     ):
-        print("hint: AUTO_STUDIO_CURSOR_SMOKE_RUN=1 可触发 project_manager 短 completion")
+        print("hint: GENI_STUDIO_CURSOR_SMOKE_RUN=1 可触发 project_manager 短 completion")
         return 0
     out = backend.complete(
         role_name="project_manager",

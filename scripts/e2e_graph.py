@@ -6,9 +6,9 @@ import os
 import time
 from datetime import UTC, datetime
 
-from auto_studio.config.env_loader import apply_env_file
-from auto_studio.hitl.service import GraphRunService, HitlError
-from auto_studio.workflows.default import graph
+from geni_studio.config.env_loader import apply_env_file
+from geni_studio.hitl.service import GraphRunService, HitlError
+from geni_studio.workflows.default import graph
 
 
 def _log(msg: str) -> None:
@@ -18,19 +18,19 @@ def _log(msg: str) -> None:
 
 def main() -> int:
     apply_env_file(
-        override=os.environ.get("AUTO_STUDIO_DOTENV_OVERRIDE", "1").strip().lower()
+        override=os.environ.get("GENI_STUDIO_DOTENV_OVERRIDE", "1").strip().lower()
         in ("1", "true", "yes")
     )
-    scenario = os.environ.get("AUTO_STUDIO_E2E_SCENARIO", "npu_operator")
-    project = os.environ.get("AUTO_STUDIO_E2E_PROJECT", "_example")
+    scenario = os.environ.get("GENI_STUDIO_E2E_SCENARIO", "npu_operator")
+    project = os.environ.get("GENI_STUDIO_E2E_PROJECT", "_example")
     request = os.environ.get(
-        "AUTO_STUDIO_E2E_REQUEST",
+        "GENI_STUDIO_E2E_REQUEST",
         "为 npu_operator 场景实现 Mul 算子：输入输出为 float16，含单测与可检验验收标准。"
         "不要列出待澄清问题，直接给出可执行需求说明。",
     )
-    max_steps = int(os.environ.get("AUTO_STUDIO_E2E_MAX_STEPS", "40"))
+    max_steps = int(os.environ.get("GENI_STUDIO_E2E_MAX_STEPS", "40"))
     svc = GraphRunService(graph)
-    _log(f"start scenario={scenario} project={project} backend={os.environ.get('AUTO_STUDIO_BACKEND') or 'auto'}")
+    _log(f"start scenario={scenario} project={project} backend={os.environ.get('GENI_STUDIO_BACKEND') or 'auto'}")
     t0 = time.monotonic()
     st = svc.start(human_request=request, scenario_key=scenario, project_id=project)
     _log(f"thread={st.thread_id} phase={st.phase} next={st.next_nodes}")

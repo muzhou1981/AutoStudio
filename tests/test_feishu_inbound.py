@@ -4,17 +4,17 @@ import json
 
 from fastapi.testclient import TestClient
 
-from auto_studio.hitl.feishu_cards import (
+from geni_studio.hitl.feishu_cards import (
     build_gate_interactive_card,
     build_pm_clarification_interactive_card,
 )
-from auto_studio.hitl.feishu_inbound import (
+from geni_studio.hitl.feishu_inbound import (
     parse_card_action_trigger,
     url_verification_response,
 )
-from auto_studio.hitl.service import GraphRunService
-from auto_studio.web.app import app
-from auto_studio.workflows.default import graph
+from geni_studio.hitl.service import GraphRunService
+from geni_studio.web.app import app
+from geni_studio.workflows.default import graph
 
 
 def test_url_verification():

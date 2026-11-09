@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from auto_studio.roles.loader import load_role_system_prompt, role_md_path
+from geni_studio.roles.loader import load_role_system_prompt, role_md_path
 
 
 def test_role_md_path():

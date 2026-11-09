@@ -7,11 +7,11 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from auto_studio.config.context import ConfigError
-from auto_studio.config.precheck import precheck_scenario_materials
-from auto_studio.hitl.service import GraphRunService
-from auto_studio.web.app import app
-from auto_studio.workflows.default import graph
+from geni_studio.config.context import ConfigError
+from geni_studio.config.precheck import precheck_scenario_materials
+from geni_studio.hitl.service import GraphRunService
+from geni_studio.web.app import app
+from geni_studio.workflows.default import graph
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def test_missing_domain_material_blocks_start(tmp_path) -> None:
 def test_finance_nodes_run_before_the_architecture_gate(
     svc: GraphRunService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("auto_studio.workflows.default._finance_enabled", lambda state: True)
+    monkeypatch.setattr("geni_studio.workflows.default._finance_enabled", lambda state: True)
     st = svc.start(human_request="财务", scenario_key="npu_operator")
     assert st.awaiting_human is not None
     assert st.awaiting_human.gate_id == "gate_requirement_confirm"

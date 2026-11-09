@@ -5,7 +5,7 @@
 
 ## 背景
 
-编排页可以把一份流程存成 `workflows/<id>/workflow.yaml`，项目也可以把它记入 `workflow.profile_id`。启动一轮时，LangGraph 仍固定执行 `src/auto_studio/workflows/default.py`。活动名称、角色和回退边不会成为当轮的节点，也不会进入 Cursor SDK。
+编排页可以把一份流程存成 `workflows/<id>/workflow.yaml`，项目也可以把它记入 `workflow.profile_id`。启动一轮时，LangGraph 仍固定执行 `src/geni_studio/workflows/default.py`。活动名称、角色和回退边不会成为当轮的节点，也不会进入 Cursor SDK。
 
 [ADR 0001](0001-workflow-in-python-with-langgraph-studio.md) 把第一版定为 Python 图，并写明出现多套流程后再评估声明式格式。[ADR 0002](0002-scenario-project-config-and-cropping.md) 在 M2 不把 YAML 编译成另一张图，裁剪作用在同一张默认图上。编排页已经产生多套流程，这条限制不再覆盖「项目选中一份流程」的情形。
 

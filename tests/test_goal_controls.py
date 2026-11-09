@@ -9,10 +9,10 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 
-from auto_studio.hitl.service import GraphRunService
-from auto_studio.verification.retro import scorecard
-from auto_studio.web.app import app
-from auto_studio.workflows.default import graph
+from geni_studio.hitl.service import GraphRunService
+from geni_studio.verification.retro import scorecard
+from geni_studio.web.app import app
+from geni_studio.workflows.default import graph
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def test_run_list_filters_by_phase(svc: GraphRunService) -> None:
 
 
 def test_gate_timeout_records_without_leaving_the_gate(svc: GraphRunService, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AUTO_STUDIO_GATE_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("GENI_STUDIO_GATE_TIMEOUT_SECONDS", "0")
     st = svc.start(human_request="超时", scenario_key="npu_operator")
     data = svc.status_dict(st.thread_id)
     assert data["phase"] == "awaiting_human"
@@ -81,21 +81,21 @@ def test_scorecard_uses_rework_acceptance_and_cost():
 def test_process_restart_reopens_and_continues(tmp_path) -> None:
     path = tmp_path / "checkpoints.sqlite"
     env = os.environ.copy()
-    env["AUTO_STUDIO_CHECKPOINT"] = "sqlite"
-    env["AUTO_STUDIO_CHECKPOINT_PATH"] = str(path)
-    env["AUTO_STUDIO_BACKEND"] = "stub"
-    env["AUTO_STUDIO_WORKSPACE"] = "0"
+    env["GENI_STUDIO_CHECKPOINT"] = "sqlite"
+    env["GENI_STUDIO_CHECKPOINT_PATH"] = str(path)
+    env["GENI_STUDIO_BACKEND"] = "stub"
+    env["GENI_STUDIO_WORKSPACE"] = "0"
     code = """
 import os, sys
-os.environ["AUTO_STUDIO_CHECKPOINT"] = "sqlite"
-os.environ["AUTO_STUDIO_CHECKPOINT_PATH"] = sys.argv[1]
-os.environ["AUTO_STUDIO_BACKEND"] = "stub"
-os.environ["AUTO_STUDIO_WORKSPACE"] = "0"
-from auto_studio.hitl.service import GraphRunService
-from auto_studio.workflows.default import compile_graph
+os.environ["GENI_STUDIO_CHECKPOINT"] = "sqlite"
+os.environ["GENI_STUDIO_CHECKPOINT_PATH"] = sys.argv[1]
+os.environ["GENI_STUDIO_BACKEND"] = "stub"
+os.environ["GENI_STUDIO_WORKSPACE"] = "0"
+from geni_studio.hitl.service import GraphRunService
+from geni_studio.workflows.default import compile_graph
 from pathlib import Path
 
-from auto_studio.workspace.checkpoint import sqlite_checkpointer
+from geni_studio.workspace.checkpoint import sqlite_checkpointer
 
 svc = GraphRunService(compile_graph(sqlite_checkpointer(Path(sys.argv[1]))))
 action = sys.argv[2]

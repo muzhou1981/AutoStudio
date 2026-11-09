@@ -1,6 +1,6 @@
 """人工待办阅读材料。"""
 
-from auto_studio.hitl.reading import human_reading
+from geni_studio.hitl.reading import human_reading
 
 
 def test_requirement_gate_reading_includes_the_spec():

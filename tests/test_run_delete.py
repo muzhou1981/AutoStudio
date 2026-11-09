@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from auto_studio.hitl.service import GraphRunService, HitlError
-from auto_studio.web.app import app
-from auto_studio.workflows.default import graph
+from geni_studio.hitl.service import GraphRunService, HitlError
+from geni_studio.web.app import app
+from geni_studio.workflows.default import graph
 
 
 @pytest.fixture

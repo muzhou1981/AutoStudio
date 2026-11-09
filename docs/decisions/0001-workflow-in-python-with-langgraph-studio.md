@@ -9,7 +9,7 @@
 
 ## 决策
 
-第一版直接以 Python 编写 LangGraph 图，放在 `src/auto_studio/workflows/`。在根目录 `langgraph.json` 中注册图，通过 `langgraph dev` 启动本地服务，用 LangGraph Studio 可视化与调试。
+第一版直接以 Python 编写 LangGraph 图，放在 `src/geni_studio/workflows/`。在根目录 `langgraph.json` 中注册图，通过 `langgraph dev` 启动本地服务，用 LangGraph Studio 可视化与调试。
 
 ## 理由
 

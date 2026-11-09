@@ -1,0 +1,43 @@
+workflow_id: npu_operator_dev
+title: NPU 算子开发
+description: 可复用的 NPU 算子开发子图。规格确认后实现并测试，测试不通过时回到实现。
+builtin: true
+subgraph: true
+nodes:
+- id: start
+  kind: start
+  name: 启动
+  role: human
+  returns_to: ''
+- id: spec
+  kind: activity
+  name: 算子规格
+  role: architect
+  returns_to: ''
+- id: confirm
+  kind: gate
+  name: 规格确认
+  role: human
+  returns_to: ''
+  decision: approve
+- id: impl
+  kind: activity
+  name: 算子实现
+  role: developer
+  returns_to: ''
+- id: test
+  kind: activity
+  name: 算子测试
+  role: tester
+  returns_to: impl
+  max_loops: 2
+- id: review
+  kind: activity
+  name: 算子评审
+  role: code_reviewer
+  returns_to: ''
+- id: end
+  kind: end
+  name: 结束
+  role: human
+  returns_to: ''

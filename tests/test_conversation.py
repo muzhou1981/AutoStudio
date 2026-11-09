@@ -1,6 +1,6 @@
 """角色会话落盘后可以按角色读回。"""
 
-from auto_studio.hitl.conversation import (
+from geni_studio.hitl.conversation import (
     append_step,
     begin_turn,
     conversation_view,
@@ -10,7 +10,7 @@ from auto_studio.hitl.conversation import (
 
 
 def test_turn_keeps_prompt_steps_and_result(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("auto_studio.hitl.conversation.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.hitl.conversation.factory_root", lambda: tmp_path)
     path = begin_turn(
         "tid",
         "developer",
@@ -26,7 +26,7 @@ def test_turn_keeps_prompt_steps_and_result(tmp_path, monkeypatch) -> None:
     assert events[0]["prompt"].startswith("角色定义")
     assert events[1]["step"]["type"] == "toolCall"
     assert events[2]["text"] == "写完了"
-    root = tmp_path / ".auto_studio" / "runs" / "tid"
+    root = tmp_path / ".geni_studio" / "runs" / "tid"
     root.mkdir(parents=True, exist_ok=True)
     (root / "requirement_spec.md").write_text("# 需求说明\n\n正文\n", encoding="utf-8")
     assert read_artifact_text("tid", "requirement_spec").startswith("# 需求说明")

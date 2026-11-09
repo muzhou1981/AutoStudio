@@ -5,14 +5,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from auto_studio.config.context import ConfigError
-from auto_studio.config.workflow_defs import (
+from geni_studio.config.context import ConfigError
+from geni_studio.config.workflow_defs import (
     create_workflow,
     get_workflow,
     list_workflows,
     save_workflow,
 )
-from auto_studio.web.app import app
+from geni_studio.web.app import app
 
 
 def _root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -21,14 +21,16 @@ def _root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         "---\nname: developer\ntitle: 程序员\n---\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("auto_studio.config.workflow_defs.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.workflow_defs.factory_root", lambda: tmp_path)
 
 
 def test_create_lists_and_rejects_bad_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _root(tmp_path, monkeypatch)
     created = create_workflow("demo", "演示", root=tmp_path)
     assert [node["name"] for node in created["workflow"]["nodes"]] == ["启动", "结束"]
-    assert list_workflows(tmp_path) == [{"workflow_id": "demo", "title": "演示"}]
+    assert list_workflows(tmp_path) == [
+        {"workflow_id": "demo", "title": "演示", "builtin": False, "engine": "", "subgraph": False},
+    ]
     with pytest.raises(ConfigError, match="已有同名流程"):
         create_workflow("demo", root=tmp_path)
     nodes = [
@@ -52,6 +54,12 @@ def test_create_lists_and_rejects_bad_graph(tmp_path: Path, monkeypatch: pytest.
     nodes[1]["returns_to"] = "end"
     with pytest.raises(ConfigError, match="更早的节点"):
         save_workflow("demo", {"title": "演示", "nodes": nodes}, root=tmp_path)
+    nodes[1]["returns_to"] = "start"
+    with pytest.raises(ConfigError, match="先写最大循环次数"):
+        save_workflow("demo", {"title": "演示", "nodes": nodes}, root=tmp_path)
+    nodes[1]["max_loops"] = 2
+    looped = save_workflow("demo", {"title": "演示", "nodes": nodes}, root=tmp_path)
+    assert looped["workflow"]["nodes"][1]["max_loops"] == 2
     with pytest.raises(ConfigError, match="字母开头"):
         create_workflow("1bad", root=tmp_path)
 

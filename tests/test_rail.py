@@ -2,8 +2,8 @@
 
 from fastapi.testclient import TestClient
 
-from auto_studio.hitl.rail import build_rail
-from auto_studio.web.app import app
+from geni_studio.hitl.rail import build_rail
+from geni_studio.web.app import app
 
 
 def _states(rail: dict) -> dict[str, str]:

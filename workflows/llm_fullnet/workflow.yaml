@@ -1,0 +1,56 @@
+workflow_id: llm_fullnet
+title: 大语言模型整网适配或推理框架适配
+description: 整网或框架适配是一项；拆出的算子开发会插入 NPU 算子开发子图，并行完成后再做集成验证。
+builtin: true
+subgraph: true
+nodes:
+- id: start
+  kind: start
+  name: 启动
+  role: human
+  returns_to: ''
+- id: adapt
+  kind: activity
+  name: 整网适配
+  role: architect
+  returns_to: ''
+- id: confirm
+  kind: gate
+  name: 方案确认
+  role: human
+  returns_to: ''
+  decision: approve
+- id: operators
+  kind: parallel
+  name: 算子开发
+  role: ''
+  returns_to: ''
+  branches:
+  - id: op_a
+    name: 算子甲
+    nodes:
+    - id: sub_a
+      kind: subgraph
+      name: NPU 算子开发
+      subgraph_id: npu_operator_dev
+      role: ''
+      returns_to: ''
+  - id: op_b
+    name: 算子乙
+    nodes:
+    - id: sub_b
+      kind: subgraph
+      name: NPU 算子开发
+      subgraph_id: npu_operator_dev
+      role: ''
+      returns_to: ''
+- id: integrate
+  kind: activity
+  name: 集成验证
+  role: tester
+  returns_to: ''
+- id: end
+  kind: end
+  name: 结束
+  role: human
+  returns_to: ''

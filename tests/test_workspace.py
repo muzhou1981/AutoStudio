@@ -3,20 +3,20 @@ import subprocess
 
 import pytest
 
-from auto_studio.backends.cursor_backend import CursorBackend
-from auto_studio.hitl.service import GraphRunService
-from auto_studio.workflows.default import compile_graph, graph
-from auto_studio.workspace.checkpoint import sqlite_checkpointer
-from auto_studio.workspace.context import use_worktree
+from geni_studio.backends.cursor_backend import CursorBackend
+from geni_studio.hitl.service import GraphRunService
+from geni_studio.workflows.default import compile_graph, graph
+from geni_studio.workspace.checkpoint import sqlite_checkpointer
+from geni_studio.workspace.context import use_worktree
 
 
 def test_start_persists_artifacts_and_worktree(tmp_path, monkeypatch):
-    monkeypatch.setenv("AUTO_STUDIO_WORKSPACE", "1")
-    monkeypatch.setenv("AUTO_STUDIO_TARGET_ROOT", str(tmp_path))
+    monkeypatch.setenv("GENI_STUDIO_WORKSPACE", "1")
+    monkeypatch.setenv("GENI_STUDIO_TARGET_ROOT", str(tmp_path))
     st = GraphRunService(graph).start(human_request="mul", scenario_key="npu_operator")
     worktree = st.values["workspace_path"]
     assert os.path.isdir(worktree)
-    run_dir = tmp_path / ".auto_studio" / "runs" / st.thread_id
+    run_dir = tmp_path / ".geni_studio" / "runs" / st.thread_id
     spec = (run_dir / "requirement_spec.md").read_text(encoding="utf-8")
     assert "requirement" in spec or "stub" in spec or "需求" in spec
     assert (run_dir / "manifest.json").is_file()
@@ -24,11 +24,11 @@ def test_start_persists_artifacts_and_worktree(tmp_path, monkeypatch):
         ["git", "-C", worktree, "rev-parse", "--abbrev-ref", "HEAD"],
         text=True,
     ).strip()
-    assert branch == f"auto-studio/{st.thread_id}"
+    assert branch == f"geni-studio/{st.thread_id}"
 
 
 def test_sqlite_checkpoint_resumes(tmp_path, monkeypatch):
-    monkeypatch.setenv("AUTO_STUDIO_WORKSPACE", "0")
+    monkeypatch.setenv("GENI_STUDIO_WORKSPACE", "0")
     db = tmp_path / "checkpoints.sqlite"
     svc = GraphRunService(compile_graph(sqlite_checkpointer(db)))
     st = svc.start(human_request="persist", scenario_key="npu_operator")
@@ -40,8 +40,8 @@ def test_sqlite_checkpoint_resumes(tmp_path, monkeypatch):
 def test_cursor_defaults_to_auto_route_and_worktree_tools(tmp_path, monkeypatch):
     pytest.importorskip("cursor_sdk")
     monkeypatch.setenv("CURSOR_API_KEY", "test-key")
-    monkeypatch.setenv("AUTO_STUDIO_CURSOR_VERIFY", "0")
-    monkeypatch.delenv("AUTO_STUDIO_CURSOR_MODEL", raising=False)
+    monkeypatch.setenv("GENI_STUDIO_CURSOR_VERIFY", "0")
+    monkeypatch.delenv("GENI_STUDIO_CURSOR_MODEL", raising=False)
     captured: dict = {}
 
     class _Run:

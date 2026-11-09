@@ -2,7 +2,7 @@
 artifact: config_plan
 producer: config_manager
 consumers: [all execution roles, architect, finance]
-template_upstream: AutoStudio（无 GitHub 对标）
+template_upstream: GeniStudio（无 GitHub 对标）
 template_url: ""
 ---
 

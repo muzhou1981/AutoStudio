@@ -1,9 +1,9 @@
-from auto_studio.hitl.pm_clarification import (
+from geni_studio.hitl.pm_clarification import (
     extract_pm_questions,
     merge_clarification_reply,
 )
-from auto_studio.hitl.service import GraphRunService
-from auto_studio.workflows.default import graph
+from geni_studio.hitl.service import GraphRunService
+from geni_studio.workflows.default import graph
 
 
 def test_extract_pm_questions_from_section():
@@ -23,7 +23,7 @@ def test_auto_pm_clarification_pause_and_resume(monkeypatch):
             return "## 需求草案\n\n## 待澄清\n- 交付范围？\n"
         return f"[stub:{role_name}] {stub_note}"
 
-    monkeypatch.setattr("auto_studio.backends.runner.invoke_role", _fake_invoke)
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", _fake_invoke)
     svc = GraphRunService(graph)
     st = svc.start(human_request="demo", scenario_key="npu_operator")
     assert st.phase == "awaiting_human"

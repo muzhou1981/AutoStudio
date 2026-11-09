@@ -3,7 +3,7 @@ artifact: cost_report
 producer: finance
 consumers: [project_manager, process_owner]
 phase: snapshot
-template_upstream: AutoStudio（无 GitHub 对标；phase: snapshot | final）
+template_upstream: GeniStudio（无 GitHub 对标；phase: snapshot | final）
 template_url: ""
 ---
 

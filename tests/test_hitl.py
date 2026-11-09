@@ -3,9 +3,9 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from auto_studio.hitl.service import GraphRunService, HitlError
-from auto_studio.web.app import app
-from auto_studio.workflows.default import graph
+from geni_studio.hitl.service import GraphRunService, HitlError
+from geni_studio.web.app import app
+from geni_studio.workflows.default import graph
 
 
 @pytest.fixture
@@ -94,7 +94,7 @@ def test_stop_finished_run_raises(svc: GraphRunService) -> None:
 
 
 def test_stop_requested_before_start_skips_nodes(svc: GraphRunService) -> None:
-    from auto_studio.hitl.control import request_stop
+    from geni_studio.hitl.control import request_stop
 
     tid = "stop-before-start"
     request_stop(tid)
@@ -104,14 +104,14 @@ def test_stop_requested_before_start_skips_nodes(svc: GraphRunService) -> None:
 
 
 def test_stop_during_first_node_does_not_reach_the_gate(svc: GraphRunService, monkeypatch: pytest.MonkeyPatch) -> None:
-    from auto_studio.backends.runner import invoke_role
-    from auto_studio.hitl.control import current_thread_id, request_stop
+    from geni_studio.backends.runner import invoke_role
+    from geni_studio.hitl.control import current_thread_id, request_stop
 
     def wrapped(**kwargs):
         request_stop(current_thread_id())
         return invoke_role(**kwargs)
 
-    monkeypatch.setattr("auto_studio.backends.runner.invoke_role", wrapped)
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", wrapped)
     st = svc.start(human_request="stop", scenario_key="npu_operator")
     assert st.phase == "stopped"
     assert st.next_nodes == ()
@@ -145,8 +145,8 @@ def test_api_stop_unknown_is_pending() -> None:
 
 
 def test_pause_during_first_node_keeps_the_round(svc: GraphRunService, monkeypatch: pytest.MonkeyPatch) -> None:
-    from auto_studio.backends.runner import invoke_role
-    from auto_studio.hitl.control import current_thread_id, request_pause
+    from geni_studio.backends.runner import invoke_role
+    from geni_studio.hitl.control import current_thread_id, request_pause
 
     once = {"done": False}
 
@@ -156,7 +156,7 @@ def test_pause_during_first_node_keeps_the_round(svc: GraphRunService, monkeypat
             request_pause(current_thread_id())
         return invoke_role(**kwargs)
 
-    monkeypatch.setattr("auto_studio.backends.runner.invoke_role", wrapped)
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", wrapped)
     st = svc.start(human_request="pause", scenario_key="npu_operator")
     assert st.phase == "paused"
     assert st.next_nodes == ("project_manager_draft",)
@@ -173,8 +173,8 @@ def test_pause_during_first_node_keeps_the_round(svc: GraphRunService, monkeypat
 
 
 def test_pause_after_first_node_does_not_redo_it(svc: GraphRunService, monkeypatch: pytest.MonkeyPatch) -> None:
-    from auto_studio.backends.runner import invoke_role
-    from auto_studio.hitl.control import RunPaused, current_thread_id, request_pause
+    from geni_studio.backends.runner import invoke_role
+    from geni_studio.hitl.control import RunPaused, current_thread_id, request_pause
 
     once = {"done": False}
 
@@ -185,7 +185,7 @@ def test_pause_after_first_node_does_not_redo_it(svc: GraphRunService, monkeypat
             raise RunPaused("本轮已暂停")
         return invoke_role(**kwargs)
 
-    monkeypatch.setattr("auto_studio.backends.runner.invoke_role", wrapped)
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", wrapped)
     st = svc.start(human_request="pause later", scenario_key="npu_operator")
     spec = st.values.get("requirement_spec")
     assert st.phase == "paused"
@@ -199,14 +199,14 @@ def test_pause_after_first_node_does_not_redo_it(svc: GraphRunService, monkeypat
 
 
 def test_stop_from_paused_ends_the_round(svc: GraphRunService, monkeypatch: pytest.MonkeyPatch) -> None:
-    from auto_studio.backends.runner import invoke_role
-    from auto_studio.hitl.control import current_thread_id, request_pause
+    from geni_studio.backends.runner import invoke_role
+    from geni_studio.hitl.control import current_thread_id, request_pause
 
     def wrapped(**kwargs):
         request_pause(current_thread_id())
         return invoke_role(**kwargs)
 
-    monkeypatch.setattr("auto_studio.backends.runner.invoke_role", wrapped)
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", wrapped)
     st = svc.start(human_request="pause then stop", scenario_key="npu_operator")
     assert st.phase == "paused"
     stopped = svc.stop(st.thread_id)

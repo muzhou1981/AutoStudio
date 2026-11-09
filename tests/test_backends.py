@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from auto_studio.backends.base import StubBackend, get_default_backend
+from geni_studio.backends.base import StubBackend, get_default_backend
 
 
 def test_stub_backend():
@@ -13,31 +13,31 @@ def test_stub_backend():
 
 def test_default_backend_is_stub_without_env(monkeypatch):
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
-    monkeypatch.delenv("AUTO_STUDIO_BACKEND", raising=False)
+    monkeypatch.delenv("GENI_STUDIO_BACKEND", raising=False)
     b = get_default_backend()
     assert isinstance(b, StubBackend)
 
 
 def test_default_backend_uses_cursor_when_api_key(monkeypatch):
     monkeypatch.setenv("CURSOR_API_KEY", "test-key")
-    monkeypatch.delenv("AUTO_STUDIO_BACKEND", raising=False)
-    monkeypatch.setenv("AUTO_STUDIO_CURSOR_VERIFY", "0")
+    monkeypatch.delenv("GENI_STUDIO_BACKEND", raising=False)
+    monkeypatch.setenv("GENI_STUDIO_CURSOR_VERIFY", "0")
 
     class _FakeCursor:
         def complete(self, **kwargs: object) -> str:
             return "cursor-ok"
 
     monkeypatch.setattr(
-        "auto_studio.backends.cursor_backend.CursorBackend",
+        "geni_studio.backends.cursor_backend.CursorBackend",
         _FakeCursor,
     )
     b = get_default_backend()
     assert b.complete(role_name="x", system_prompt="s", user_prompt="u") == "cursor-ok"
 
 
-def test_auto_studio_backend_stub_overrides_key(monkeypatch):
+def test_geni_studio_backend_stub_overrides_key(monkeypatch):
     monkeypatch.setenv("CURSOR_API_KEY", "test-key")
-    monkeypatch.setenv("AUTO_STUDIO_BACKEND", "stub")
+    monkeypatch.setenv("GENI_STUDIO_BACKEND", "stub")
     b = get_default_backend()
     assert isinstance(b, StubBackend)
 
@@ -45,7 +45,7 @@ def test_auto_studio_backend_stub_overrides_key(monkeypatch):
 def test_cursor_complete_records_token_usage(monkeypatch):
     pytest.importorskip("cursor_sdk")
     monkeypatch.setenv("CURSOR_API_KEY", "test-key")
-    monkeypatch.setenv("AUTO_STUDIO_CURSOR_VERIFY", "0")
+    monkeypatch.setenv("GENI_STUDIO_CURSOR_VERIFY", "0")
 
     class _Usage:
         input_tokens = 3
@@ -67,8 +67,8 @@ def test_cursor_complete_records_token_usage(monkeypatch):
             return _Agent()
 
     monkeypatch.setattr("cursor_sdk._client._default_client", lambda: _Client())
-    from auto_studio.backends.cost import begin_cost_log, end_cost_log, take_cost_lines
-    from auto_studio.backends.cursor_backend import CursorBackend
+    from geni_studio.backends.cost import begin_cost_log, end_cost_log, take_cost_lines
+    from geni_studio.backends.cursor_backend import CursorBackend
 
     token = begin_cost_log()
     try:
@@ -82,7 +82,7 @@ def test_cursor_complete_records_token_usage(monkeypatch):
 def test_role_md_is_sent_once_per_live_agent(monkeypatch):
     pytest.importorskip("cursor_sdk")
     monkeypatch.setenv("CURSOR_API_KEY", "test-key")
-    monkeypatch.setenv("AUTO_STUDIO_CURSOR_VERIFY", "0")
+    monkeypatch.setenv("GENI_STUDIO_CURSOR_VERIFY", "0")
     prompts: list[str] = []
 
     class _Run:
@@ -101,7 +101,7 @@ def test_role_md_is_sent_once_per_live_agent(monkeypatch):
             return _Agent()
 
     monkeypatch.setattr("cursor_sdk._client._default_client", lambda: _Client())
-    from auto_studio.backends.cursor_backend import CursorBackend
+    from geni_studio.backends.cursor_backend import CursorBackend
 
     backend = CursorBackend()
     backend.complete(role_name="architect", system_prompt="角色定义", user_prompt="写设计")
@@ -115,7 +115,7 @@ def test_role_md_is_sent_once_per_live_agent(monkeypatch):
 
 
 def test_uppercase_proxy_is_copied_for_the_bridge(monkeypatch):
-    from auto_studio.backends.cursor_backend import ensure_lowercase_proxy
+    from geni_studio.backends.cursor_backend import ensure_lowercase_proxy
 
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
     monkeypatch.delenv("https_proxy", raising=False)

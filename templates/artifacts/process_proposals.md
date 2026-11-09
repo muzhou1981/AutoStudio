@@ -26,7 +26,7 @@ template_url: https://github.com/appwrite/rfc/blob/main/rfc-template.md
 
 | 对象 | 路径 | 变更说明 |
 |------|------|----------|
-| 流程 | src/auto_studio/workflows/… | |
+| 流程 | src/geni_studio/workflows/… | |
 | 角色 | roles/…/role.md | |
 
 ### Alternatives

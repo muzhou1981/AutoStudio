@@ -7,14 +7,14 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-from auto_studio.hitl.feishu_cards import build_gate_interactive_card
-from auto_studio.hitl.feishu_status import status_lines_for_thread
-from auto_studio.hitl.rail import build_rail
-from auto_studio.hitl.service import GraphRunService
-from auto_studio.verification.command import assert_command_cwd
-from auto_studio.verification.retro import scorecard
-from auto_studio.web.app import app
-from auto_studio.workflows.default import compile_graph, graph
+from geni_studio.hitl.feishu_cards import build_gate_interactive_card
+from geni_studio.hitl.feishu_status import status_lines_for_thread
+from geni_studio.hitl.rail import build_rail
+from geni_studio.hitl.service import GraphRunService
+from geni_studio.verification.command import assert_command_cwd
+from geni_studio.verification.retro import scorecard
+from geni_studio.web.app import app
+from geni_studio.workflows.default import compile_graph, graph
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def test_project_snapshot_stays_after_the_file_would_change(
     assert "title: 示例项目" in frozen
     assert "scenario_key: npu_operator" in str(st.values.get("config_snapshot_scenario") or "")
     monkeypatch.setattr(
-        "auto_studio.config.registry.get_project_yaml",
+        "geni_studio.config.registry.get_project_yaml",
         lambda *args, **kwargs: "project_id: _example\ntitle: 后来改过\n",
     )
     again = svc.status(st.thread_id)
@@ -53,14 +53,14 @@ def test_run_list_filters_by_project_and_reports_retry_limit(svc: GraphRunServic
 def test_gate_timeout_waits_then_records_and_approval_still_advances(
     svc: GraphRunService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AUTO_STUDIO_GATE_TIMEOUT_SECONDS", "86400")
+    monkeypatch.setenv("GENI_STUDIO_GATE_TIMEOUT_SECONDS", "86400")
     st = svc.start(human_request="时限内", scenario_key="npu_operator")
     early = svc.status_dict(st.thread_id)
     assert early["phase"] == "awaiting_human"
     assert not early["values"].get("gate_timeout_recorded")
     assert early["values"].get("awaiting_since")
 
-    monkeypatch.setenv("AUTO_STUDIO_GATE_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("GENI_STUDIO_GATE_TIMEOUT_SECONDS", "0")
     late = svc.status_dict(st.thread_id)
     assert late["phase"] == "awaiting_human"
     assert late["next_nodes"] == ["gate_requirement_confirm"]
@@ -98,7 +98,13 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert ">运行状态</span>" in text
     assert 'href="/workflow#new"' in text
     assert 'href="/help#overview"' in text
+    assert 'href="/help#architecture"' in text
     assert 'href="/help#guide"' in text
+    assert "安装步骤写在仓库的 README" in text
+    assert 'id="btnContinueRun"' in text
+    assert "这一轮在中途中断" in text
+    assert 'id="flowNodeLoops"' in text
+    assert "合规管理负责隐私、网络安全和知识产权" in text
     assert "入门指南" in text
     assert 'data-help-article="workflow"' in text
     assert "帮助只读。" in text
@@ -149,7 +155,7 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
 
 
 def test_command_cwd_allows_a_subdirectory_and_rejects_a_sibling(tmp_path) -> None:
-    from auto_studio.verification.command import TestCommandError
+    from geni_studio.verification.command import TestCommandError
 
     workspace = tmp_path / "tree"
     nested = workspace / "pkg"
@@ -194,9 +200,9 @@ def test_rail_markers_are_not_skipped() -> None:
 
 
 def test_paused_round_resumes_on_a_new_graph(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from auto_studio.backends.runner import invoke_role
-    from auto_studio.hitl.control import RunPaused, current_thread_id, request_pause
-    from auto_studio.workspace.checkpoint import sqlite_checkpointer
+    from geni_studio.backends.runner import invoke_role
+    from geni_studio.hitl.control import RunPaused, current_thread_id, request_pause
+    from geni_studio.workspace.checkpoint import sqlite_checkpointer
 
     once = {"done": False}
 
@@ -207,7 +213,7 @@ def test_paused_round_resumes_on_a_new_graph(tmp_path, monkeypatch: pytest.Monke
             raise RunPaused("本轮已暂停")
         return invoke_role(**kwargs)
 
-    monkeypatch.setattr("auto_studio.backends.runner.invoke_role", wrapped)
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", wrapped)
     path = tmp_path / "paused.sqlite"
     first = GraphRunService(compile_graph(sqlite_checkpointer(path)))
     paused = first.start(human_request="暂停续", scenario_key="npu_operator", run_name="暂停样本")

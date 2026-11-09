@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from auto_studio.config.context import ConfigError
-from auto_studio.config.registry import (
+from geni_studio.config.context import ConfigError
+from geni_studio.config.registry import (
     apply_project_form,
     describe_project_directory,
     effective_config_summary,
@@ -16,7 +16,7 @@ from auto_studio.config.registry import (
     project_form_view,
     save_project_yaml,
 )
-from auto_studio.web.app import app
+from geni_studio.web.app import app
 
 
 def test_list_scenarios_and_projects():
@@ -109,11 +109,11 @@ def test_config_page_and_static():
 
 def test_save_project_tmp_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "auto_studio.config.registry.factory_root",
+        "geni_studio.config.registry.factory_root",
         lambda: tmp_path,
     )
     monkeypatch.setattr(
-        "auto_studio.config.context.factory_root",
+        "geni_studio.config.context.factory_root",
         lambda: tmp_path,
     )
     (tmp_path / "scenarios" / "npu_operator").mkdir(parents=True)
@@ -222,11 +222,11 @@ def test_project_page_puts_remote_url_between_description_and_workspace():
 
 
 def test_project_workspace_overrides_default_root(tmp_path, monkeypatch):
-    from auto_studio.workspace.layout import resolve_target_root
+    from geni_studio.workspace.layout import resolve_target_root
 
-    monkeypatch.setattr("auto_studio.config.registry.factory_root", lambda: tmp_path)
-    monkeypatch.setattr("auto_studio.workspace.layout.factory_root", lambda: tmp_path)
-    monkeypatch.setenv("AUTO_STUDIO_TARGET_ROOT", str(tmp_path / "from-env"))
+    monkeypatch.setattr("geni_studio.config.registry.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.workspace.layout.factory_root", lambda: tmp_path)
+    monkeypatch.setenv("GENI_STUDIO_TARGET_ROOT", str(tmp_path / "from-env"))
     (tmp_path / "scenarios" / "npu_operator").mkdir(parents=True)
     (tmp_path / "scenarios" / "npu_operator" / "scenario.yaml").write_text(
         "scenario_key: npu_operator\n",
@@ -279,18 +279,18 @@ def test_config_api_put_example():
 
 
 def test_web_sets_backend_and_masks_api_key(tmp_path, monkeypatch):
-    monkeypatch.setattr("auto_studio.config.registry.factory_root", lambda: tmp_path)
-    monkeypatch.setattr("auto_studio.cli.factory_root", lambda: tmp_path)
-    monkeypatch.setattr("auto_studio.config.env_loader.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.registry.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.cli.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.env_loader.factory_root", lambda: tmp_path)
     client = TestClient(app)
     r = client.post(
         "/api/config/settings",
-        json={"key": "AUTO_STUDIO_BACKEND", "value": "cursor"},
+        json={"key": "GENI_STUDIO_BACKEND", "value": "cursor"},
     )
     assert r.status_code == 200
     body = r.json()
     assert body["effective_backend"] == "cursor"
-    backend = next(k for k in body["keys"] if k["name"] == "AUTO_STUDIO_BACKEND")
+    backend = next(k for k in body["keys"] if k["name"] == "GENI_STUDIO_BACKEND")
     assert backend["value_hint"] == "cursor"
     r2 = client.post(
         "/api/config/settings",
@@ -310,23 +310,23 @@ def test_web_sets_backend_and_masks_api_key(tmp_path, monkeypatch):
     assert implied.status_code == 200
     assert implied.json()["effective_backend"] == "cursor"
     assert "secret-value" not in implied.text
-    hint = next(k for k in implied.json()["keys"] if k["name"] == "AUTO_STUDIO_BACKEND")
+    hint = next(k for k in implied.json()["keys"] if k["name"] == "GENI_STUDIO_BACKEND")
     assert "当前生效 cursor" in hint["value_hint"]
 
 
 def _ready_lark(monkeypatch: pytest.MonkeyPatch) -> None:
-    from auto_studio.hitl.lark_cli_client import LarkCliAuthSummary
+    from geni_studio.hitl.lark_cli_client import LarkCliAuthSummary
 
     monkeypatch.setattr(
-        "auto_studio.hitl.lark_cli_client.auth_summary",
+        "geni_studio.hitl.lark_cli_client.auth_summary",
         lambda: LarkCliAuthSummary(True, True, True, "ok"),
     )
 
 
 def test_probe_reports_connected_for_stub(monkeypatch, tmp_path):
     _ready_lark(monkeypatch)
-    monkeypatch.setenv("AUTO_STUDIO_LARK_BACKEND", "lark_cli")
-    monkeypatch.setenv("AUTO_STUDIO_TARGET_ROOT", str(tmp_path))
+    monkeypatch.setenv("GENI_STUDIO_LARK_BACKEND", "lark_cli")
+    monkeypatch.setenv("GENI_STUDIO_TARGET_ROOT", str(tmp_path))
     client = TestClient(app)
     probed = client.post("/api/config/settings/probe")
     assert probed.status_code == 200
@@ -340,11 +340,11 @@ def test_probe_reports_connected_for_stub(monkeypatch, tmp_path):
 
 
 def test_probe_skips_missing_cursor_key_and_keeps_saved_value(monkeypatch):
-    from auto_studio.config.connectivity import probe_saved_settings
+    from geni_studio.config.connectivity import probe_saved_settings
 
     _ready_lark(monkeypatch)
-    monkeypatch.setenv("AUTO_STUDIO_BACKEND", "cursor")
-    monkeypatch.setenv("AUTO_STUDIO_LARK_BACKEND", "lark_cli")
+    monkeypatch.setenv("GENI_STUDIO_BACKEND", "cursor")
+    monkeypatch.setenv("GENI_STUDIO_LARK_BACKEND", "lark_cli")
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     body = probe_saved_settings()
     assert body["ok"] is True
@@ -356,17 +356,17 @@ def test_probe_skips_missing_cursor_key_and_keeps_saved_value(monkeypatch):
 def test_probe_cursor_failure_does_not_echo_the_key(monkeypatch):
     import os
 
-    from auto_studio.config.connectivity import probe_saved_settings
+    from geni_studio.config.connectivity import probe_saved_settings
 
     _ready_lark(monkeypatch)
-    monkeypatch.setenv("AUTO_STUDIO_BACKEND", "cursor")
-    monkeypatch.setenv("AUTO_STUDIO_LARK_BACKEND", "lark_cli")
+    monkeypatch.setenv("GENI_STUDIO_BACKEND", "cursor")
+    monkeypatch.setenv("GENI_STUDIO_LARK_BACKEND", "lark_cli")
     monkeypatch.setenv("CURSOR_API_KEY", "secret-value")
 
     def fail_key(api_key, model):
         return ("fail", "API Key 无效。到 Cursor 设置里更新 User API Key，再写入一次。")
 
-    monkeypatch.setattr("auto_studio.config.connectivity.probe_cursor_key", fail_key)
+    monkeypatch.setattr("geni_studio.config.connectivity.probe_cursor_key", fail_key)
     body = probe_saved_settings()
     assert body["ok"] is False
     assert body["summary"].startswith("连不上。")

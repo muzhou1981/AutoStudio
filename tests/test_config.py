@@ -33,7 +33,7 @@ L0_ARTIFACT_NAMES = frozenset(
     }
 )
 
-from auto_studio.config.context import (
+from geni_studio.config.context import (
     ConfigError,
     apply_omit_sections,
     build_run_context,
@@ -41,7 +41,7 @@ from auto_studio.config.context import (
     resolve_design_track,
     resolve_template,
 )
-from auto_studio.workflows.default import resolve_design_track_enabled
+from geni_studio.workflows.default import resolve_design_track_enabled
 
 
 def test_l0_templates_cover_all_registered_artifacts():

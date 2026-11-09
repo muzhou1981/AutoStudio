@@ -2,9 +2,9 @@
 
 from fastapi.testclient import TestClient
 
-from auto_studio.config.workflow_nodes import FINANCE_NODES, nodes_hidden_from_rail
-from auto_studio.hitl.rail import RAIL_NODES, build_rail
-from auto_studio.web.app import app
+from geni_studio.config.workflow_nodes import FINANCE_NODES, nodes_hidden_from_rail
+from geni_studio.hitl.rail import RAIL_NODES, build_rail
+from geni_studio.web.app import app
 
 DESIGN = frozenset({"ux_designer", "ui_designer", "visual_designer"})
 

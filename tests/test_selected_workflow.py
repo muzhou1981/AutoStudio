@@ -5,10 +5,10 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
-from auto_studio.config.context import ConfigError
-from auto_studio.hitl.service import GraphRunService
-from auto_studio.workflows.default import compile_graph
-from auto_studio.workflows.executable import resolve_executable
+from geni_studio.config.context import ConfigError
+from geni_studio.hitl.service import GraphRunService
+from geni_studio.workflows.default import compile_graph
+from geni_studio.workflows.executable import resolve_executable
 
 
 def _root(tmp_path: Path) -> None:
@@ -39,17 +39,17 @@ def _root(tmp_path: Path) -> None:
         "- {id: start, kind: start, name: 启动, role: human, returns_to: ''}\n"
         "- {id: n1, kind: activity, name: 起草, role: project_manager, returns_to: ''}\n"
         "- {id: n2, kind: gate, name: 确认, role: human, returns_to: '', decision: approve}\n"
-        "- {id: n3, kind: activity, name: 开发, role: developer, returns_to: n1}\n"
+        "- {id: n3, kind: activity, name: 开发, role: developer, returns_to: n1, max_loops: 2}\n"
         "- {id: end, kind: end, name: 结束, role: human, returns_to: ''}\n",
         encoding="utf-8",
     )
 
 
 def _patch_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("auto_studio.config.context.factory_root", lambda: tmp_path)
-    monkeypatch.setattr("auto_studio.config.registry.factory_root", lambda: tmp_path)
-    monkeypatch.setattr("auto_studio.config.precheck.precheck_scenario_materials", lambda *args, **kwargs: None)
-    monkeypatch.setattr("auto_studio.hitl.service.workspace_enabled", lambda: False)
+    monkeypatch.setattr("geni_studio.config.context.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.registry.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.precheck.precheck_scenario_materials", lambda *args, **kwargs: None)
+    monkeypatch.setattr("geni_studio.hitl.service.workspace_enabled", lambda: False)
 
 
 def test_missing_decision_refuses_to_start(tmp_path: Path) -> None:
@@ -111,7 +111,7 @@ def test_selected_workflow_runs_activity_gate_and_return(
             return "未通过\nSTATUS: fail"
         return f"[stub:{role_name}] {stub_note}"
 
-    monkeypatch.setattr("auto_studio.backends.runner.invoke_role", fake_invoke)
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", fake_invoke)
     svc = GraphRunService(compile_graph(MemorySaver()))
     started = svc.start(human_request="做一件事", scenario_key="demo", project_id="bound")
     assert started.phase == "awaiting_human"

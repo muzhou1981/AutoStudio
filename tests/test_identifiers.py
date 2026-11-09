@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from auto_studio.config.identifiers import allocate_identifier
-from auto_studio.web.app import app
+from geni_studio.config.identifiers import allocate_identifier
+from geni_studio.web.app import app
 
 
 def test_allocate_keeps_valid_id_and_slugifies_ascii() -> None:
@@ -44,9 +44,9 @@ def test_create_project_from_title(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         "scenario_key: npu_operator\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("auto_studio.config.registry.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.registry.factory_root", lambda: tmp_path)
     monkeypatch.setattr(
-        "auto_studio.config.identifiers.backend_translate",
+        "geni_studio.config.identifiers.backend_translate",
         lambda _text: "Preview Project",
     )
     client = TestClient(app)
@@ -64,9 +64,9 @@ def test_create_workflow_from_title(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         "---\nname: developer\ntitle: 程序员\n---\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("auto_studio.config.workflow_defs.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.workflow_defs.factory_root", lambda: tmp_path)
     monkeypatch.setattr(
-        "auto_studio.config.identifiers.backend_translate",
+        "geni_studio.config.identifiers.backend_translate",
         lambda _text: "",
     )
     client = TestClient(app)

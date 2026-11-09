@@ -1,4 +1,4 @@
-# AutoStudio 架构
+# GeniStudio 架构
 
 > 待默认流程第一版完成后补充其余章节。
 
@@ -82,9 +82,9 @@
 | GET | `/api/runs/{thread_id}` | 状态、`phase`、`awaiting_human`、state 摘要 |
 | POST | `/api/runs/{thread_id}/hitl` | 提交 `gate_decision` + `human_reply`，续跑至下一 interrupt 或结束 |
 
-启动本地 Web：`auto-studio-web` 或 `python -m auto_studio.web.app`（默认 `127.0.0.1:8765`）。飞书 **入站**（卡片/消息 → HITL）仍待接；**出站**通知见 [ADR 0004](decisions/0004-feishu-hitl-via-lark-cli.md)。
+启动本地 Web：`geni-studio-web` 或 `python -m geni_studio.web.app`（默认 `127.0.0.1:8765`）。飞书 **入站**（卡片/消息 → HITL）仍待接；**出站**通知见 [ADR 0004](decisions/0004-feishu-hitl-via-lark-cli.md)。
 
-#### 飞书接到 AutoStudio（推荐：官方 lark-cli）
+#### 飞书接到 GeniStudio（推荐：官方 lark-cli）
 
 适用：**公司租户未开开放平台**，用 **个人开发者账号** 创建应用。
 
@@ -94,8 +94,8 @@
    - 发消息测试：`lark-cli im +messages-send --as bot --chat-id oc_xxx --text "ping"`
 
 2. **仓库 `.env`**  
-   - `AUTO_STUDIO_LARK_BACKEND=lark_cli`（默认）  
-   - `AUTO_STUDIO_PUBLIC_BASE_URL`：Web HITL 链接前缀（通知正文中的跳转）  
+   - `GENI_STUDIO_LARK_BACKEND=lark_cli`（默认）  
+   - `GENI_STUDIO_PUBLIC_BASE_URL`：Web HITL 链接前缀（通知正文中的跳转）  
    - **不必** 填写 `LARK_APP_SECRET`（除非改用 `env_bot` 后端）
 
 3. **项目 YAML**（`/config` 可编辑）  
@@ -107,11 +107,11 @@
    ```
 
 4. **行为**  
-   - Run 进入 `awaiting_human` 时，AutoStudio 调用 `lark-cli im +messages-send --as bot` 推送 PM 文本 + Web 链接。  
+   - Run 进入 `awaiting_human` 时，GeniStudio 调用 `lark-cli im +messages-send --as bot` 推送 PM 文本 + Web 链接。  
    - 人类在 Web 提交 `gate_decision`；与飞书入站回调等价的路径后续再接。
 
 5. **备选 `env_bot`**  
-   - 企业已开开放平台且希望在 `.env` 存凭据时：设 `AUTO_STUDIO_LARK_BACKEND=env_bot` 并填写 `LARK_APP_ID` / `LARK_APP_SECRET`（直连发送待实现时可仍用 lark-cli）。
+   - 企业已开开放平台且希望在 `.env` 存凭据时：设 `GENI_STUDIO_LARK_BACKEND=env_bot` 并填写 `LARK_APP_ID` / `LARK_APP_SECRET`（直连发送待实现时可仍用 lark-cli）。
 
 6. **身份边界**  
    - PM 对外须为 **Bot 应用身份**（lark-cli `--as bot`），**不要** 用 lark-tools 员工 Cookie `send` 冒充项目经理。

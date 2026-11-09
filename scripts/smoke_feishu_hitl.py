@@ -61,11 +61,11 @@ def _api_e2e(base: str) -> int:
 
 
 def _live_notify(base: str) -> int:
-    open_id = os.environ.get("AUTO_STUDIO_FEISHU_NOTIFY_OPEN_ID", "").strip()
+    open_id = os.environ.get("GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID", "").strip()
     if not open_id:
-        print("SKIP live: 未设置 AUTO_STUDIO_FEISHU_NOTIFY_OPEN_ID", file=sys.stderr)
+        print("SKIP live: 未设置 GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID", file=sys.stderr)
         return 2
-    os.environ.setdefault("AUTO_STUDIO_LARK_BACKEND", "lark_cli")
+    os.environ.setdefault("GENI_STUDIO_LARK_BACKEND", "lark_cli")
     payload = json.dumps(
         {
             "human_request": "feishu live card",
@@ -90,16 +90,16 @@ def _live_notify(base: str) -> int:
 
 
 def main() -> int:
-    from auto_studio.config.env_loader import apply_env_file
+    from geni_studio.config.env_loader import apply_env_file
 
     apply_env_file(
-        override=os.environ.get("AUTO_STUDIO_DOTENV_OVERRIDE", "1").strip().lower()
+        override=os.environ.get("GENI_STUDIO_DOTENV_OVERRIDE", "1").strip().lower()
         in ("1", "true", "yes")
     )
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--base",
-        default=os.environ.get("AUTO_STUDIO_WEB_BASE", "http://127.0.0.1:8765"),
+        default=os.environ.get("GENI_STUDIO_WEB_BASE", "http://127.0.0.1:8765"),
     )
     parser.add_argument(
         "--live",
@@ -113,7 +113,7 @@ def main() -> int:
         return _api_e2e(args.base)
     except urllib.error.URLError as e:
         print(f"FAIL: 无法访问 {args.base} — {e}", file=sys.stderr)
-        print("hint: 另开终端运行 auto-studio-web", file=sys.stderr)
+        print("hint: 另开终端运行 geni-studio-web", file=sys.stderr)
         return 1
 
 

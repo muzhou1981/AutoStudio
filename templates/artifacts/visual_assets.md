@@ -2,7 +2,7 @@
 artifact: visual_assets
 producer: visual_designer
 consumers: [developer, ui_designer]
-template_upstream: AutoStudio（无标准 GitHub 资源清单；字段见 artifact-template-sources.md）
+template_upstream: GeniStudio（无标准 GitHub 资源清单；字段见 artifact-template-sources.md）
 template_url: ""
 ---
 

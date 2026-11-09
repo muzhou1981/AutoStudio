@@ -2,7 +2,7 @@
 artifact: cost_ledger
 producer: engine
 consumers: [finance]
-template_upstream: AutoStudio（追加式用量/成本日志；无 GitHub 对标）
+template_upstream: GeniStudio（追加式用量/成本日志；无 GitHub 对标）
 template_url: ""
 ---
 

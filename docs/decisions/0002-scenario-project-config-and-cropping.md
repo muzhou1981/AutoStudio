@@ -13,9 +13,9 @@
 
 | 层级 | 存放位置 | 作用 |
 |------|----------|------|
-| L0 工厂默认 | `templates/artifacts/`、`src/auto_studio/workflows/default.py`、`roles/` | 全厂基线 |
+| L0 工厂默认 | `templates/artifacts/`、`src/geni_studio/workflows/default.py`、`roles/` | 全厂基线 |
 | L1 场景 | `scenarios/<scenario_key>/scenario.yaml`（+ 可选 `templates/`、`workflow_profile.yaml`） | 一类项目的 reusable 预设（算子、Web、CLI 等） |
-| L2 项目 | `projects/<project_id>/project.yaml`（+ 可选 `templates/`）；或目标仓库 `.auto_studio/project.yaml` | 具体目标软件/仓库的覆盖 |
+| L2 项目 | `projects/<project_id>/project.yaml`（+ 可选 `templates/`）；或目标仓库 `.geni_studio/project.yaml` | 具体目标软件/仓库的覆盖 |
 | L3 单次运行 | Run 输入、`design_track_enabled`、人工关卡后的 state 补丁 | 本轮例外 |
 
 **合并规则**：同名字段 **L3 > L2 > L1 > L0**；未声明则继承下层。禁止项目配置修改 `roles/` 正文（走 `change_request` + 流程负责人）；项目仅覆盖**场景、模板路径、流程 profile、工具列表、预算参数**。
@@ -153,7 +153,7 @@ projects/
     templates/
 ```
 
-目标仓库可选：`<target_repo>/.auto_studio/project.yaml` 指向 `project_id` 或内联 L2 片段（引擎合并时 L2 以工厂 `projects/` 为主，仓库内文件为补充，避免双源冲突——**M2 只支持工厂 `projects/` 单源**，仓库内仅放 pointer）。
+目标仓库可选：`<target_repo>/.geni_studio/project.yaml` 指向 `project_id` 或内联 L2 片段（引擎合并时 L2 以工厂 `projects/` 为主，仓库内文件为补充，避免双源冲突——**M2 只支持工厂 `projects/` 单源**，仓库内仅放 pointer）。
 
 ## 不做什么（M2）
 
@@ -173,5 +173,5 @@ projects/
 
 - 已有：`design_track_enabled`、`route_after_config_plan` → 读 `features.design_track`（`resolve_design_track`）。
 - 已有：`templates/artifacts/*.md` → L0；`scenarios/npu_operator`、`scenarios/web_app`、`projects/_example` 示例。
-- 已有：`src/auto_studio/config/`（`RunContext`、`resolve_template`、`skip_if_disabled`）。
+- 已有：`src/geni_studio/config/`（`RunContext`、`resolve_template`、`skip_if_disabled`）。
 - 待做：Web 项目 CRUD；节点内注入 `load_template_text` + 角色 Agent。

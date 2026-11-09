@@ -3,7 +3,7 @@
 | 术语 | 含义 |
 |------|------|
 | 角色 | 具有特定职责、原则与价值观的 Agent 定义，位于 `roles/` |
-| 工作流程 | 以 LangGraph 编排的角色协作流程，位于 `src/auto_studio/workflows/` |
+| 工作流程 | 以 LangGraph 编排的角色协作流程，位于 `src/geni_studio/workflows/` |
 | 产物 | 角色之间交接的结构化输出，例如需求说明、架构设计、测试报告 |
 | 人工关卡 | 流程中须由人批准后才能继续的节点 |
 | HITL | Human-in-the-loop；人类通过 Web 或飞书提交澄清或关卡批复，引擎写回 state 后续跑 |
