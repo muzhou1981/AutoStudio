@@ -54,6 +54,7 @@ class StartRunBody(BaseModel):
     run_name: str = ""
     node_tools: dict[str, NodeToolChoice] = Field(default_factory=dict)
     attachments: list[AttachmentRef] = Field(default_factory=list)
+    role_models: dict[str, str] = Field(default_factory=dict)
 
 
 class DeleteRunBody(BaseModel):
@@ -150,6 +151,7 @@ class SaveRunDraftBody(BaseModel):
     human_request: str = ""
     node_tools: dict[str, NodeToolChoice] = Field(default_factory=dict)
     attachments: list[AttachmentRef] = Field(default_factory=list)
+    role_models: dict[str, str] = Field(default_factory=dict)
 
 
 @app.get("/api/runs")
@@ -182,6 +184,7 @@ def api_save_run_draft(body: SaveRunDraftBody) -> dict:
             node_tools=tools,
             taken_names=taken,
             attachments=clean_attachment_ids(body.attachments),
+            role_models=_clean_role_models(body.role_models),
         )
     except HitlError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -240,6 +243,20 @@ def api_next_run_name(project_id: str = "") -> dict:
     return {"project_id": pid, "run_name": next_run_name(pid, taken)}
 
 
+def _clean_role_models(raw: dict[str, str]) -> dict[str, str]:
+    cleaned: dict[str, str] = {}
+    for role, model in raw.items():
+        key = str(role).strip()
+        value = str(model or "").strip()
+        if not key:
+            raise ValueError("角色标识不能空。")
+        if len(key) > 80 or len(value) > 120:
+            raise ValueError("角色或模型标识过长。")
+        if value:
+            cleaned[key] = value
+    return cleaned
+
+
 def _clean_node_tools(raw: dict[str, NodeToolChoice]) -> dict[str, dict[str, list[str]]]:
     from geni_studio.backends.tools import clean_tool_ids
 
@@ -270,10 +287,25 @@ def api_start_run(body: StartRunBody) -> dict:
             run_name=body.run_name,
             node_tools=tools,
             attachment_ids=attachment_ids,
+            role_models=_clean_role_models(body.role_models),
         )
     except (ConfigError, HitlError, ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     notify_awaiting_human_via_lark_cli(_run_service, st.thread_id, body.project_id)
+    return _run_service.status_dict(st.thread_id)
+
+
+class RoleModelsBody(BaseModel):
+    role_models: dict[str, str] = Field(default_factory=dict)
+
+
+@app.put("/api/runs/{thread_id}/role-models")
+def api_set_role_models(thread_id: str, body: RoleModelsBody) -> dict:
+    try:
+        st = _run_service.set_role_models(thread_id, _clean_role_models(body.role_models))
+    except (HitlError, ValueError, TypeError) as e:
+        missing = "未知" in str(e)
+        raise HTTPException(status_code=404 if missing else 400, detail=str(e)) from e
     return _run_service.status_dict(st.thread_id)
 
 

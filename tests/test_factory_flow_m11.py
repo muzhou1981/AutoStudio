@@ -18,15 +18,67 @@ from geni_studio.config.workflow_defs import (
 from geni_studio.web.app import app
 
 
+def test_activity_roles_include_nested_workflows(tmp_path):
+    for role_id, title in (("architect", "架构师"), ("developer", "程序员")):
+        folder = tmp_path / "roles" / role_id
+        folder.mkdir(parents=True)
+        (folder / "role.md").write_text(f"---\ntitle: {title}\n---\n", encoding="utf-8")
+    child = tmp_path / "workflows" / "child"
+    child.mkdir(parents=True)
+    (child / "workflow.yaml").write_text(
+        "workflow_id: child\ntitle: 子\nsubgraph: true\nnodes:\n"
+        "- {id: start, kind: start, name: 启动, role: human}\n"
+        "- {id: work, kind: activity, name: 实现, role: developer}\n"
+        "- {id: end, kind: end, name: 结束, role: human}\n",
+        encoding="utf-8",
+    )
+    parent = tmp_path / "workflows" / "parent"
+    parent.mkdir()
+    (parent / "workflow.yaml").write_text(
+        "workflow_id: parent\ntitle: 父\nnodes:\n"
+        "- {id: start, kind: start, name: 启动, role: human}\n"
+        "- {id: plan, kind: activity, name: 合同, role: architect}\n"
+        "- {id: path, kind: subgraph, name: 子流程, role: '', subgraph_id: child}\n"
+        "- {id: end, kind: end, name: 结束, role: human}\n",
+        encoding="utf-8",
+    )
+    from geni_studio.config.workflow_defs import workflow_activity_roles
+
+    roles = workflow_activity_roles("parent", tmp_path)
+    assert [item["id"] for item in roles] == ["architect", "developer"]
+    assert roles[0]["label"] == "架构师"
+
+
 def test_factory_default_is_listed_and_locked():
     found = [item for item in list_workflows() if item["workflow_id"] == "factory_default"]
     assert found and found[0]["builtin"] is True
+    assert found[0]["title"] == "通用软件开发"
     assert found[0]["engine"] == "default"
     loaded = get_workflow("factory_default")["workflow"]
     assert loaded["nodes"][0]["kind"] == "start"
     assert loaded["nodes"][-1]["kind"] == "end"
     with pytest.raises(ConfigError, match="先复制"):
         save_workflow("factory_default", loaded)
+
+
+def test_self_improve_is_builtin_and_executable():
+    from geni_studio.workflows.executable import resolve_executable
+
+    found = [item for item in list_workflows() if item["workflow_id"] == "self_improve"]
+    assert found and found[0]["builtin"] is True
+    assert found[0]["title"] == "自我改进"
+    assert found[0]["engine"] == ""
+    loaded = get_workflow("self_improve")["workflow"]
+    prepared = resolve_executable(loaded)
+    names = [node["name"] for node in prepared["nodes"]]
+    assert names == ["启动", "听清改动", "确认改动", "改代码", "自行核对", "看结果", "写交付说明", "确认入库", "结束"]
+    check = next(node for node in prepared["nodes"] if node["id"] == "self_check")
+    assert check["returns_to"] == "change_code"
+    assert check["max_loops"] == 3
+    review = next(node for node in prepared["nodes"] if node["id"] == "review")
+    assert review["reject_to"] == "change_code"
+    with pytest.raises(ConfigError, match="先复制"):
+        save_workflow("self_improve", loaded)
 
 
 def test_copy_drops_the_builtin_flag(tmp_path):
@@ -104,8 +156,10 @@ def test_project_page_requires_a_workflow_and_role_model_selects():
     assert 'id="fieldProfile"' in page
     assert 'waOption("", "不指定")' not in script
     assert "还没有流程。先创建一份。" in page
-    assert 'id="region-models"' in page
-    assert 'id="roleModelList"' in page
+    assert 'id="region-models"' not in page
+    assert 'id="runRoleModels"' in page
+    assert page.index('id="runRoleModels"') < page.index('id="req"')
+    assert page.index('id="runRoleModels"') < page.index('id="region-extra"')
     assert 'id="fieldDirProfile"' in page
     assert ">所选流程</h2>" in page
     assert 'id="btnCopyFlow"' in page

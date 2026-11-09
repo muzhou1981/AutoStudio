@@ -1,6 +1,6 @@
 workflow_id: factory_default
-title: 默认流程
-description: 工厂内置的软件开发流程。要改，先复制一份。
+title: 通用软件开发
+description: 工厂内置的通用软件开发流程。要改，先复制一份。
 builtin: true
 engine: default
 nodes:

@@ -7,6 +7,7 @@
 
   let mode = "new";
   let loadedId = "";
+  let ignorePick = false;
   let selectedId = "";
   let roles = [];
   let workflows = [];
@@ -391,7 +392,7 @@
   function writeUrl(nextMode, id, replace) {
     let url = "/workflow";
     if (nextMode === "open" && id) url += "?workflow=" + encodeURIComponent(id);
-    const hash = nextMode === "new" ? "#new" : "#open";
+    const hash = nextMode === "new" ? "#new" : "#edit";
     const next = url + hash;
     if (location.pathname + location.search + location.hash === next) return;
     history[replace ? "replaceState" : "pushState"]({ route: "workflow" }, "", next);
@@ -439,7 +440,8 @@
 
   function showPieces() {
     const editing = mode === "new" || Boolean(loadedId);
-    $("flowOpen").hidden = mode !== "open" || Boolean(loadedId);
+    $("flowOpen").hidden = mode !== "open";
+    if ($("flowPick")) $("flowPick").disabled = false;
     $("flowEditor").hidden = !editing;
     const created = mode === "open" && Boolean(loadedId);
     const builtin = Boolean(graph.builtin);
@@ -449,6 +451,7 @@
     $("btnSaveFlow").hidden = !created || builtin;
     if ($("btnCopyLoaded")) $("btnCopyLoaded").hidden = !created;
     $("flowTitle").disabled = builtin;
+    $("flowDescription").hidden = !editing;
     $("flowDescription").disabled = builtin;
     ["btnAddActivity", "btnAddGate", "btnAddParallel", "btnSaveSubgraph", "btnInsertSubgraph", "btnFlowUp", "btnFlowDown", "btnFlowDelete", "btnSaveFlowRaw"].forEach((id) => {
       if ($(id)) $(id).disabled = builtin;
@@ -469,15 +472,17 @@
   }
 
   function laneKey(node) {
-    if (node.kind === "parallel" || node.kind === "subgraph") return "structure";
+    if (node.kind === "subgraph") return "subgraph";
+    if (node.kind === "parallel") return "parallel";
     return node.role;
   }
 
   function lanesOf() {
     const used = new Set(graph.nodes.map((node) => laneKey(node)));
     const lanes = [];
-    if (used.has("structure")) lanes.push({ id: "structure", label: "流程" });
     if (used.has("human")) lanes.push({ id: "human", label: "人类" });
+    if (used.has("subgraph")) lanes.push({ id: "subgraph", label: "子流程" });
+    if (used.has("parallel")) lanes.push({ id: "parallel", label: "并行" });
     roles.forEach((role) => {
       if (role.id !== "human" && used.has(role.id)) lanes.push(role);
     });
@@ -558,11 +563,26 @@
     });
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("class", "flow-edges");
+    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+    marker.setAttribute("id", "flowReturnHead");
+    marker.setAttribute("viewBox", "0 0 8 8");
+    marker.setAttribute("markerWidth", "7");
+    marker.setAttribute("markerHeight", "7");
+    marker.setAttribute("refX", "7");
+    marker.setAttribute("refY", "4");
+    marker.setAttribute("orient", "auto");
+    const head = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    head.setAttribute("d", "M0,0 L8,4 L0,8 Z");
+    head.setAttribute("fill", "context-stroke");
+    marker.appendChild(head);
+    defs.appendChild(marker);
+    svg.appendChild(defs);
     boxes.forEach((box, index) => {
       if (index < boxes.length - 1) svg.appendChild(pathEl(roundedLink(box, boxes[index + 1])));
       if (box.node.returns_to) {
         const target = boxes.find((item) => item.node.id === box.node.returns_to);
-        if (target) svg.appendChild(pathEl(roundedLink(box, target)));
+        if (target) svg.appendChild(pathEl(returnLink(box, target), "is-return"));
       }
     });
     board.appendChild(svg);
@@ -585,9 +605,33 @@
     });
   }
 
-  function pathEl(d) {
+  function returnLink(from, to) {
+    const x1 = from.left + from.width / 2;
+    const y1 = from.top + from.height;
+    const x2 = to.left + to.width / 2;
+    const y2 = to.top + to.height;
+    const low = Math.max(y1, y2) + 16;
+    const span = Math.abs(x2 - x1);
+    const radius = Math.min(8, span / 2, (low - y1) / 2, (low - y2) / 2);
+    if (radius < 3) return `M ${x1} ${y1} V ${low} H ${x2} V ${y2}`;
+    const dir = x2 >= x1 ? 1 : -1;
+    return [
+      `M ${x1} ${y1}`,
+      `V ${low - radius}`,
+      `Q ${x1} ${low} ${x1 + dir * radius} ${low}`,
+      `H ${x2 - dir * radius}`,
+      `Q ${x2} ${low} ${x2} ${low - radius}`,
+      `V ${y2}`,
+    ].join(" ");
+  }
+
+  function pathEl(d, kind) {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", d);
+    if (kind) {
+      path.setAttribute("class", kind);
+      path.setAttribute("marker-end", "url(#flowReturnHead)");
+    }
     return path;
   }
 
@@ -850,7 +894,7 @@
           open.textContent = "打开子图";
           open.addEventListener("click", () => {
             if (!confirmLeave()) return;
-            const url = "/workflow?workflow=" + encodeURIComponent(step.subgraph_id) + "#open";
+            const url = "/workflow?workflow=" + encodeURIComponent(step.subgraph_id) + "#edit";
             history.pushState({}, "", url);
             window.applyWorkflowLocation();
           });
@@ -969,13 +1013,15 @@
     workflows = flowRes.workflows || [];
     fillRoleSelects();
     const pick = $("flowPick");
-    const selected = pick.value;
+    const selected = pick.value || loadedId;
+    ignorePick = true;
     pick.replaceChildren(option("", "— 选择 —"));
     workflows.forEach((item) => {
       const prefix = item.builtin ? "内置 · " : "";
       pick.appendChild(option(item.workflow_id, prefix + item.title));
     });
     if (selected) pick.value = selected;
+    ignorePick = false;
     const insert = $("flowInsertSubgraph");
     if (insert) {
       const chosen = insert.value;
@@ -990,9 +1036,9 @@
     $("flowEmpty").hidden = !none;
     $("flowEmptyAction").hidden = !none;
     $("flowPick").hidden = none;
-    $("btnOpenFlow").hidden = none;
+    $("flowPick").disabled = false;
     if ($("btnCopyFlow")) $("btnCopyFlow").hidden = none;
-    $("flowHint").hidden = none;
+    $("flowHint").hidden = none || Boolean(loadedId);
   }
 
   async function enterNew(replace) {
@@ -1013,6 +1059,9 @@
       loadedId = "";
       selectedId = "";
       setGraph(blankGraph("", ""), "");
+      ignorePick = true;
+      $("flowPick").value = "";
+      ignorePick = false;
       showPieces();
       markClean();
       writeUrl("open", "", replace);
@@ -1022,12 +1071,17 @@
     const data = await response.json();
     if (!response.ok) {
       showError(data.detail || "打不开这个流程。");
+      ignorePick = true;
+      $("flowPick").value = loadedId || "";
+      ignorePick = false;
       return;
     }
     loadedId = id;
     selectedId = "";
     setGraph(data.workflow, data.yaml);
+    ignorePick = true;
     $("flowPick").value = id;
+    ignorePick = false;
     $("flowHint").hidden = true;
     showPieces();
     markClean();
@@ -1035,7 +1089,13 @@
   }
 
   async function requestWorkflowMode(nextMode) {
-    if (nextMode === mode && !(nextMode === "open" && loadedId)) return;
+    if (nextMode === "import") {
+      if (!confirmLeave()) return;
+      const input = $("flowImport");
+      if (input) input.click();
+      return;
+    }
+    if (nextMode === mode) return;
     if (!confirmLeave()) return;
     if (nextMode === "new") await enterNew(false);
     else await enterOpen("", false);
@@ -1048,28 +1108,31 @@
     const opened = new URLSearchParams(location.search).get("workflow") || "";
     if (opened) await enterOpen(opened, true);
     else if (location.hash === "#new") await enterNew(true);
+    else if (location.hash === "#edit" || location.hash === "#open") await enterOpen("", true);
     else if ((await fetch("/api/workflows").then((response) => response.json())).workflows.length) await enterOpen("", true);
     else await enterNew(true);
   };
 
-  $("btnOpenFlow").onclick = async () => {
-    const id = $("flowPick").value;
-    if (!id) {
-      showError("先选择要打开的流程。");
+  $("flowPick").addEventListener("change", async () => {
+    if (ignorePick) return;
+    const id = ($("flowPick").value || "").trim();
+    if (id === (loadedId || "")) return;
+    if (!confirmLeave()) {
+      ignorePick = true;
+      $("flowPick").value = loadedId || "";
+      ignorePick = false;
       return;
     }
-    if (id === loadedId) return;
-    if (!confirmLeave()) return;
     showError("");
     await enterOpen(id, false);
-  };
+  });
 
   $("btnFlowGoNew").onclick = () => requestWorkflowMode("new");
 
   async function copySelected(id) {
     const source = workflows.find((item) => item.workflow_id === id);
     if (!id || !source) {
-      showError("先选择要打开的流程。");
+      showError("先选择要编辑的流程。");
       return;
     }
     if (!confirmLeave()) return;
@@ -1087,6 +1150,36 @@
     await loadLists();
     await enterOpen(data.workflow.workflow_id, false);
     showSaved("已复制为 " + data.workflow.workflow_id + "。");
+  }
+
+  if ($("flowImport")) {
+    $("flowImport").addEventListener("change", async () => {
+      const file = $("flowImport").files && $("flowImport").files[0];
+      $("flowImport").value = "";
+      if (!file) return;
+      showError("");
+      showSaved("");
+      let text = "";
+      try {
+        text = await file.text();
+      } catch (_) {
+        showError("读不到这个文件。");
+        return;
+      }
+      const response = await fetch("/api/workflows/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ yaml: text }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        showError(data.detail || "没能导入流程。");
+        return;
+      }
+      await loadLists();
+      await enterOpen(data.workflow.workflow_id, false);
+      showSaved("已导入 " + data.workflow.title + "。");
+    });
   }
 
   if ($("btnCopyFlow")) $("btnCopyFlow").onclick = () => copySelected($("flowPick").value);
@@ -1321,7 +1414,7 @@
     const node = selectedNode();
     if (!node || node.kind !== "subgraph" || !node.subgraph_id) return;
     if (!confirmLeave()) return;
-    const url = "/workflow?workflow=" + encodeURIComponent(node.subgraph_id) + "#open";
+    const url = "/workflow?workflow=" + encodeURIComponent(node.subgraph_id) + "#edit";
     history.pushState({}, "", url);
     window.applyWorkflowLocation();
   };

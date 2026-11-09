@@ -133,6 +133,8 @@ class FactoryState(TypedDict, total=False):
     branch_artifacts: Annotated[dict[str, str], _merge_maps]
     # 这一轮各活动节点选用的 Skill 与 MCP。键是节点标识。
     node_tools: dict[str, dict[str, list[str]]]
+    # 这一轮各角色选用的模型。空着的角色沿用工厂默认。
+    role_models: dict[str, str]
     return_target: str
     escalated_from: str
 

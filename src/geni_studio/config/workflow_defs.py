@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from geni_studio.config.context import ConfigError, factory_root
+from geni_studio.config.identifiers import allocate_identifier
 from geni_studio.roles.loader import role_contract, role_title
 
 _WORKFLOW_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
@@ -114,11 +115,46 @@ def list_workflows(root: Path | None = None) -> list[dict[str, Any]]:
 
 
 def uses_default_engine(workflow_id: str, root: Path | None = None) -> bool:
-    """内置默认流程仍走 default.py，不按通用活动重编译。"""
+    """内置的通用软件开发仍走 default.py，不按通用活动重编译。"""
     if not workflow_exists(workflow_id, root):
         return False
     data = _read_yaml(_workflow_path(workflow_id, root, must_exist=True))
     return str(data.get("engine") or "") == "default"
+
+
+def workflow_activity_roles(workflow_id: str, root: Path | None = None) -> list[dict[str, str]]:
+    """流程里实际会执行的活动角色。子流程和并行支路一并计入，人类不计入。"""
+    labels = {item["id"]: item["label"] for item in list_role_lanes(root)}
+    found: list[str] = []
+
+    def walk(nodes: Any, stack: set[str]) -> None:
+        if not isinstance(nodes, list):
+            return
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            kind = str(node.get("kind") or "")
+            if kind == "activity":
+                role = str(node.get("role") or "").strip()
+                if role and role != "human" and role not in found:
+                    found.append(role)
+            elif kind == "parallel":
+                for branch in node.get("branches") or []:
+                    if isinstance(branch, dict):
+                        walk(branch.get("nodes"), stack)
+            elif kind == "subgraph":
+                subgraph_id = str(node.get("subgraph_id") or "").strip()
+                if not subgraph_id or subgraph_id in stack:
+                    continue
+                try:
+                    loaded = get_workflow(subgraph_id, root)
+                except ConfigError:
+                    continue
+                walk(loaded["workflow"].get("nodes"), stack | {subgraph_id})
+
+    loaded = get_workflow(workflow_id, root)
+    walk(loaded["workflow"].get("nodes"), {workflow_id.strip()})
+    return [{"id": role, "label": labels.get(role, role)} for role in found]
 
 
 def workflow_exists(workflow_id: str, root: Path | None = None) -> bool:
@@ -133,6 +169,39 @@ def workflow_exists(workflow_id: str, root: Path | None = None) -> bool:
 def get_workflow(workflow_id: str, root: Path | None = None) -> dict[str, Any]:
     path = _workflow_path(workflow_id, root, must_exist=True)
     data = validate_workflow(_read_yaml(path), root=root, workflow_id=workflow_id)
+    return {"workflow": data, "yaml": _dump(data)}
+
+
+def import_workflow(text: str, root: Path | None = None) -> dict[str, Any]:
+    """从 YAML 新建一份可编辑流程。内置标记和默认引擎不带入。标识被占用时另起一个。"""
+    try:
+        loaded = yaml.safe_load(text) if text.strip() else {}
+    except yaml.YAMLError as exc:
+        raise ConfigError("原文不是合法的 YAML。") from exc
+    if not isinstance(loaded, dict):
+        raise ConfigError("原文的根节点须为 mapping。")
+    title = str(loaded.get("title") or "").strip()
+    if not title:
+        raise ConfigError("先写标题。")
+    root = root or factory_root()
+    taken = [item["workflow_id"] for item in list_workflows(root)]
+    requested = str(loaded.get("workflow_id") or "").strip()
+    if requested and _WORKFLOW_ID_RE.match(requested) and requested not in set(taken):
+        workflow_id = requested
+    else:
+        workflow_id = allocate_identifier(title, prefix="workflow", taken=taken, translate=lambda _text: "")
+    payload: dict[str, Any] = {
+        "workflow_id": workflow_id,
+        "title": title,
+        "description": str(loaded.get("description") or "").strip(),
+        "nodes": loaded.get("nodes") or [],
+    }
+    if loaded.get("subgraph"):
+        payload["subgraph"] = True
+    data = validate_workflow(payload, root=root, workflow_id=workflow_id)
+    path = _workflow_path(workflow_id, root, must_exist=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_dump(data), encoding="utf-8")
     return {"workflow": data, "yaml": _dump(data)}
 
 
@@ -202,7 +271,7 @@ def _require_subgraph(subgraph_id: str, owner: str, root: Path | None, seen_grap
     if not workflow_exists(subgraph_id, root):
         raise ConfigError(f"子图不存在：{subgraph_id}")
     if uses_default_engine(subgraph_id, root):
-        raise ConfigError("默认流程不能当作子图插入。")
+        raise ConfigError("通用软件开发不能当作子图插入。")
     data = _read_yaml(_workflow_path(subgraph_id, root, must_exist=True))
     nested = set(seen_graphs)
     nested.add(subgraph_id)
@@ -308,8 +377,6 @@ def save_as_subgraph(
         raise ConfigError("先写子图标题。")
     root = root or factory_root()
     if not workflow_id:
-        from geni_studio.config.identifiers import allocate_identifier
-
         workflow_id = allocate_identifier(
             title,
             prefix="subgraph",

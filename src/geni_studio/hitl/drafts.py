@@ -103,6 +103,7 @@ def save_draft(
     node_tools: dict[str, dict[str, list[str]]] | None = None,
     taken_names: set[str] | None = None,
     attachments: list[str] | None = None,
+    role_models: dict[str, str] | None = None,
 ) -> dict:
     pid = project_id.strip()
     if not pid:
@@ -133,6 +134,7 @@ def save_draft(
         "human_request": request,
         "node_tools": node_tools or {},
         "attachments": files,
+        "role_models": role_models or {},
     }
     _path(existing_id).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",

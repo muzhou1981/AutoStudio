@@ -91,6 +91,14 @@ def test_project_yaml_selects_role_model(tmp_path: Path, monkeypatch):
     token = set_project_id("demo")
     try:
         assert model_for_role("developer") == "composer-2"
+        from geni_studio.backends.runner import reset_role_models, set_role_models
+
+        role_token = set_role_models({"developer": "gpt-run"})
+        try:
+            assert model_for_role("developer") == "gpt-run"
+        finally:
+            reset_role_models(role_token)
+        assert model_for_role("developer") == "composer-2"
     finally:
         reset_project_id(token)
 

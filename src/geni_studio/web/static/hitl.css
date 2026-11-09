@@ -465,7 +465,7 @@
   padding: 0;
 }
 
-.swim-grid.has-return { padding-top: 1.15rem; }
+.swim-grid.has-return { padding-bottom: 1.35rem; }
 
 .swim-lane {
   display: flex;
@@ -836,20 +836,61 @@ details.raw pre {
   .btn-loading::after { animation: none; border-top-color: var(--spinner-head); }
 }
 
-.flow-meta { margin-bottom: 0.15rem; }
+.flow-meta { margin-bottom: 0.15rem; grid-template-columns: minmax(0, 1fr); }
 
-#flowWork { margin-top: 1.15rem; }
+#flowWork { margin-top: 0.85rem; }
+
+#flowDescription { margin-bottom: 0.85rem; }
 
 .flow-add {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 0.55rem;
-  margin-bottom: 0.85rem;
+  margin-bottom: 0.65rem;
+}
+
+.flow-composer .row-actions { margin-top: 0.15rem; }
+
+@media (min-width: 900px) {
+  html[data-route="workflow"] .app-view[data-route="workflow"] > .workspace-main {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-bottom: 0;
+  }
+
+  html[data-route="workflow"] #flowEditor,
+  html[data-route="workflow"] #flowWork {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+  }
+
+  html[data-route="workflow"] .flow-stage {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  html[data-route="workflow"] .flow-composer {
+    flex: none;
+    margin: 0.75rem calc(var(--gutter) * -1) 0;
+    border-top: 1px solid var(--border);
+    padding: 0.75rem var(--gutter) 0.85rem;
+    background: var(--bg-base);
+  }
 }
 
 .flow-add wa-select,
-.flow-add wa-input { min-width: 9rem; }
+.flow-add wa-input {
+  width: auto;
+  flex: 1 1 10rem;
+  min-width: 8.5rem;
+  max-width: 14rem;
+  margin-top: 0;
+}
 
 #flowContract > .section-title {
   margin-top: 1.75rem;
@@ -973,6 +1014,20 @@ details.raw pre {
 .run-composer .row-actions {
   margin-top: 0.65rem;
 }
+
+.run-role-models {
+  max-height: 11rem;
+  overflow: auto;
+  margin-bottom: 0.75rem;
+}
+
+#roleModelList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 0.35rem 0.75rem;
+}
+
+#roleModelList wa-select { margin-top: 0; }
 
 .prompt-box {
   border: 1px solid var(--border);
@@ -1283,11 +1338,12 @@ html[data-theme="dark"] .flow-lane:nth-child(odd) {
 }
 
 .flow-lane-label {
-  width: 4.5rem;
+  width: 4.75rem;
   padding-left: 0.55rem;
   color: var(--text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .flow-edges {
@@ -1302,6 +1358,14 @@ html[data-theme="dark"] .flow-lane:nth-child(odd) {
   fill: none;
   stroke: var(--text-muted);
   stroke-width: 1.5;
+}
+
+.flow-edges path.is-return {
+  stroke-dasharray: 5 4;
+}
+
+.flow-edges marker path {
+  fill: var(--text-muted);
 }
 
 .flow-node {

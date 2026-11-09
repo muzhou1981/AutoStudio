@@ -231,7 +231,7 @@ function syncSkipWrap() {
 function setProjectFieldsEnabled(on) {
   document
     .querySelectorAll(
-      "#projectFields wa-input, #projectFields wa-select, #projectFields wa-textarea, #region-scenario wa-select, #region-notify wa-input, #region-extra wa-input, #region-extra wa-select, #roleModelList wa-select",
+      "#projectFields wa-input, #projectFields wa-select, #projectFields wa-textarea, #region-scenario wa-select, #region-notify wa-input, #region-extra wa-input, #region-extra wa-select",
     )
     .forEach((el) => {
       el.disabled = !on;
@@ -244,7 +244,6 @@ async function fillProjectForm(data) {
   $("fieldDescription").value = data.description || "";
   $("fieldRemoteUrl").value = data.remote_url || "";
   fillWorkflowOptions(data.profile_id || "");
-  await refreshRoleModels(data.profile_id || "", data.role_models || {});
   $("fieldRetries").value = data.max_dev_retries == null ? "" : String(data.max_dev_retries);
   $("fieldDesign").value = data.design_track_mode || "inherit";
   $("fieldSkipMode").value = data.skip_mode || "inherit";
@@ -273,7 +272,6 @@ function clearProjectForm() {
   $("fieldSkipMode").value = "inherit";
   renderSkipNodes(window.__nodes || [], []);
   syncSkipWrap();
-  if ($("roleModelList")) $("roleModelList").replaceChildren();
   updateProjectFlowSummary();
 }
 
@@ -618,35 +616,7 @@ function projectFormPayload() {
     notify_chat_id: $("fieldChat").value.trim(),
     notify_open_id: $("fieldOpen").value.trim(),
     workspace: $("fieldWorkspace").value.trim(),
-    role_models: roleModelsPayload(),
   };
-}
-
-function roleModelsPayload() {
-  const models = {};
-  document.querySelectorAll("#roleModelList [data-role]").forEach((el) => {
-    models[el.dataset.role] = el.value || "";
-  });
-  return models;
-}
-
-function modelSelect(role, label, selected) {
-  const row = document.createElement("div");
-  row.className = "io-line";
-  const select = document.createElement("wa-select");
-  select.label = label;
-  select.dataset.role = role;
-  select.appendChild(waOption("", "沿用工厂默认"));
-  const known = window.__backendModels || [];
-  for (const item of known) {
-    select.appendChild(waOption(item.id, item.label || item.id));
-  }
-  if (selected && !known.some((item) => item.id === selected)) {
-    select.appendChild(waOption(selected, selected));
-  }
-  select.value = selected || "";
-  row.appendChild(select);
-  return row;
 }
 
 async function loadBackendModels() {
@@ -657,7 +627,7 @@ async function loadBackendModels() {
   if (hint) {
     hint.textContent = data && data.detail
       ? data.detail
-      : "留空表示沿用工厂默认。名单来自所选流程，选项来自当前后端。";
+      : "留空表示沿用工厂默认。这一轮的选择不影响其它 Run。";
   }
 }
 
@@ -669,41 +639,10 @@ function updateProjectFlowSummary() {
   summary.textContent = item ? item.title + "（" + item.workflow_id + "）。" : "还没有选定流程。";
 }
 
-async function refreshRoleModels(profileId, saved) {
-  const list = $("roleModelList");
-  const empty = $("roleModelEmpty");
-  if (!list) return;
-  const chosen = (saved && typeof saved === "object") ? saved : {};
-  if (!profileId) {
-    list.replaceChildren();
-    if (empty) empty.hidden = false;
-    updateProjectFlowSummary();
-    return;
-  }
-  const response = await fetch("/api/workflows/" + encodeURIComponent(profileId));
-  const data = await response.json();
-  const roles = [];
-  const seen = new Set();
-  for (const node of (data.workflow && data.workflow.nodes) || []) {
-    if (node.kind === "activity" && node.role && !seen.has(node.role)) {
-      seen.add(node.role);
-      roles.push({ id: node.role, label: node.role });
-    }
-  }
-  const catalog = await fetch("/api/workflows/roles").then((item) => item.json());
-  const labels = new Map(((catalog && catalog.roles) || []).map((role) => [role.id, role.label]));
-  list.replaceChildren();
-  roles.forEach((role) => {
-    list.appendChild(modelSelect(role.id, labels.get(role.id) || role.id, chosen[role.id] || ""));
-  });
-  if (empty) empty.hidden = roles.length > 0;
-  updateProjectFlowSummary();
-}
-
 $("fieldSkipMode").addEventListener("change", syncSkipWrap);
 if ($("fieldProfile")) {
   $("fieldProfile").addEventListener("change", () => {
-    refreshRoleModels($("fieldProfile").value, roleModelsPayload());
+    updateProjectFlowSummary();
   });
 }
 

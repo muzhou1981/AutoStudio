@@ -1,6 +1,6 @@
 workflow_id: npu_operator_dev
 title: NPU 算子开发
-description: 可复用的 NPU 算子开发子图。规格确认后实现并测试，测试不通过时回到实现。
+description: 先写算子合同。确认 CCA 时，批准进入 CCA 子图，不通过则前往确认 AOM。确认 AOM 时，批准进入 AOM 子图，不通过则前往共同评审。两条都批准时先做 CCA 再做 AOM，然后共同评审。要改，先复制一份。
 builtin: true
 subgraph: true
 nodes:
@@ -9,31 +9,42 @@ nodes:
   name: 启动
   role: human
   returns_to: ''
-- id: spec
+- id: contract
   kind: activity
-  name: 算子规格
+  name: 算子合同
   role: architect
   returns_to: ''
-- id: confirm
+  inputs:
+  - human_request
+- id: confirm_cca
   kind: gate
-  name: 规格确认
+  name: 确认 CCA
   role: human
   returns_to: ''
   decision: approve
-- id: impl
-  kind: activity
-  name: 算子实现
-  role: developer
+  reject_to: confirm_aom
+- id: cca_path
+  kind: subgraph
+  name: NPU 算子 CCA
+  role: ''
   returns_to: ''
-- id: test
-  kind: activity
-  name: 算子测试
-  role: tester
-  returns_to: impl
-  max_loops: 2
+  subgraph_id: npu_operator_cca
+- id: confirm_aom
+  kind: gate
+  name: 确认 AOM
+  role: human
+  returns_to: ''
+  decision: approve
+  reject_to: review
+- id: aom_path
+  kind: subgraph
+  name: NPU 算子 AOM
+  role: ''
+  returns_to: ''
+  subgraph_id: npu_operator_aom
 - id: review
   kind: activity
-  name: 算子评审
+  name: 共同评审
   role: code_reviewer
   returns_to: ''
 - id: end

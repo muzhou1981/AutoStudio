@@ -18,6 +18,7 @@ def test_save_lists_and_deletes_a_draft(tmp_path, monkeypatch) -> None:
             "run_name": "草稿样本",
             "human_request": "先记下来",
             "node_tools": {"developer": {"skills": ["review"], "mcp": []}},
+            "role_models": {"developer": "composer-2", "qa": ""},
         },
     )
     assert saved.status_code == 200
@@ -25,6 +26,7 @@ def test_save_lists_and_deletes_a_draft(tmp_path, monkeypatch) -> None:
     assert body["run_name"] == "草稿样本"
     assert body["phase"] == "saved"
     assert body["node_tools"]["developer"]["skills"] == ["review"]
+    assert body["role_models"] == {"developer": "composer-2"}
 
     updated = client.put(
         "/api/runs/drafts",

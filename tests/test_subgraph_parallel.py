@@ -24,6 +24,16 @@ def test_builtin_subgraphs_are_listed_and_the_fullnet_calls_npu() -> None:
     assert listed["npu_operator_dev"]["builtin"] is True
     assert listed["npu_operator_dev"]["subgraph"] is True
     assert listed["npu_operator_dev"]["title"] == "NPU 算子开发"
+    assert listed["npu_operator_cca"]["builtin"] is True
+    assert listed["npu_operator_cca"]["subgraph"] is True
+    assert listed["npu_operator_aom"]["subgraph"] is True
+    parent = get_workflow("npu_operator_dev")["workflow"]
+    assert [node["subgraph_id"] for node in parent["nodes"] if node["kind"] == "subgraph"] == [
+        "npu_operator_cca",
+        "npu_operator_aom",
+    ]
+    assert next(node for node in parent["nodes"] if node["id"] == "confirm_cca")["reject_to"] == "confirm_aom"
+    assert next(node for node in parent["nodes"] if node["id"] == "confirm_aom")["reject_to"] == "review"
     fullnet = listed["llm_fullnet"]
     assert fullnet["builtin"] is True
     assert fullnet["subgraph"] is True
@@ -36,8 +46,10 @@ def test_builtin_subgraphs_are_listed_and_the_fullnet_calls_npu() -> None:
     _compiled, state = compile_for_project("llm_fullnet", checkpointer=MemorySaver())
     labels = [node["label"] for node in state["workflow_nodes"]]
     assert "整网适配" in labels
-    assert "算子甲 · 算子规格" in labels
-    assert "算子乙 · 算子实现" in labels
+    assert "算子甲 · 算子合同" in labels
+    assert "算子甲 · 分层验证" in labels
+    assert "算子乙 · 约束表" in labels
+    assert "算子乙 · 代表用例" in labels
     assert "集成验证" in labels
 
 

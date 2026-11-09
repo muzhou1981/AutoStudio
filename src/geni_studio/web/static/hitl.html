@@ -33,7 +33,7 @@
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css" />
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/utilities.css" />
   <link rel="stylesheet" href="/static/shared.css?v=20261109-roleicon" />
-  <link rel="stylesheet" href="/static/hitl.css?v=20261109-helpimg3" />
+  <link rel="stylesheet" href="/static/hitl.css?v=20261109-rolemodel" />
   <script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
 </head>
 <body>
@@ -115,9 +115,13 @@
                 <wa-icon name="plus" library="system"></wa-icon>
                 <span>新建</span>
               </a>
-              <a class="sidebar-link sidebar-sub" data-workflow-mode="open" href="/workflow#open">
+              <a class="sidebar-link sidebar-sub" data-workflow-mode="open" href="/workflow#edit">
                 <wa-icon name="file" library="system"></wa-icon>
-                <span>打开</span>
+                <span>编辑</span>
+              </a>
+              <a class="sidebar-link sidebar-sub" data-workflow-mode="import" href="/workflow#import">
+                <svg class="sidebar-svg" viewBox="0 0 512 512" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M288 32c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 242.7-73.4-73.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l128 128c12.5 12.5 32.8 12.5 45.3 0l128-128c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L288 274.7 288 32zM64 352c-35.3 0-64 28.7-64 64l0 32c0 35.3 28.7 64 64 64l384 0c35.3 0 64-28.7 64-64l0-32c0-35.3-28.7-64-64-64l-101.5 0-45.3 45.3c-25 25-65.5 25-90.5 0L165.5 352 64 352zm368 56a24 24 0 1 1 0 48 24 24 0 1 1 0-48z"/></svg>
+                <span>导入</span>
               </a>
               </div>
             </div>
@@ -239,6 +243,12 @@
           </div>
         </div>
         <div class="run-composer" id="region-prompt">
+          <div id="runRoleModels" class="run-role-models">
+            <p class="section-title">角色模型</p>
+            <p class="hint-block" id="roleModelHint">留空表示沿用工厂默认。这一轮的选择不影响其它 Run。</p>
+            <p class="hint-block" id="roleModelEmpty" hidden>先选择项目。</p>
+            <div id="roleModelList"></div>
+          </div>
           <div class="prompt-box" id="promptBox">
             <div id="attachList" class="attach-list" hidden></div>
             <wa-textarea id="req" label="描述本轮交付目标" rows="3" placeholder="例如：为 npu_operator 场景实现 Mul 算子，含单测与性能基线…"></wa-textarea>
@@ -286,13 +296,13 @@
       <div class="app-view" data-route="workflow">
         <main class="workspace-main" aria-label="流程">
           <p class="section-title" id="flowHeading">编排</p>
+          <input id="flowImport" type="file" accept=".yaml,.yml,text/yaml,text/x-yaml" hidden />
           <div id="flowOpen" hidden>
             <wa-select id="flowPick" label="选择流程" placeholder="选择流程"></wa-select>
             <div class="row-actions">
-              <wa-button id="btnOpenFlow" variant="brand">打开</wa-button>
               <wa-button id="btnCopyFlow" appearance="outlined" variant="neutral">复制</wa-button>
             </div>
-            <p class="hint-block" id="flowHint">先选择要打开的流程。</p>
+            <p class="hint-block" id="flowHint">先选择要编辑的流程。</p>
             <p class="hint-block" id="flowEmpty" hidden>还没有流程。</p>
             <div class="row-actions" id="flowEmptyAction" hidden>
               <wa-button id="btnFlowGoNew" appearance="outlined" variant="neutral">新建</wa-button>
@@ -301,12 +311,24 @@
           <div id="flowEditor" hidden>
             <div class="field-row flow-meta">
               <wa-input id="flowTitle" label="标题"></wa-input>
-              <wa-input id="flowDescription" label="说明"></wa-input>
             </div>
             <div class="row-actions" id="flowCreateRow">
               <wa-button id="btnCreateFlow" variant="brand" hidden>创建</wa-button>
             </div>
             <div id="flowWork" hidden>
+            <div class="flow-stage">
+            <div class="flow-scroll" id="flowScroll">
+              <div id="flowBoard" class="flow-board"></div>
+            </div>
+            <ol class="flow-column" id="flowColumn"></ol>
+            <wa-details class="raw" id="flowRaw" summary="原文 workflow.yaml" hidden>
+              <wa-textarea id="flowYaml" label="整份 YAML" rows="12" spellcheck="false"></wa-textarea>
+              <div class="row-actions">
+                <wa-button id="btnSaveFlowRaw" appearance="outlined" variant="neutral">用原文覆盖</wa-button>
+              </div>
+            </wa-details>
+            </div>
+            <div class="flow-composer">
             <div class="flow-add">
               <wa-select id="flowRole" label="角色"></wa-select>
               <wa-input id="flowActivityName" label="活动名" spellcheck="false"></wa-input>
@@ -322,19 +344,10 @@
               <wa-select id="flowInsertSubgraph" label="插入子图"></wa-select>
               <wa-button id="btnInsertSubgraph" appearance="outlined" variant="neutral">插入</wa-button>
             </div>
-            <div class="flow-scroll" id="flowScroll">
-              <div id="flowBoard" class="flow-board"></div>
-            </div>
-            <ol class="flow-column" id="flowColumn"></ol>
-            <wa-details class="raw" id="flowRaw" summary="原文 workflow.yaml" hidden>
-              <wa-textarea id="flowYaml" label="整份 YAML" rows="12" spellcheck="false"></wa-textarea>
-              <div class="row-actions">
-                <wa-button id="btnSaveFlowRaw" appearance="outlined" variant="neutral">用原文覆盖</wa-button>
-              </div>
-            </wa-details>
             <div class="row-actions" id="flowSaveRow">
               <wa-button id="btnCopyLoaded" appearance="outlined" variant="neutral" hidden>复制</wa-button>
               <wa-button id="btnSaveFlow" appearance="outlined" variant="neutral" hidden>保存</wa-button>
+            </div>
             </div>
             </div>
           </div>
@@ -347,6 +360,7 @@
             <h2>流程说明</h2>
           </div>
           <div class="inspect-body">
+          <wa-textarea id="flowDescription" label="说明" rows="6" hidden></wa-textarea>
           <div id="flowInspectMeta">
             <p class="hint-block" id="flowIdHint">标识按标题自动生成。中文标题会译成英文。创建后不再改变。</p>
             <p class="hint-block" id="flowIdLine" hidden></p>
@@ -545,12 +559,6 @@
               </div>
               <wa-input id="fieldRetries" label="开发重试上限" hint="空则沿用项目类型" type="number" min="0" step="1" inputmode="numeric"></wa-input>
             </div>
-            <div class="func-region" id="region-models">
-              <p class="section-title">角色模型</p>
-              <p class="hint-block" id="roleModelHint">留空表示沿用工厂默认。名单来自所选流程，选项来自当前后端。</p>
-              <p class="hint-block" id="roleModelEmpty" hidden>先选定流程。</p>
-              <div id="roleModelList"></div>
-            </div>
             <div class="row-actions" id="projectActions">
               <wa-button id="btnCreateProject" variant="brand">创建</wa-button>
               <wa-button id="btnSaveProject" appearance="outlined" variant="neutral" hidden>保存</wa-button>
@@ -651,15 +659,9 @@
               <img src="/static/help-overview.jpg?v=20261109" alt="GeniStudio 概览：项目经理居中协调，架构、前端、后端、测试和运维各就各位。" />
             </figure>
             <ul>
-              <li>GeniStudio 接收人的交付目标，按项目绑定的流程让各角色写出文档和代码，并在决策点停下来等人批复。</li>
-              <li>工厂自身和待开发项目分开。</li>
-              <li>左栏自上而下是项目、运行、流程、角色、配置和帮助。</li>
-              <li>项目决定这一轮用哪份流程、哪一种项目类型。</li>
-              <li>运行看这一轮走到哪。</li>
-              <li>流程编排活动和决策点。</li>
-              <li>角色页增加、修改和删除角色。</li>
-              <li>配置填写与具体项目无关的后端、工作区、飞书和环境。</li>
-              <li>它适合已经有明确流程和模板、需要 Agent 长时间运行的工作。不适合单次、小型任务。</li>
+              <li>GeniStudio 是一个流程驱动的自动化软件生产工场。</li>
+              <li>适合有成熟流程和交付件模板的规模化开发，不适合单次或不确定性、探索性软件开发。</li>
+              <li>可定制化程度高，包括但不限于角色、流程编排、运行时 Skill/MCP 配置、Agent 后端配置等。</li>
             </ul>
           </article>
           <article class="help-copy" data-help-article="architecture" hidden>
@@ -746,13 +748,13 @@
           </article>
           <article class="help-copy" data-help-article="guide" hidden>
             <ul>
-              <li>安装步骤写在仓库的 README。装好后打开这个 Web 页面。</li>
+              <li>安装步骤写在仓库的 README，完整说明在 docs/install.md。装好后打开这个 Web 页面。</li>
               <li>在「配置」的 Agent 里选择后端。想先熟悉界面，选 stub，它不调用 Cursor。</li>
               <li>要让角色真正工作时，后端选 cursor，并写入 Cursor API Key。密钥只保存，页面不回显。</li>
               <li>模型可以留空，留空时使用 Auto。写完后按「写入 .env」。</li>
               <li>工作区可以先空着。项目里填写了工作区时用项目的目录；都没填时，才用配置页的默认工作区。</li>
               <li>飞书可以以后再配。需要通知和在飞书里批复时，再填写飞书后端、Web 地址，以及默认通知群或通知人。</li>
-              <li>先准备流程。可以选内置的默认流程，也可以先在「流程」里新建或复制。</li>
+              <li>先准备流程。可以选内置的通用软件开发或自我改进，也可以先在「流程」里新建或复制。</li>
               <li>再新建项目并选定该流程。只写标题，标识会按标题生成。选择项目类型，并填写待开发项目的工作区。</li>
               <li>然后到「运行」。选定项目，填写交付目标，确认名称后启动。</li>
               <li>遇到决策点时，在待办里批准或驳回。批准后继续，驳回则这一轮结束。</li>
@@ -780,7 +782,7 @@
           </article>
           <article class="help-copy" data-help-article="workflow" hidden>
             <ul>
-              <li>可以新建或打开一份流程。新建只写标题，标识按标题生成。</li>
+              <li>可以新建、编辑或导入一份流程。新建只写标题，标识按标题生成。编辑时选中一份就载入，选择框保持可用。导入读取 workflow.yaml，内置标记不会带入。</li>
               <li>宽屏用泳道排列活动和决策点。右栏左缘可以拖动，改变右栏宽度。</li>
               <li>活动要写出输入和输出。每项输出要有模板。</li>
               <li>模板是服务进程能读取的本地文件，或一个 http、https 链接。</li>
@@ -1125,6 +1127,107 @@
       if (projectId) $("project").value = projectId;
     }
 
+    function roleModelsFromList() {
+      const models = {};
+      document.querySelectorAll("#roleModelList [data-role]").forEach((el) => {
+        const value = String(el.value || "").trim();
+        if (value) models[el.dataset.role] = value;
+      });
+      return models;
+    }
+
+    function runModelSelect(role, label, selected) {
+      const select = document.createElement("wa-select");
+      select.label = label;
+      select.dataset.role = role;
+      const blank = document.createElement("wa-option");
+      blank.value = "";
+      blank.textContent = "沿用工厂默认";
+      select.appendChild(blank);
+      const known = window.__backendModels || [];
+      known.forEach((item) => {
+        const option = document.createElement("wa-option");
+        option.value = item.id;
+        option.textContent = item.label || item.id;
+        select.appendChild(option);
+      });
+      if (selected && !known.some((item) => item.id === selected)) {
+        const option = document.createElement("wa-option");
+        option.value = selected;
+        option.textContent = selected;
+        select.appendChild(option);
+      }
+      select.value = selected || "";
+      select.addEventListener("change", () => {
+        if (ignoreRoleModelChange) return;
+        pendingRoleModels = roleModelsFromList();
+        const tid = $("thread").value.trim();
+        if (!tid) return;
+        fetch("/api/runs/" + encodeURIComponent(tid) + "/role-models", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role_models: pendingRoleModels }),
+        }).catch(() => {});
+      });
+      return select;
+    }
+
+    async function refreshRunRoleModels(saved, locked) {
+      const list = $("roleModelList");
+      const empty = $("roleModelEmpty");
+      if (!list) return;
+      const projectId = String($("project").value || "").trim();
+      const chosen = saved && typeof saved === "object" ? saved : {};
+      if (!projectId) {
+        list.replaceChildren();
+        if (empty) {
+          empty.hidden = false;
+          empty.textContent = "先选择项目。";
+        }
+        roleModelStamp = "";
+        return;
+      }
+      let profile = "";
+      try {
+        const form = await fetch("/api/config/projects/" + encodeURIComponent(projectId) + "/form").then((response) => response.json());
+        profile = String((form && form.profile_id) || "").trim();
+      } catch (_) {
+        profile = "";
+      }
+      if (!profile) {
+        list.replaceChildren();
+        if (empty) {
+          empty.hidden = false;
+          empty.textContent = "这个项目还没有流程。";
+        }
+        roleModelStamp = projectId;
+        return;
+      }
+      let roles = [];
+      try {
+        const data = await fetch("/api/workflows/" + encodeURIComponent(profile) + "/activity-roles").then((response) => response.json());
+        roles = (data && data.roles) || [];
+      } catch (_) {
+        roles = [];
+      }
+      const stamp = projectId + ":" + roles.map((role) => role.id).join(",") + ":" + JSON.stringify(chosen) + ":" + (locked ? "1" : "0");
+      if (stamp === roleModelStamp) return;
+      ignoreRoleModelChange = true;
+      list.replaceChildren();
+      roles.forEach((role) => {
+        const select = runModelSelect(role.id, role.label || role.id, chosen[role.id] || "");
+        select.disabled = Boolean(locked);
+        list.appendChild(select);
+      });
+      ignoreRoleModelChange = false;
+      pendingRoleModels = roleModelsFromList();
+      if (empty) {
+        empty.hidden = roles.length > 0;
+        empty.textContent = "这个流程里没有需要模型的角色。";
+      }
+      roleModelStamp = projectId + ":" + roles.map((role) => role.id).join(",") + ":" + JSON.stringify(pendingRoleModels) + ":" + (locked ? "1" : "0");
+    }
+
     function clearCurrentRun() {
       stopPoll();
       $("thread").value = "";
@@ -1138,7 +1241,10 @@
       syncStartButton("idle");
       syncStopButton("idle");
       pendingNodeTools = {};
+      pendingRoleModels = {};
+      roleModelStamp = "";
       clearAttachments();
+      refreshRunRoleModels({}, false);
       renderInspect(null);
       loadIdleRail();
     }
@@ -1172,12 +1278,15 @@
         }));
         renderAttachments();
         pendingNodeTools = data.node_tools || {};
+        pendingRoleModels = data.role_models || {};
+        roleModelStamp = "";
         syncUrlDraft(draftId);
         syncThreadChrome("");
         applyBoundRunName(null);
         syncStartButton("saved");
         syncStopButton("idle");
         await syncRunScenarioHint();
+        await refreshRunRoleModels(pendingRoleModels, false);
         await loadIdleRail();
         await loadRunList();
       } catch (_) {
@@ -1328,6 +1437,9 @@
     };
     let lastStatus = null;
     let pendingNodeTools = {};
+    let pendingRoleModels = {};
+    let roleModelStamp = "";
+    let ignoreRoleModelChange = false;
     let runToolCatalog = { skills: [], mcp: [], detail: "" };
     let statusKey = "";
     let pollTimer = null;
@@ -1802,12 +1914,20 @@
       if (returnFrom > currentIndex && currentIndex >= 0) {
         const from = points[returnFrom];
         const to = points[currentIndex];
-        const y = Math.max(8, Math.min(from.top, to.top) - 16);
-        add(sideLink(from, to), hot);
+        const low = Math.max(from.bottom, to.bottom) + 14;
+        add(roundedOrth(
+          [
+            { x: from.x, y: from.bottom + 1 },
+            { x: from.x, y: low },
+            { x: to.x, y: low },
+            { x: to.x, y: to.bottom + 1 },
+          ],
+          8
+        ), hot);
         const note = document.createElementNS("http://www.w3.org/2000/svg", "text");
         note.setAttribute("class", "swim-return");
         note.setAttribute("x", String((from.x + to.x) / 2));
-        note.setAttribute("y", String(y - 3));
+        note.setAttribute("y", String(low - 4));
         note.textContent = "退回";
         svg.appendChild(note);
       }
@@ -2611,6 +2731,10 @@
         }
         showError($("startError"), "");
         applyStatus(data);
+        const models = (data.values && data.values.role_models) || {};
+        pendingRoleModels = models;
+        const ended = data.phase === "completed" || data.phase === "rejected" || data.phase === "stopped";
+        refreshRunRoleModels(models, ended);
         applyBoundRunName(data);
         syncThreadChrome(tid, data.values && data.values.run_name);
         syncStartButton(data.phase);
@@ -2662,6 +2786,7 @@
         run_name: String($("runName").value || "").trim(),
         node_tools: pendingNodeTools,
         attachments: runAttachments.map((item) => ({ id: item.id, name: item.name, size: item.size })),
+        role_models: pendingRoleModels,
       };
       if (!body.project_id) {
         showError($("startError"), "先选择项目。");
@@ -2725,6 +2850,7 @@
         showRunSaved("");
         pendingNodeTools = {};
         clearAttachments();
+        roleModelStamp = "";
         await refresh();
       } catch (err) {
         if (!$("thread").value.trim() || $("thread").value.trim() === tid) {
@@ -2917,6 +3043,7 @@
             human_request: $("req").value.trim(),
             node_tools: pendingNodeTools,
             attachments: runAttachments.map((item) => ({ id: item.id, name: item.name, size: item.size })),
+            role_models: pendingRoleModels,
           }),
         });
         const data = await r.json();
@@ -2930,6 +3057,8 @@
         runNameTouched = true;
         if (data.run_name) $("runName").value = data.run_name;
         pendingNodeTools = data.node_tools || {};
+        pendingRoleModels = data.role_models || pendingRoleModels;
+        roleModelStamp = "";
         if (data.attachments) {
           runAttachments = data.attachments.map((item) => ({
             id: item.id,
@@ -2963,7 +3092,10 @@
       syncUrlDraft("");
       showRunSaved("");
       pendingNodeTools = {};
+      pendingRoleModels = {};
+      roleModelStamp = "";
       clearAttachments();
+      refreshRunRoleModels({}, false);
       syncThreadChrome("");
       stopPoll();
       runNameTouched = false;
@@ -3009,8 +3141,11 @@
         return;
       }
       pendingNodeTools = {};
+      pendingRoleModels = {};
+      roleModelStamp = "";
       loadedDraftProject = "";
       syncRunScenarioHint();
+      refreshRunRoleModels({}, false);
       if (!$("thread").value.trim()) {
         runNameTouched = false;
         fillRunNameSuggestion();
@@ -3035,6 +3170,7 @@
           openDraft(draft);
         } else {
           loadIdleRail();
+          refreshRunRoleModels({}, false);
           loadRunList();
           syncStartButton("idle");
         }
@@ -3337,8 +3473,8 @@
       <wa-callout id="dirPickerError" variant="danger" hidden></wa-callout>
     </div>
   </div>
-  <script src="/static/config.js?v=20261109-m13"></script>
-  <script src="/static/workflow.js?v=20261109-tools2"></script>
+  <script src="/static/config.js?v=20261109-rolemodel"></script>
+  <script src="/static/workflow.js?v=20261109-edit"></script>
   <script src="/static/role.js?v=20261109-role"></script>
 </body>
 </html>

@@ -1,0 +1,37 @@
+workflow_id: npu_operator_aom
+title: NPU 算子 AOM
+description: AOM 通路。先对齐约束表，再接入用例生成、CheckOp 和唯一登记。轻量验证没过就回到接入实现。通过后再编一个代表用例。要改，先复制一份。
+builtin: true
+subgraph: true
+nodes:
+- id: start
+  kind: start
+  name: 启动
+  role: human
+  returns_to: ''
+- id: constraints
+  kind: activity
+  name: 约束表
+  role: architect
+  returns_to: ''
+- id: wire_up
+  kind: activity
+  name: 接入实现
+  role: developer
+  returns_to: ''
+- id: light_check
+  kind: activity
+  name: 轻量验证
+  role: tester
+  returns_to: wire_up
+  max_loops: 3
+- id: sample_case
+  kind: activity
+  name: 代表用例
+  role: developer
+  returns_to: ''
+- id: end
+  kind: end
+  name: 结束
+  role: human
+  returns_to: ''

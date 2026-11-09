@@ -177,7 +177,20 @@ class GraphRunService:
         from geni_studio.workspace.policy import exclusive_write
 
         write_lock = exclusive_write(lock_root) if lock_root is not None else nullcontext()
+        models: dict[str, str] = {}
+        if isinstance(payload, dict) and isinstance(payload.get("role_models"), dict):
+            models = payload["role_models"]
+        else:
+            try:
+                stored = self.status(thread_id).values.get("role_models")
+            except HitlError:
+                stored = {}
+            if isinstance(stored, dict):
+                models = stored
+        from geni_studio.backends.runner import reset_role_models, set_role_models
+
         project_token = set_project_id(project_id)
+        role_token = set_role_models(models)
         cost_token = begin_cost_log()
         try:
             with write_lock, ctx:
@@ -185,6 +198,7 @@ class GraphRunService:
         finally:
             lines = take_cost_lines()
             end_cost_log(cost_token)
+            reset_role_models(role_token)
             reset_project_id(project_token)
         self._append_costs(thread_id, lines)
 
@@ -294,6 +308,7 @@ class GraphRunService:
         run_name: str = "",
         node_tools: dict[str, dict[str, list[str]]] | None = None,
         attachment_ids: list[str] | None = None,
+        role_models: dict[str, str] | None = None,
     ) -> RunStatus:
         from geni_studio.config.context import build_run_context, factory_root
         from geni_studio.config.precheck import precheck_scenario_materials
@@ -334,6 +349,8 @@ class GraphRunService:
             initial["workspace_path"] = str(layout.worktree)
         if node_tools:
             initial["node_tools"] = node_tools
+        if role_models:
+            initial["role_models"] = role_models
         if attachment_ids:
             from pathlib import Path
 
@@ -367,6 +384,14 @@ class GraphRunService:
         else:
             chosen.pop(node_id, None)
         self._bound(thread_id).update_state(self._config(thread_id), {"node_tools": chosen})
+        return self._done(thread_id)
+
+    def set_role_models(self, thread_id: str, role_models: dict[str, str]) -> RunStatus:
+        """记下这一轮各角色选用的模型。"""
+        st = self.status(thread_id)
+        if st.phase in ("completed", "rejected", "stopped"):
+            raise HitlError("这一轮已经结束。")
+        self._bound(thread_id).update_state(self._config(thread_id), {"role_models": role_models})
         return self._done(thread_id)
 
     def advance_until_blocked(self, thread_id: str) -> RunStatus:

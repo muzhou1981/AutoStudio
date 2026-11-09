@@ -13,11 +13,13 @@ from geni_studio.config.workflow_defs import (
     copy_workflow,
     create_workflow,
     get_workflow,
+    import_workflow,
     list_role_lanes,
     list_workflows,
     save_as_subgraph,
     save_workflow,
     save_workflow_yaml,
+    workflow_activity_roles,
 )
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -37,6 +39,10 @@ class SaveWorkflowBody(BaseModel):
 
 
 class SaveWorkflowYamlBody(BaseModel):
+    yaml: str = ""
+
+
+class ImportWorkflowBody(BaseModel):
     yaml: str = ""
 
 
@@ -83,6 +89,14 @@ def api_create_workflow(body: CreateWorkflowBody) -> dict:
         raise _http(exc) from exc
 
 
+@router.post("/import")
+def api_import_workflow(body: ImportWorkflowBody) -> dict:
+    try:
+        return import_workflow(body.yaml)
+    except ConfigError as exc:
+        raise _http(exc) from exc
+
+
 @router.post("/{workflow_id}/as-subgraph")
 def api_save_as_subgraph(workflow_id: str, body: SaveSubgraphBody) -> dict:
     try:
@@ -109,6 +123,14 @@ def api_copy_workflow(workflow_id: str, body: CopyWorkflowBody) -> dict:
     )
     try:
         return copy_workflow(workflow_id, new_id, title)
+    except ConfigError as exc:
+        raise _http(exc) from exc
+
+
+@router.get("/{workflow_id}/activity-roles")
+def api_workflow_activity_roles(workflow_id: str) -> dict:
+    try:
+        return {"roles": workflow_activity_roles(workflow_id)}
     except ConfigError as exc:
         raise _http(exc) from exc
 

@@ -2,10 +2,30 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
+
 from geni_studio.backends.base import StubBackend, get_default_backend
 from geni_studio.backends.cost import current_project_id, note_cost
 from geni_studio.config.context import ConfigError, factory_root, load_project_config
 from geni_studio.roles.loader import load_role_system_prompt
+
+_role_models: ContextVar[dict[str, str] | None] = ContextVar("geni_studio_role_models", default=None)
+
+
+def set_role_models(models: dict | None) -> object:
+    clean: dict[str, str] = {}
+    if isinstance(models, dict):
+        for role, model in models.items():
+            key = str(role).strip()
+            value = str(model or "").strip()
+            if key and value:
+                clean[key] = value
+    return _role_models.set(clean)
+
+
+def reset_role_models(token: object) -> None:
+    _role_models.reset(token)  # type: ignore[arg-type]
+
 
 ROLE_CAPABILITIES: dict[str, frozenset[str]] = {
     "developer": frozenset({"file_write", "shell"}),
@@ -33,6 +53,9 @@ def _role_config(role_name: str, project_id: str = "") -> dict:
 
 
 def model_for_role(role_name: str, project_id: str = "") -> str | None:
+    chosen = str((_role_models.get() or {}).get(role_name) or "").strip()
+    if chosen:
+        return chosen
     model = str(_role_config(role_name, project_id).get("model") or "").strip()
     return model or None
 

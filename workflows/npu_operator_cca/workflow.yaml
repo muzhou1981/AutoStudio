@@ -1,0 +1,27 @@
+workflow_id: npu_operator_cca
+title: NPU 算子 CCA
+description: CCA 通路。做最小实现闭包，再按静态检查、独立编译、runtime、libop.so、SIM 或 ASIC 分层验证。低层没过就回到实现，不把产物目录当成板卡已跑通。要改，先复制一份。
+builtin: true
+subgraph: true
+nodes:
+- id: start
+  kind: start
+  name: 启动
+  role: human
+  returns_to: ''
+- id: impl_closure
+  kind: activity
+  name: 实现闭包
+  role: developer
+  returns_to: ''
+- id: layered_check
+  kind: activity
+  name: 分层验证
+  role: tester
+  returns_to: impl_closure
+  max_loops: 3
+- id: end
+  kind: end
+  name: 结束
+  role: human
+  returns_to: ''

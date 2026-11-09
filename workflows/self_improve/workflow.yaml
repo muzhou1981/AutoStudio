@@ -1,0 +1,68 @@
+workflow_id: self_improve
+title: 自我改进
+description: 日常驱动 Agent 改 GeniStudio 自身。先听清改动并等人确认，再改代码、自行核对，人看过结果后才入库。要改，先复制一份。
+builtin: true
+nodes:
+- id: start
+  kind: start
+  name: 启动
+  role: human
+  returns_to: ''
+- id: hear
+  kind: activity
+  name: 听清改动
+  role: project_manager
+  returns_to: ''
+  inputs:
+  - human_request
+- id: confirm_change
+  kind: gate
+  name: 确认改动
+  role: human
+  returns_to: ''
+  decision: approve
+  reject_to: hear
+- id: change_code
+  kind: activity
+  name: 改代码
+  role: developer
+  returns_to: ''
+  inputs:
+  - requirement_spec
+- id: self_check
+  kind: activity
+  name: 自行核对
+  role: tester
+  returns_to: change_code
+  max_loops: 3
+  inputs:
+  - requirement_spec
+  - code_change
+- id: review
+  kind: gate
+  name: 看结果
+  role: human
+  returns_to: ''
+  decision: approve
+  reject_to: change_code
+- id: handoff
+  kind: activity
+  name: 写交付说明
+  role: project_manager
+  returns_to: ''
+  inputs:
+  - requirement_spec
+  - code_change
+  - test_report
+- id: confirm_commit
+  kind: gate
+  name: 确认入库
+  role: human
+  returns_to: ''
+  decision: approve
+  reject_to: change_code
+- id: end
+  kind: end
+  name: 结束
+  role: human
+  returns_to: ''

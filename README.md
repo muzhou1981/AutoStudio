@@ -34,11 +34,11 @@ geni_studio/
 
 ## 安装
 
-在仓库根目录完成下面四步，然后打开 Web 页面。密钥只写在本机的 `.env`，不要提交。
+完整步骤、核对命令和给 Agent 的执行契约见 [`docs/install.md`](docs/install.md)。在仓库根目录通常是这四步，然后打开 Web 页面。密钥只写在本机的 `.env`，不要提交。
 
 1. 用 Python 3.12 创建虚拟环境：`uv venv --python 3.12`
 2. 安装本仓库及开发依赖：`uv pip install -e ".[cursor,dev]"`
-3. 复制环境文件：`cp .env.example .env`
+3. 复制环境文件：`cp .env.example .env`（已有 `.env` 时不要覆盖）
 4. 启动 Web 页面：`geni-studio-web`。浏览器打开 `http://127.0.0.1:8765/`
 
 只熟悉界面、不调用 Cursor 时，在配置页把后端选成 stub，不必填写密钥。

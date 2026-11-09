@@ -427,7 +427,7 @@ def _flatten_node(
         from geni_studio.config.workflow_defs import uses_default_engine
 
         if uses_default_engine(subgraph_id, root):
-            raise ConfigError("默认流程不能当作子图插入。")
+            raise ConfigError("通用软件开发不能当作子图插入。")
         loaded = get_workflow(subgraph_id, root=root)
         inner_prefix = f"{prefix}{node['id']}__"
         inner: list[dict[str, Any]] = []
