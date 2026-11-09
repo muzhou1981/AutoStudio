@@ -1,5 +1,9 @@
 # GeniStudio
 
+<p align="center">
+  <img src="src/geni_studio/web/static/help-overview.jpg" alt="GeniStudio：项目经理居中协调，架构、前端、后端、测试和运维各就各位。" width="1024" />
+</p>
+
 AI 软件工厂：接收人类需求，由项目经理、架构师、程序员、测试工程师、QA、财务 等角色 Agent 在工作流程约束下协作，在给定的预算范围内产出经过验证的软件；每轮任务结束后复盘并提出改进提案。
 
 需求与决策见 [`docs/requirements.md`](docs/requirements.md)。
