@@ -1,7 +1,8 @@
 workflow_id: self_improve
 title: 自我改进
-description: 日常驱动 Agent 改 GeniStudio 自身。先听清改动并等人确认，再改代码、自行核对，人看过结果后才入库。要改，先复制一份。
+description: 日常驱动 Agent 改 GeniStudio 自身。直接在目标仓库当前检出的分支上修改，不另建工作树。先听清改动并等人确认，再改代码、自行核对。人确认入库后，由程序员在当前分支提交。要改，先复制一份。
 builtin: true
+workspace: current_branch
 nodes:
 - id: start
   kind: start
@@ -61,6 +62,12 @@ nodes:
   returns_to: ''
   decision: approve
   reject_to: change_code
+- id: land_commit
+  kind: activity
+  name: 提交入库
+  role: developer
+  returns_to: ''
+  commits_on_branch: true
 - id: end
   kind: end
   name: 结束

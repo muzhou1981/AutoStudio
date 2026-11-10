@@ -68,7 +68,7 @@
       </aside>
 
       <main id="config-main" class="workspace-main" aria-label="配置">
-        <div class="composer-block">
+        <div class="composer-block config-form-half">
           <section aria-labelledby="projectHeading">
             <p class="section-title" id="projectHeading">项目</p>
             <p class="panel-lead">先选项目类型和开关，再填单行。整份 YAML 在文末的原文里。</p>
@@ -128,16 +128,22 @@
 
           <hr class="main-divider" />
 
-          <section aria-labelledby="runtimeHeading">
+          <section class="config-form-half" aria-labelledby="runtimeHeading">
             <p class="section-title" id="runtimeHeading">运行配置</p>
-            <p class="panel-lead">写入工厂根目录的 .env。API Key 只保存，页面不回显。</p>
             <wa-select id="backendPick" label="后端" value="stub">
-              <wa-option value="stub">stub，不调用 Cursor</wa-option>
-              <wa-option value="cursor">cursor，Cursor SDK</wa-option>
+              <wa-option value="stub">stub</wa-option>
+              <wa-option value="cursor">Cursor SDK</wa-option>
+              <wa-option value="codex">Codex SDK</wa-option>
             </wa-select>
-            <wa-input id="modelInput" label="模型" hint="留空使用 Auto" placeholder="留空即 Auto"></wa-input>
-            <wa-input id="targetInput" label="默认工作区" hint="项目未填工作区时使用" placeholder="待开发仓库的绝对路径，可空"></wa-input>
-            <wa-input id="apiKeyInput" label="Cursor API Key" hint="不改就留空" type="password" placeholder="只写入 .env"></wa-input>
+            <div class="config-field-api-key">
+              <label class="config-api-key-label" id="apiKeyFieldLabel" for="apiKeyInput">API Key</label>
+              <div class="config-api-key-row">
+                <wa-input id="apiKeyInput" class="config-api-key-readonly" label="" hint="stub 不调用外部模型，无需填写。" type="text" readonly disabled></wa-input>
+                <wa-button id="btnDeleteApiKey" appearance="outlined" variant="danger" size="s" hidden>删除</wa-button>
+              </div>
+              <wa-button id="btnAddApiKey" appearance="outlined" variant="neutral" hidden>添加密钥</wa-button>
+            </div>
+            <wa-select id="modelPick" label="默认模型" placeholder="后端默认"></wa-select>
             <wa-select id="larkBackend" label="飞书后端" value="lark_cli">
               <wa-option value="lark_cli">lark-cli</wa-option>
               <wa-option value="env_bot">应用凭据</wa-option>
@@ -187,7 +193,19 @@
       </aside>
     </div>
   </div>
+  <div id="apiKeyDialog" class="dir-picker" hidden>
+    <div class="dir-picker-card" role="dialog" aria-modal="true" aria-labelledby="apiKeyDialogTitle">
+      <p class="section-title" id="apiKeyDialogTitle">添加 API Key</p>
+      <wa-input id="apiKeyDialogInput" label="API Key" type="password" placeholder="粘贴密钥"></wa-input>
+      <wa-callout id="apiKeyDialogError" variant="danger" hidden></wa-callout>
+      <div class="row-actions">
+        <wa-button id="btnApiKeyDialogSave" variant="brand">保存</wa-button>
+        <wa-button id="btnApiKeyDialogCancel" appearance="outlined" variant="neutral">取消</wa-button>
+      </div>
+    </div>
+  </div>
   <wa-button id="themeToggle" class="theme-fab" appearance="filled" variant="neutral" size="s" aria-label="切换浅色与深色主题">夜晚</wa-button>
-  <script src="/static/config.js"></script>
+  <script src="/static/api-utils.js?v=20261110-web-ui"></script>
+  <script src="/static/config.js?v=20261110-runtime-rebase"></script>
 </body>
 </html>

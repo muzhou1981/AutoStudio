@@ -159,9 +159,9 @@ def test_pause_during_first_node_keeps_the_round(svc: GraphRunService, monkeypat
     monkeypatch.setattr("geni_studio.backends.runner.invoke_role", wrapped)
     st = svc.start(human_request="pause", scenario_key="npu_operator")
     assert st.phase == "paused"
-    assert st.next_nodes == ("project_manager_draft",)
+    assert st.next_nodes == ("pm_clarification_check",)
     assert st.awaiting_human is None
-    assert not st.values.get("requirement_spec")
+    assert st.values.get("requirement_spec")  # 当前节点已结束，结果必须保留。
     assert st.values.get("run_stopped") is not True
     rail = {cell["id"]: cell["state"] for cell in svc.status_dict(st.thread_id)["rail"]["cells"]}
     assert rail["project_manager_draft"] == "paused"

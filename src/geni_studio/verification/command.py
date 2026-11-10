@@ -25,9 +25,26 @@ class TestCommandResult:
     transcript: str
 
 
+def verified_report(state: dict, report: str, simulated_status: str = "pass") -> tuple[str, str]:
+    from geni_studio.backends.base import StubBackend
+    from geni_studio.backends.runner import backend_for_role
+
+    try:
+        result = run_test_command(state)
+    except (TestCommandError, subprocess.TimeoutExpired, OSError, ValueError) as exc:
+        return f"{report}\n\n## 测试命令\n执行失败：{type(exc).__name__}", "fail"
+    if result is not None:
+        return f"{report}\n\n{result.transcript}", "pass" if result.returncode == 0 else "fail"
+    if isinstance(backend_for_role("tester"), StubBackend):
+        return f"{report}\n\n模拟验证（stub），未执行测试命令。", simulated_status
+    return f"{report}\n\n未配置验证命令，缺少机器验证证据。", "fail"
+
+
 def resolve_test_command(state: dict) -> list[str] | None:
-    raw = str(state.get("test_command") or os.environ.get("GENI_STUDIO_TEST_COMMAND") or "").strip()
-    if not raw:
+    frozen = state.get("config_snapshot_effective")
+    default = frozen.get("_test_command", "") if isinstance(frozen, dict) else os.environ.get("GENI_STUDIO_TEST_COMMAND")
+    raw = str(state.get("test_command") or default or "").strip()
+    if not raw and not isinstance(frozen, dict):
         raw = _command_from_project(str(state.get("project_id") or current_project_id()))
     if not raw:
         return None

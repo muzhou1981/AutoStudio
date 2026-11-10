@@ -9,10 +9,13 @@ from pathlib import Path
 from geni_studio.config.context import factory_root
 from geni_studio.config.env_loader import apply_env_file
 
-_SECRET_KEYS = {"CURSOR_API_KEY"}
+_SECRET_KEYS = {"CURSOR_API_KEY", "OPENAI_API_KEY"}
 _ALLOWED = {
     "CURSOR_API_KEY",
+    "OPENAI_API_KEY",
     "GENI_STUDIO_CURSOR_MODEL",
+    "GENI_STUDIO_CODEX_MODEL",
+    "GENI_STUDIO_DEFAULT_MODEL",
     "GENI_STUDIO_BACKEND",
     "GENI_STUDIO_TARGET_ROOT",
     "GENI_STUDIO_LARK_BACKEND",

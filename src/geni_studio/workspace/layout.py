@@ -51,10 +51,6 @@ def workspace_config_error(raw: str) -> str | None:
     if not text:
         return None
     path = _expand_workspace(text)
-    if path == factory_root().resolve() and os.environ.get(
-        "GENI_STUDIO_ALLOW_FACTORY_TARGET", ""
-    ).strip().lower() not in ("1", "true", "yes"):
-        return "工作区不能填工厂仓库本身。"
     if path.is_file():
         return "工作区要填目录，不能是文件。"
     if path.exists() and any(path.iterdir()) and not _is_git_repo(path):
@@ -68,23 +64,35 @@ class RunLayout:
     dot_dir: Path
     worktree: Path
     run_dir: Path
+    base_branch: str = ""
 
 
-def prepare_run_layout(target_root: Path, thread_id: str) -> RunLayout:
+def prepare_run_layout(
+    target_root: Path,
+    thread_id: str,
+    *,
+    on_current_branch: bool = False,
+) -> RunLayout:
     target_root = target_root.resolve()
-    if target_root == factory_root().resolve() and os.environ.get(
-        "GENI_STUDIO_ALLOW_FACTORY_TARGET", ""
-    ).strip().lower() not in ("1", "true", "yes"):
-        raise WorkspaceError(
-            "目标目录是工厂仓库。递归改进自身时请设置 GENI_STUDIO_ALLOW_FACTORY_TARGET=1，"
-            "改动只进入 .geni_studio/worktrees。"
-        )
     target_root.mkdir(parents=True, exist_ok=True)
     _ensure_git_repo(target_root)
     dot = target_root / ".geni_studio"
     dot.mkdir(parents=True, exist_ok=True)
     (dot / "runs").mkdir(parents=True, exist_ok=True)
     _ensure_gitignore(target_root)
+    run_dir = dot / "runs" / thread_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    if on_current_branch:
+        branch = _branch_name(target_root)
+        (run_dir / "base_branch.txt").write_text(branch + "\n", encoding="utf-8")
+        (run_dir / "worktree.txt").write_text(os.fspath(target_root) + "\n", encoding="utf-8")
+        return RunLayout(
+            target_root=target_root,
+            dot_dir=dot,
+            worktree=target_root,
+            run_dir=run_dir,
+            base_branch=branch,
+        )
     worktree = dot / "worktrees" / thread_id
     if not worktree.exists():
         branch = f"geni-studio/{thread_id}"
@@ -96,10 +104,154 @@ def prepare_run_layout(target_root: Path, thread_id: str) -> RunLayout:
         )
         if proc.returncode != 0:
             raise WorkspaceError((proc.stderr or proc.stdout or "git worktree add 失败").strip())
-    run_dir = dot / "runs" / thread_id
-    run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "worktree.txt").write_text(os.fspath(worktree) + "\n", encoding="utf-8")
     return RunLayout(target_root=target_root, dot_dir=dot, worktree=worktree, run_dir=run_dir)
+
+
+def workspace_lock_root(workspace_path: str) -> Path | None:
+    """本轮可写目录对应的目标仓库。当前分支模式的工作区就是仓库根。"""
+    if not workspace_path.strip():
+        return None
+    path = Path(workspace_path)
+    if path.parent.name == "worktrees" and path.parent.parent.name == ".geni_studio":
+        return path.parent.parent.parent
+    if (path / ".geni_studio").is_dir():
+        return path
+    return None
+
+
+def run_dir_for_workspace(workspace_path: str, thread_id: str) -> Path | None:
+    """产物目录。工作树在 `.geni_studio/worktrees` 下；当前分支模式在仓库根。"""
+    if not workspace_path.strip() or not thread_id.strip():
+        return None
+    path = Path(workspace_path)
+    if path.parent.name == "worktrees" and path.parent.parent.name == ".geni_studio":
+        return path.parent.parent / "runs" / thread_id
+    dot = path / ".geni_studio"
+    if dot.is_dir():
+        return dot / "runs" / thread_id
+    return None
+
+
+def commit_current_branch(workspace_path: str, base_branch: str, summary: str) -> str:
+    """程序员在开工时的当前分支提交尚未提交的改动。不推送远端。"""
+    path = Path(workspace_path)
+    if not workspace_path.strip() or not _is_git_repo(path):
+        raise WorkspaceError("工作区不是 git 仓库，不能提交。")
+    expected = base_branch.strip()
+    if not expected:
+        raise WorkspaceError("这一轮没有记录开工分支，不能提交。")
+    current = _branch_name(path)
+    if current != expected:
+        raise WorkspaceError(f"当前分支是 {current}，开工时是 {expected}。拒绝提交。")
+    if (path / ".git" / "MERGE_HEAD").is_file():
+        raise WorkspaceError("目标仓库已有未完成的合并，不能提交。")
+    if not _user_status(path):
+        return f"分支 {current} 没有未提交的改动，未创建新的提交。"
+    add = subprocess.run(
+        ["git", "-C", os.fspath(path), "add", "-A"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if add.returncode != 0:
+        raise WorkspaceError((add.stderr or add.stdout or "git add 失败").strip())
+    reset = subprocess.run(
+        ["git", "-C", os.fspath(path), "reset", "-q", "--", ".geni_studio"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if reset.returncode != 0:
+        raise WorkspaceError((reset.stderr or reset.stdout or "无法排除工厂运行目录。").strip())
+    staged = subprocess.run(
+        ["git", "-C", os.fspath(path), "diff", "--cached", "--name-only"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if staged.returncode != 0:
+        raise WorkspaceError((staged.stderr or staged.stdout or "无法读取暂存内容。").strip())
+    if not staged.stdout.strip():
+        return f"分支 {current} 没有未提交的改动，未创建新的提交。"
+    message = f"入库：{_commit_subject(summary)}\n\n人类已确认入库。程序员在当前分支提交本轮改动。\n"
+    proc = subprocess.run(
+        ["git", "-C", os.fspath(path), "commit", "-m", message],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_commit_env(path),
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "git commit 失败").strip()
+        raise WorkspaceError(detail)
+    sha = subprocess.run(
+        ["git", "-C", os.fspath(path), "rev-parse", "--short", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    short = sha.stdout.strip() or "HEAD"
+    return f"已由程序员在分支 {current} 提交 {short}。"
+
+
+def _branch_name(path: Path) -> str:
+    proc = subprocess.run(
+        ["git", "-C", os.fspath(path), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    name = proc.stdout.strip()
+    if proc.returncode != 0 or not name:
+        raise WorkspaceError((proc.stderr or proc.stdout or "无法读取当前分支。").strip())
+    if name == "HEAD":
+        raise WorkspaceError("当前是分离头指针，自我改进需要一个分支。")
+    return name
+
+
+def _status_porcelain(path: Path) -> str:
+    proc = subprocess.run(
+        ["git", "-C", os.fspath(path), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise WorkspaceError((proc.stderr or proc.stdout or "无法读取工作区状态。").strip())
+    return proc.stdout.strip()
+
+
+def _commit_subject(summary: str) -> str:
+    text = " ".join(str(summary or "").split())
+    if not text:
+        text = "本轮已批准的改动"
+    if len(text) > 50:
+        text = text[:50].rstrip() + "…"
+    return text
+
+
+def _commit_env(path: Path) -> dict[str, str]:
+    env = dict(os.environ)
+    if not _git_config(path, "user.name"):
+        env.setdefault("GIT_AUTHOR_NAME", "GeniStudio")
+        env.setdefault("GIT_COMMITTER_NAME", "GeniStudio")
+    if not _git_config(path, "user.email"):
+        env.setdefault("GIT_AUTHOR_EMAIL", "geni_studio@local")
+        env.setdefault("GIT_COMMITTER_EMAIL", "geni_studio@local")
+    return env
+
+
+def _git_config(path: Path, key: str) -> str:
+    proc = subprocess.run(
+        ["git", "-C", os.fspath(path), "config", key],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.strip()
 
 
 def _is_git_repo(path: Path) -> bool:
@@ -133,17 +285,37 @@ def _has_commit(path: Path) -> bool:
     return proc.returncode == 0
 
 
+def _ignores_geni_studio(text: str) -> bool:
+    for raw in text.splitlines():
+        item = raw.strip()
+        if not item or item.startswith("#"):
+            continue
+        if item in {".geni_studio", ".geni_studio/"}:
+            return True
+    return False
+
+
+def _user_status(path: Path) -> str:
+    lines: list[str] = []
+    for line in _status_porcelain(path).splitlines():
+        entry = line[3:].strip().strip('"')
+        if entry == ".geni_studio" or entry.startswith(".geni_studio/"):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _ensure_gitignore(path: Path) -> None:
     """已有提交的仓库写入 .git/info/exclude，避免改当前分支上的 .gitignore。"""
     line = ".geni_studio/\n"
     ignore = path / ".gitignore"
     exclude = path / ".git" / "info" / "exclude"
     tracked = ignore.read_text(encoding="utf-8") if ignore.is_file() else ""
-    if ".geni_studio/" in tracked:
+    if _ignores_geni_studio(tracked):
         return
     if _has_commit(path) and exclude.parent.is_dir():
         current = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
-        if ".geni_studio/" in current:
+        if _ignores_geni_studio(current):
             return
         with exclude.open("a", encoding="utf-8") as handle:
             if current and not current.endswith("\n"):
@@ -153,15 +325,12 @@ def _ensure_gitignore(path: Path) -> None:
     with ignore.open("a", encoding="utf-8") as handle:
         if ignore.stat().st_size and not tracked.endswith("\n"):
             handle.write("\n")
-        handle.write(".geni_studio/worktrees/\n")
+        handle.write(line)
 
 
 def _initial_commit(path: Path) -> None:
     _ensure_gitignore(path)
-    keep = path / ".geni_studio" / ".gitkeep"
-    keep.parent.mkdir(parents=True, exist_ok=True)
-    keep.touch()
-    subprocess.run(["git", "-C", os.fspath(path), "add", ".gitignore", ".geni_studio/.gitkeep"], check=True)
+    subprocess.run(["git", "-C", os.fspath(path), "add", ".gitignore"], check=True)
     subprocess.run(
         ["git", "-C", os.fspath(path), "commit", "-q", "-m", "init GeniStudio target"],
         check=True,

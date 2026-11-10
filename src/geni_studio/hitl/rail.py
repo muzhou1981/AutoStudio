@@ -232,10 +232,10 @@ def _current_node(
             return stopped_at
         return None
     if phase in {"paused", "interrupted"}:
-        if paused_at in known:
-            return paused_at
-        if next_nodes and next_nodes[0] in known:
-            return next_nodes[0]
+        for candidate in (paused_at, *next_nodes):
+            mapped = _INTERNAL_TO_RAIL.get(candidate, candidate)
+            if mapped in known:
+                return mapped
         return None
     if phase in {"idle", ""}:
         return start_id

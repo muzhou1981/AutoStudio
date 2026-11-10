@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 cursor = ["cursor-sdk"]
+codex = ["openai-codex==0.167.0"]
 dev = ["langgraph-cli[inmem]", "pytest>=8.0", "ruff>=0.5", "httpx>=0.27"]
 
 [project.scripts]

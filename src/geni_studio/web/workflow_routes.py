@@ -12,6 +12,7 @@ from geni_studio.config.identifiers import allocate_identifier
 from geni_studio.config.workflow_defs import (
     copy_workflow,
     create_workflow,
+    delete_workflow,
     get_workflow,
     import_workflow,
     list_role_lanes,
@@ -157,3 +158,12 @@ def api_save_workflow_yaml(workflow_id: str, body: SaveWorkflowYamlBody) -> dict
         return save_workflow_yaml(workflow_id, body.yaml)
     except ConfigError as exc:
         raise _http(exc) from exc
+
+
+@router.delete("/{workflow_id}")
+def api_delete_workflow(workflow_id: str) -> dict:
+    try:
+        delete_workflow(workflow_id)
+    except ConfigError as exc:
+        raise _http(exc) from exc
+    return {"workflow_id": workflow_id, "deleted": True}

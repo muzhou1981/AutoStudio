@@ -5,6 +5,28 @@ tools/lark_cli/api.txt
 tools/lark_cli/oauth-qrcode.png
 __pycache__/
 .langgraph_api/
+.geni_studio/
 runs/*
 !runs/.gitkeep
 workspaces/
+
+# 本地自建项目（仓库仅保留示例；Web/CLI 创建的配置落在此目录）
+projects/*
+!projects/README.md
+!projects/_example/
+!projects/_example/**
+
+# 本地自建流程（仓库仅保留内置 workflow；编排页「另存为」生成在此目录）
+workflows/*
+!workflows/factory_default/
+!workflows/factory_default/**
+!workflows/llm_fullnet/
+!workflows/llm_fullnet/**
+!workflows/npu_operator_aom/
+!workflows/npu_operator_aom/**
+!workflows/npu_operator_cca/
+!workflows/npu_operator_cca/**
+!workflows/npu_operator_dev/
+!workflows/npu_operator_dev/**
+!workflows/self_improve/
+!workflows/self_improve/**

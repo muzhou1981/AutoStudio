@@ -8,6 +8,7 @@ import pytest
 
 os.environ.setdefault("GENI_STUDIO_CHECKPOINT", "memory")
 os.environ.setdefault("GENI_STUDIO_WORKSPACE", "0")
+os.environ.setdefault("GENI_STUDIO_SYNC_START", "1")
 
 
 @pytest.fixture(autouse=True)

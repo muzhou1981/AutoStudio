@@ -18,8 +18,8 @@ def extract_acceptance_ids(text: str) -> list[str]:
 
 
 def missing_acceptance_ids(*, requirement_spec: str, evidence: str) -> list[str]:
-    blob = evidence or ""
-    return [ac for ac in extract_acceptance_ids(requirement_spec) if ac not in blob]
+    seen = set(extract_acceptance_ids(evidence))
+    return [ac for ac in extract_acceptance_ids(requirement_spec) if ac not in seen]
 
 
 def acceptance_matrix(*, requirement_spec: str, evidence: str) -> str:

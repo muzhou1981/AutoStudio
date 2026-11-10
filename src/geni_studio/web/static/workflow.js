@@ -78,6 +78,7 @@
     const loops = Number(node.max_loops);
     if (item.returns_to && Number.isInteger(loops) && loops >= 1) item.max_loops = loops;
     if (node.reject_to) item.reject_to = node.reject_to;
+    if (node.commits_on_branch) item.commits_on_branch = true;
     if (node.kind === "subgraph") {
       item.role = "";
       item.returns_to = "";
@@ -430,6 +431,7 @@
       description: data.description || "",
       builtin: Boolean(data.builtin),
       subgraph: Boolean(data.subgraph),
+      workspace: data.workspace || "",
       nodes: (data.nodes || []).map((node) => normalizeNode(node)),
     };
     yamlText = yaml || "";
@@ -450,6 +452,7 @@
     $("btnCreateFlow").hidden = mode !== "new";
     $("btnSaveFlow").hidden = !created || builtin;
     if ($("btnCopyLoaded")) $("btnCopyLoaded").hidden = !created;
+    if ($("btnDeleteFlow")) $("btnDeleteFlow").hidden = !created || builtin;
     $("flowTitle").disabled = builtin;
     $("flowDescription").hidden = !editing;
     $("flowDescription").disabled = builtin;
@@ -1184,6 +1187,46 @@
 
   if ($("btnCopyFlow")) $("btnCopyFlow").onclick = () => copySelected($("flowPick").value);
   if ($("btnCopyLoaded")) $("btnCopyLoaded").onclick = () => copySelected(loadedId);
+
+  if ($("btnDeleteFlow")) {
+    $("btnDeleteFlow").onclick = async () => {
+      const id = loadedId;
+      if (!id) {
+        showError("先选择要编辑的流程。");
+        return;
+      }
+      if (graph.builtin) return;
+      const title = ($("flowTitle").value || "").trim() || graph.title || id;
+      if (!window.confirm("确定删除流程「" + title + "」（" + id + "）？删除后不能恢复。")) return;
+      showError("");
+      showSaved("");
+      const button = $("btnDeleteFlow");
+      button.loading = true;
+      button.disabled = true;
+      try {
+        const response = await fetch("/api/workflows/" + encodeURIComponent(id), { method: "DELETE" });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          showError(data.detail || "没能删除流程。");
+          return;
+        }
+        if (Array.isArray(window.__workflows)) {
+          window.__workflows = window.__workflows.filter((item) => item.workflow_id !== id);
+        }
+        if (typeof window.refreshWorkflowOptions === "function") window.refreshWorkflowOptions();
+        loadedId = "";
+        markClean();
+        await loadLists();
+        await enterOpen("", false);
+        showSaved("已删除 " + id + "。");
+      } catch (err) {
+        showError(err.message || "没能删除流程。");
+      } finally {
+        button.loading = false;
+        button.disabled = false;
+      }
+    };
+  }
 
   $("btnCreateFlow").onclick = async () => {
     const title = ($("flowTitle").value || "").trim();

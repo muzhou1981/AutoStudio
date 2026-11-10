@@ -112,8 +112,10 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert 'class="sidebar-svg"' in text
     assert "M88.7 223.8" in text
     assert 'class="project-modes"' not in text
-    assert 'id="btnOpenChosen"' in text
     assert 'id="btnPickDirectory"' in text
+    assert 'id="btnPickWorkspace"' in text
+    assert 'id="btnDeleteProject"' in text
+    assert 'id="btnOpenChosen"' not in text
     assert 'aria-label="选择目录"' in text
     assert 'id="btnSaveProject" appearance="outlined"' in text
     assert ">项目配置</span>" not in text
@@ -152,6 +154,40 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert "启动本轮" not in text
     assert "暂停本轮" not in text
     assert "停止本轮" not in text
+    assert 'id="runProjectEmpty"' in text
+    assert "/static/api-utils.js" in text
+    assert "readFetchResponse" in text
+    assert 'class="run-action-error"' in text
+    assert "el.hidden = true" in text
+    assert "hitlDockResize" in text
+    assert "focusRunRailView" in text
+    assert "armStartPoll" in text
+    assert 'id="region-setup"' in text
+    assert "inspect-body-run" in text
+    assert "inspect-hitl-dock" in text
+    assert ">保存草稿</wa-button>" in text
+    todo_at = text.index('id="region-todo"')
+    inspect_run_at = text.index("inspect-body-run")
+    assert inspect_run_at < todo_at
+    assert 'id="btnDeleteFlow" appearance="outlined" variant="danger" hidden' in text
+    assert "载入非内置流程后，可以在复制和保存旁边删除。" in text
+    save_at = text.index('id="flowSaveRow"')
+    copy_at = text.index('id="btnCopyLoaded"')
+    save_btn_at = text.index('id="btnSaveFlow"')
+    delete_at = text.index('id="btnDeleteFlow"')
+    assert save_at < copy_at < save_btn_at < delete_at
+    assert "btnDeleteFlow" not in text[text.index('id="btnCopyFlow"'):save_at]
+    script = TestClient(app).get("/static/workflow.js").text
+    assert 'btnDeleteFlow").hidden = !created || builtin' in script
+    assert 'btnCopyLoaded").hidden = !created' in script
+    assert 'btnSaveFlow").hidden = !created || builtin' in script
+    assert 'window.confirm("确定删除流程「" + title + "」（" + id + "）？删除后不能恢复。")' in script
+    assert 'fetch("/api/workflows/" + encodeURIComponent(id), { method: "DELETE" })' in script
+    assert "if (graph.builtin) return;" in script
+    assert 'await enterOpen("", false);' in script
+    assert 'showSaved("已删除 " + id + "。");' in script
+    config = TestClient(app).get("/static/config.js").text
+    assert "refreshWorkflowOptions" in config
 
 
 def test_command_cwd_allows_a_subdirectory_and_rejects_a_sibling(tmp_path) -> None:

@@ -285,6 +285,13 @@ def resolve_design_track(
 
 
 def build_run_context_from_state(state: Mapping[str, Any]) -> RunContext:
+    if isinstance(state.get("config_snapshot_effective"), dict):
+        return RunContext(
+            root=factory_root(),
+            scenario_key=str(state.get("scenario_key") or ""),
+            project_id=str(state.get("project_id") or ""),
+            merged=state["config_snapshot_effective"],
+        )
     key, pid = resolve_scenario_and_project(
         str(state.get("scenario_key") or ""),
         str(state.get("project_id") or ""),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from typing import Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -27,6 +28,7 @@ def resolve_executable(workflow: dict[str, Any], *, root: Any = None) -> dict[st
     allowed = set(FactoryState.__annotations__)
     errors: list[str] = []
     nodes: list[dict[str, Any]] = []
+    on_branch = str(workflow.get("workspace") or "") == "current_branch"
     for raw in workflow.get("nodes") or []:
         node = dict(raw)
         kind = node.get("kind")
@@ -41,6 +43,8 @@ def resolve_executable(workflow: dict[str, Any], *, root: Any = None) -> dict[st
                 errors.append(f"活动「{name}」缺少产出产物。")
             node["inputs"] = inputs
             node["outputs"] = outputs
+            if on_branch:
+                node["on_current_branch"] = True
         elif kind == "gate":
             decision = str(node.get("decision") or "").strip()
             if decision not in DECISIONS:
@@ -75,12 +79,13 @@ def compile_for_project(
     prepared = resolve_executable(loaded["workflow"], root=root)
     flat = _prepare_flat(prepared, root)
     compiled = compile_workflow(flat, checkpointer=checkpointer)
-    return compiled, run_state(flat)
+    return compiled, {**run_state(flat), "workflow_definition": deepcopy(flat)}
 
 
 def compile_workflow(workflow: dict[str, Any], *, checkpointer: BaseCheckpointSaver) -> Any:
-    nodes = list(workflow["nodes"])
+    nodes = deepcopy(workflow["nodes"])
     executable = [node for node in nodes if node["kind"] not in {"start", "end"}]
+    _validate_parallel(executable)
     by_id = {node["id"]: node for node in nodes}
     builder = StateGraph(FactoryState)
     for step in _iter_steps(executable):
@@ -92,22 +97,52 @@ def compile_workflow(workflow: dict[str, Any], *, checkpointer: BaseCheckpointSa
     for node in executable:
         if node["kind"] != "parallel":
             continue
-        builder.add_node(node["fork_id"], _with_stop_guard(_noop))
+        builder.add_node(node["fork_id"], _with_stop_guard(_fork(node)))
         builder.add_node(node["join_id"], _with_stop_guard(_join(node)))
     builder.add_node(_ESCALATE, _with_stop_guard(_escalate))
     builder.add_edge(START, _entry(executable[0]))
     for index, node in enumerate(executable):
         nxt = _entry(executable[index + 1]) if index + 1 < len(executable) else END
         if node["kind"] == "parallel":
+            done = []
             for branch in node["branches"]:
+                marker = f"{node['id']}__{branch['id']}__done"
+                done.append(marker)
+                builder.add_node(marker, _with_stop_guard(_noop))
                 builder.add_edge(node["fork_id"], branch["steps"][0]["id"])
-                _link_steps(builder, branch["steps"], node["join_id"], nodes, by_id, executable)
+                _link_steps(builder, branch["steps"], marker, nodes, by_id, executable)
+            builder.add_edge(done, node["join_id"])
             builder.add_edge(node["join_id"], nxt)
         else:
             _link_one(builder, node, nxt, nodes, by_id, executable)
     builder.add_edge(_ESCALATE, END)
     gates = [step["id"] for step in _iter_steps(executable) if step["kind"] == "gate"]
     return builder.compile(checkpointer=checkpointer, interrupt_before=gates)
+
+
+def _validate_parallel(nodes):
+    for node in nodes:
+        if node.get("kind") != "parallel":
+            continue
+        for branch in node["branches"]:
+            for step in branch["steps"]:
+                if step["kind"] != "activity" or step.get("returns_to"):
+                    raise ConfigError("并行支路暂不支持人工关卡、回退或嵌套并行，请拆为顺序流程")
+
+
+def _fork(node):
+    def fn(state):
+        if state.get("workspace_path"):
+            from geni_studio.backends.runner import required_capabilities
+
+            for step in _iter_steps([node]):
+                if required_capabilities(step["role"]) & {"file_write", "shell"}:
+                    raise ConfigError("并行写工作区尚未隔离，请把写入或执行命令的活动改为顺序执行")
+        prefix = f"{node['id']}:"
+        return {"branch_artifacts": {
+            key: "" for key in (state.get("branch_artifacts") or {}) if key.startswith(prefix)
+        }}
+    return fn
 
 
 def run_state(workflow: dict[str, Any]) -> dict[str, Any]:
@@ -163,6 +198,10 @@ def _template_problem(activity: str, item: dict[str, str]) -> list[str]:
 def _activity_contract(node: dict[str, Any], root: Any) -> tuple[list[str], list[str], list[str]]:
     role = str(node.get("role") or "")
     name = str(node.get("name") or role)
+    if node.get("commits_on_branch"):
+        if role != "developer":
+            return [], [], [f"活动「{name}」只有程序员可以提交入库。"]
+        return ["code_change", "delivery_report"], ["land_record"], []
     try:
         defaults_in, defaults_out = role_contract(role, root)
     except FileNotFoundError as exc:
@@ -204,7 +243,28 @@ def _activity(node: dict[str, Any]):
         from geni_studio.backends.runner import invoke_role
         from geni_studio.hitl.attachments import prompt_section
 
+        if node.get("commits_on_branch"):
+            from geni_studio.workspace.layout import commit_current_branch
+
+            summary = str(
+                state.get("delivery_report")
+                or state.get("code_change")
+                or state.get("human_request")
+                or ""
+            )
+            body = commit_current_branch(
+                str(state.get("workspace_path") or ""),
+                str(state.get("base_branch") or ""),
+                summary,
+            )
+            return _activity_update(node, state, outputs, body)
+
         sections = [f"活动：{node['name']}"]
+        if node.get("on_current_branch"):
+            sections.append(
+                "这一步直接修改目标仓库当前检出的分支，不另建工作树。"
+                "不要执行 git commit 或 git push。提交留到人类确认入库之后，由程序员完成。"
+            )
         request = str(state.get("human_request") or "")
         if request and "human_request" not in inputs:
             sections.append(f"人类原始需求：\n{request}")
@@ -212,7 +272,11 @@ def _activity(node: dict[str, Any]):
         if attached:
             sections.append(attached)
         for key in inputs:
-            sections.append(f"{key}：\n{state.get(key) or ''}")
+            value = state.get(key) or ""
+            if node.get("parallel_id"):
+                local = f"{node['parallel_id']}:{node['branch_id']}:{key}"
+                value = (state.get("branch_artifacts") or {}).get(local, value)
+            sections.append(f"{key}：\n{value}")
         for spec in node.get("output_specs") or []:
             sections.append(_template_section(spec))
         if node.get("returns_to"):
@@ -225,42 +289,59 @@ def _activity(node: dict[str, Any]):
             user_prompt="\n\n".join(sections),
             stub_note=str(node["name"]),
         )
-        parallel = bool(node.get("parallel_id"))
-        if parallel:
-            bucket = {
-                f"{node['parallel_id']}:{node['branch_id']}:{key}": body
-                for key in outputs
-            }
-            update = {"branch_artifacts": bucket}
-        else:
-            update = {key: body for key in outputs}
-        counts = dict(state.get("return_counts") or {})
-        target = ""
-        origin = ""
-        if node.get("returns_to") and _STATUS_FAIL.search(body):
-            counts[node["id"]] = int(counts.get(node["id"]) or 0) + 1
-            limit = node.get("max_loops")
-            if not isinstance(limit, int) or limit < 1:
-                limit = max_dev_retries_for_state(state)
-            if counts[node["id"]] >= limit:
-                target = "__escalate__"
-                origin = node["id"]
-            else:
-                target = str(node.get("graph_return") or node["returns_to"])
-        if parallel:
-            update["return_counts"] = {node["id"]: counts[node["id"]]} if target else {}
-            if target:
-                update["return_decisions"] = {node["id"]: target}
-            if origin:
-                update["escalated_from"] = origin
-        else:
-            update["return_counts"] = counts
-            update["return_target"] = target
-            update["escalated_from"] = origin
-        return update
+        if node["role"] == "tester" and "test_report" in outputs:
+            from geni_studio.verification.command import verified_report
+
+            body, status = verified_report(state, body)
+            if status != "pass":
+                if not node.get("returns_to"):
+                    raise RuntimeError("测试未通过且活动未配置回退去向")
+                body = body.rstrip() + "\nSTATUS: fail"
+        return _activity_update(node, state, outputs, body)
 
     fn.__name__ = f"activity_{node['id']}"
     return fn
+
+
+def _activity_update(
+    node: dict[str, Any],
+    state: FactoryState,
+    outputs: list[str],
+    body: str,
+) -> dict[str, Any]:
+    parallel = bool(node.get("parallel_id"))
+    if parallel:
+        bucket = {
+            f"{node['parallel_id']}:{node['branch_id']}:{key}": body
+            for key in outputs
+        }
+        update: dict[str, Any] = {"branch_artifacts": bucket}
+    else:
+        update = {key: body for key in outputs}
+    counts = dict(state.get("return_counts") or {})
+    target = ""
+    origin = ""
+    if node.get("returns_to") and _STATUS_FAIL.search(body):
+        counts[node["id"]] = int(counts.get(node["id"]) or 0) + 1
+        limit = node.get("max_loops")
+        if not isinstance(limit, int) or limit < 1:
+            limit = max_dev_retries_for_state(state)
+        if counts[node["id"]] >= limit:
+            target = "__escalate__"
+            origin = node["id"]
+        else:
+            target = str(node.get("graph_return") or node["returns_to"])
+    if parallel:
+        update["return_counts"] = {node["id"]: counts[node["id"]]} if target else {}
+        if target:
+            update["return_decisions"] = {node["id"]: target}
+        if origin:
+            update["escalated_from"] = origin
+    else:
+        update["return_counts"] = counts
+        update["return_target"] = target
+        update["escalated_from"] = origin
+    return update
 
 
 def _chosen_tools(state: FactoryState, node_id: str) -> dict[str, Any]:
@@ -297,6 +378,8 @@ def _template_section(spec: dict[str, str]) -> str:
     template = spec.get("template") or ""
     if spec.get("source") == "link":
         return f"输出「{name}」请按这个模板链接的结构来写：{template}"
+    if "content" in spec:
+        return f"输出「{name}」请按下面的模板写：\n{spec['content']}"
     from pathlib import Path
 
     try:
@@ -401,6 +484,12 @@ def _prepare_flat(workflow: dict[str, Any], root: Any) -> dict[str, Any]:
             if mapped:
                 node[key] = mapped
     _bind_contracts(nodes, root)
+    from pathlib import Path
+
+    for node in _iter_steps(nodes):
+        for spec in node.get("output_specs") or []:
+            if spec.get("source") != "link":
+                spec["content"] = Path(spec["template"]).read_text(encoding="utf-8")[:12000]
     flat = dict(workflow)
     flat["nodes"] = nodes
     return flat

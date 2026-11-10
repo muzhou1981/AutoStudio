@@ -10,7 +10,7 @@ from geni_studio.hitl.service import GraphRunService
 from geni_studio.verification.acceptance import missing_acceptance_ids
 from geni_studio.verification.retro import scorecard
 from geni_studio.workflows.default import graph, qa
-from geni_studio.workspace.layout import WorkspaceError, prepare_run_layout
+from geni_studio.workspace.layout import prepare_run_layout
 
 
 def test_missing_acceptance_blocks_qa():
@@ -72,9 +72,13 @@ def test_scorecard_stays_pending_and_does_not_edit_roles():
     assert role.read_text(encoding="utf-8") == before
 
 
-def test_factory_root_is_refused_without_flag():
-    with pytest.raises(WorkspaceError, match="工厂仓库"):
-        prepare_run_layout(factory_root(), "should-not-create")
+def test_factory_root_allowed_as_run_target(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    monkeypatch.setattr("geni_studio.workspace.layout.factory_root", lambda: tmp_path)
+    layout = prepare_run_layout(tmp_path, "factory-bootstrap")
+    assert layout.target_root == tmp_path.resolve()
 
 
 def test_project_yaml_selects_role_model(tmp_path: Path, monkeypatch):

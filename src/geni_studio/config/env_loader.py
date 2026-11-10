@@ -7,6 +7,9 @@ from pathlib import Path
 
 from geni_studio.config.context import factory_root
 
+# 仅在 .env 中缺失或为空时，把进程环境里已有的值写入 .env；不覆盖已有非空项。
+_ENV_SYNC_KEYS = ("CURSOR_API_KEY",)
+
 
 def _parse_env_file(path: Path) -> dict[str, str]:
     out: dict[str, str] = {}
@@ -32,3 +35,30 @@ def apply_env_file(*, root: Path | None = None, override: bool = False) -> bool:
         if override or key not in os.environ:
             os.environ[key] = val
     return True
+
+
+def sync_env_secrets_to_dotenv(*, root: Path | None = None) -> list[str]:
+    """将 shell 等已注入、但 .env 未落盘的密钥写入 `.env`。返回本次写入的键名。"""
+    from geni_studio.cli import env_path, write_env_key
+
+    root = root or factory_root()
+    path = env_path(root)
+    file_vars = _parse_env_file(path)
+    written: list[str] = []
+    for name in _ENV_SYNC_KEYS:
+        env_val = os.environ.get(name, "").strip()
+        if not env_val:
+            continue
+        if file_vars.get(name, "").strip():
+            continue
+        write_env_key(path, name, env_val)
+        written.append(name)
+        file_vars[name] = env_val
+    return written
+
+
+def bootstrap_env(*, root: Path | None = None, override: bool = False) -> bool:
+    """加载 `.env`，并把进程里已有密钥同步到空的 `.env` 槽位。"""
+    ok = apply_env_file(root=root, override=override)
+    sync_env_secrets_to_dotenv(root=root)
+    return ok

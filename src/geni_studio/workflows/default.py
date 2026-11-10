@@ -44,6 +44,8 @@ class FactoryState(TypedDict, total=False):
     run_name: str
     config_snapshot_scenario: str
     config_snapshot_project: str
+    config_snapshot_effective: dict[str, Any]
+    workflow_definition: dict[str, Any]
     design_track_enabled: bool
     finance_enabled: bool
     cost_ledger: str
@@ -113,6 +115,10 @@ class FactoryState(TypedDict, total=False):
     escalation_choice: str
     hitl_clarification_resolved: bool
     workspace_path: str
+    # 自我改进开工时目标仓库检出的分支。其他流程为空。
+    base_branch: str
+    # 程序员在当前分支提交入库后的记录。
+    land_record: str
     test_command: str
     change_impact: str
     change_baseline_note: str
@@ -133,7 +139,7 @@ class FactoryState(TypedDict, total=False):
     branch_artifacts: Annotated[dict[str, str], _merge_maps]
     # 这一轮各活动节点选用的 Skill 与 MCP。键是节点标识。
     node_tools: dict[str, dict[str, list[str]]]
-    # 这一轮各角色选用的模型。空着的角色沿用工厂默认。
+    # 这一轮各角色选用的模型。空着的角色沿用配置里的默认模型。
     role_models: dict[str, str]
     return_target: str
     escalated_from: str
@@ -448,20 +454,9 @@ def tester_execute(state: FactoryState) -> dict:
         ),
         stub_note=f"测试报告 status={status}",
     )
-    from geni_studio.verification.command import TestCommandError, run_test_command
+    from geni_studio.verification.command import verified_report
 
-    try:
-        command = run_test_command(state)
-    except TestCommandError as exc:
-        return {
-            "test_cases": cases,
-            "test_report": f"{report}\n\n## 测试命令\n拒绝执行：{exc}",
-            "test_status": "fail",
-        }
-    if command is not None:
-        report = f"{report}\n\n{command.transcript}"
-        if command.returncode != 0:
-            status = "fail"
+    report, status = verified_report(state, report, status)
     return {"test_cases": cases, "test_report": report, "test_status": status}
 
 
@@ -489,6 +484,8 @@ def qa(state: FactoryState) -> dict:
     evidence = f"{report_in}\n{body}"
     matrix = acceptance_matrix(requirement_spec=spec, evidence=evidence)
     if missing_acceptance_ids(requirement_spec=spec, evidence=evidence):
+        status = "fail"
+    if state.get("test_status") == "fail":
         status = "fail"
     return {"qa_report": f"{body}\n\n{matrix}", "qa_status": status}
 
@@ -709,8 +706,7 @@ def _with_stop_guard(fn):
         result = fn(state)
         if is_stop_requested():
             raise RunStopped("本轮已停止")
-        if is_pause_requested():
-            raise RunPaused("本轮已暂停")
+        # 已完成节点必须提交状态；暂停由下一个节点进入前处理。
         return result
 
     wrapped.__name__ = getattr(fn, "__name__", "node")

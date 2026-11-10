@@ -12,9 +12,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from geni_studio.config.context import ConfigError, build_run_context
-from geni_studio.config.env_loader import apply_env_file
+from geni_studio.config.env_loader import bootstrap_env
+from geni_studio.workspace.layout import WorkspaceError
 
-apply_env_file()
+bootstrap_env()
 from geni_studio.hitl.feishu_notify import notify_awaiting_human_via_lark_cli
 from geni_studio.hitl.rail import build_rail
 from geni_studio.hitl.service import GraphRunService, HitlError, StopPending
@@ -292,24 +293,37 @@ def _clean_node_tools(raw: dict[str, NodeToolChoice]) -> dict[str, dict[str, lis
 
 @app.post("/api/runs")
 def api_start_run(body: StartRunBody) -> dict:
-    try:
-        from geni_studio.hitl.attachments import clean_attachment_ids
+    import os
 
+    from geni_studio.hitl.attachments import clean_attachment_ids
+
+    try:
         tools = _clean_node_tools(body.node_tools)
         attachment_ids = clean_attachment_ids(body.attachments)
-        st = _run_service.start(
-            human_request=body.human_request,
-            scenario_key=body.scenario_key,
-            project_id=body.project_id,
-            thread_id=body.thread_id,
-            run_name=body.run_name,
-            node_tools=tools,
-            attachment_ids=attachment_ids,
-            role_models=_clean_role_models(body.role_models),
-        )
-    except (ConfigError, HitlError, ValueError, TypeError) as e:
+        kwargs = {
+            "human_request": body.human_request,
+            "scenario_key": body.scenario_key,
+            "project_id": body.project_id,
+            "thread_id": body.thread_id,
+            "run_name": body.run_name,
+            "node_tools": tools,
+            "attachment_ids": attachment_ids,
+            "role_models": _clean_role_models(body.role_models),
+        }
+        sync = os.environ.get("GENI_STUDIO_SYNC_START", "").strip().lower() in ("1", "true", "yes")
+        if sync:
+            st = _run_service.start(**kwargs)
+            tid = st.thread_id
+        else:
+            tid, initial = _run_service.enqueue_start(**kwargs)
+            try:
+                payload = _run_service.status_dict(tid)
+            except HitlError:
+                payload = _run_service.provisional_status_dict(tid, initial)
+            return _with_feishu(payload, tid, body.project_id)
+    except (ConfigError, HitlError, WorkspaceError, ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return _with_feishu(_run_service.status_dict(st.thread_id), st.thread_id, body.project_id)
+    return _with_feishu(_run_service.status_dict(tid), tid, body.project_id)
 
 
 class RoleModelsBody(BaseModel):
@@ -378,7 +392,7 @@ def api_run_events(thread_id: str, once: int = 0):
             if once or data.get("phase") not in ("running", "awaiting_human"):
                 yield "event: end\ndata: {}\n\n"
                 return
-            time.sleep(0.4)
+            time.sleep(0.25)
 
     return StreamingResponse(
         generate(),
@@ -442,6 +456,9 @@ def _conversation_event(thread_id: str, data: dict) -> str:
 
 @app.get("/api/runs/{thread_id}")
 def api_run_status(thread_id: str) -> dict:
+    fail = _run_service.start_failure_message(thread_id)
+    if fail:
+        raise HTTPException(status_code=400, detail=fail)
     try:
         return _run_service.status_dict(thread_id)
     except HitlError as e:

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from geni_studio.config.context import ConfigError
 from geni_studio.config.workflow_defs import (
     create_workflow,
+    delete_workflow,
     get_workflow,
     list_workflows,
     save_workflow,
@@ -81,3 +82,73 @@ def test_workflow_api_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert developer["label"] == "程序员"
     assert developer["inputs"] == []
     assert developer["outputs"] == []
+
+
+def test_delete_plain_workflow_via_api_and_refuse_when_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC：删除整份非内置流程定义；不存在返回 404。"""
+    _root(tmp_path, monkeypatch)
+    create_workflow("demo", "演示", root=tmp_path)
+    client = TestClient(app)
+    removed = client.delete("/api/workflows/demo")
+    assert removed.status_code == 200
+    assert removed.json() == {"workflow_id": "demo", "deleted": True}
+    assert client.get("/api/workflows/demo").status_code == 404
+    assert all(item["workflow_id"] != "demo" for item in list_workflows(tmp_path))
+    missing = client.delete("/api/workflows/demo")
+    assert missing.status_code == 404
+
+
+def test_delete_removes_the_workflow_and_keeps_a_referencing_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _root(tmp_path, monkeypatch)
+    create_workflow("child", "子图", root=tmp_path)
+    save_workflow(
+        "child",
+        {"title": "子图", "subgraph": True, "nodes": [
+            {"id": "start", "kind": "start", "name": "启动", "role": "human", "returns_to": ""},
+            {"id": "end", "kind": "end", "name": "结束", "role": "human", "returns_to": ""},
+        ]},
+        root=tmp_path,
+    )
+    create_workflow("parent", "父流程", root=tmp_path)
+    save_workflow(
+        "parent",
+        {"title": "父流程", "nodes": [
+            {"id": "start", "kind": "start", "name": "启动", "role": "human", "returns_to": ""},
+            {"id": "sub", "kind": "subgraph", "name": "引用", "role": "", "subgraph_id": "child", "returns_to": ""},
+            {"id": "end", "kind": "end", "name": "结束", "role": "human", "returns_to": ""},
+        ]},
+        root=tmp_path,
+    )
+    folder = tmp_path / "workflows" / "locked"
+    folder.mkdir()
+    (folder / "workflow.yaml").write_text(
+        "workflow_id: locked\ntitle: 内置\nbuiltin: true\nnodes:\n"
+        "- {id: start, kind: start, name: 启动, role: human, returns_to: ''}\n"
+        "- {id: end, kind: end, name: 结束, role: human, returns_to: ''}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="不能删除"):
+        delete_workflow("locked", root=tmp_path)
+    assert (folder / "workflow.yaml").is_file()
+    delete_workflow("child", root=tmp_path)
+    assert not (tmp_path / "workflows" / "child").exists()
+    assert [item["workflow_id"] for item in list_workflows(tmp_path)] == ["locked", "parent"]
+    with pytest.raises(ConfigError, match="流程不存在"):
+        get_workflow("child", root=tmp_path)
+    parent_text = (tmp_path / "workflows" / "parent" / "workflow.yaml").read_text(encoding="utf-8")
+    assert "subgraph_id: child" in parent_text
+
+    client = TestClient(app)
+    removed = client.delete("/api/workflows/parent")
+    assert removed.status_code == 200
+    assert removed.json()["deleted"] is True
+    assert client.get("/api/workflows/parent").status_code == 404
+    refused = client.delete("/api/workflows/locked")
+    assert refused.status_code == 400
+    assert "不能删除" in refused.json()["detail"]
+    missing = client.delete("/api/workflows/missing")
+    assert missing.status_code == 404

@@ -9,6 +9,7 @@ _lock = threading.Lock()
 _stop_requests: set[str] = set()
 _pause_requests: set[str] = set()
 _inflight: set[str] = set()
+_starting: set[str] = set()
 _active_runs: dict[str, list[object]] = {}
 _thread_id: ContextVar[str] = ContextVar("geni_studio_run_thread", default="")
 
@@ -76,6 +77,21 @@ def clear_pause_request(thread_id: str) -> None:
 def is_inflight(thread_id: str) -> bool:
     with _lock:
         return thread_id in _inflight
+
+
+def mark_starting(thread_id: str) -> None:
+    with _lock:
+        _starting.add(thread_id)
+
+
+def clear_starting(thread_id: str) -> None:
+    with _lock:
+        _starting.discard(thread_id)
+
+
+def is_starting(thread_id: str) -> bool:
+    with _lock:
+        return thread_id in _starting
 
 
 def enter_inflight(thread_id: str) -> bool:

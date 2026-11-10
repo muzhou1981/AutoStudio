@@ -15,6 +15,14 @@ def role_md_path(role_name: str, root: Path | None = None) -> Path:
 
 
 def load_role_system_prompt(role_name: str, root: Path | None = None) -> str:
+    from geni_studio.backends.runtime import current_config
+
+    frozen = current_config()
+    if root is None and frozen is not None and "_roles" in frozen:
+        try:
+            return frozen["_roles"][role_name]
+        except KeyError as exc:
+            raise FileNotFoundError(f"Run 快照中缺少角色定义: {role_name}") from exc
     path = role_md_path(role_name, root)
     if not path.is_file():
         raise FileNotFoundError(f"缺少角色定义: {path}")

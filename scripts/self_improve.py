@@ -13,7 +13,7 @@ from geni_studio.workspace.self_improve import self_improve_block_reason
 ROOT = Path(__file__).resolve().parents[1]
 REQUEST = (
     "只做这一处改进：在 README.md 的本地开发一节末尾追加一行"
-    "「自改进场景 self_improve 的改动只出现在 .geni_studio/worktrees，不合并到当前分支。」"
+    "「自我改进直接修改目标仓库当前检出的分支。人类确认入库后，由程序员在该分支提交。」"
     "不要列出待澄清问题，不要改其他文件。"
 )
 

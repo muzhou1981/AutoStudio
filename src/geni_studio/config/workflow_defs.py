@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -114,6 +115,16 @@ def list_workflows(root: Path | None = None) -> list[dict[str, Any]]:
     return items
 
 
+def uses_current_branch(workflow_id: str, root: Path | None = None) -> bool:
+    """自我改进直接改当前检出的分支，不另建工作树。"""
+    if not workflow_id.strip() or not workflow_exists(workflow_id, root):
+        return False
+    if uses_default_engine(workflow_id, root):
+        return False
+    data = _read_yaml(_workflow_path(workflow_id, root, must_exist=True))
+    return str(data.get("workspace") or "") == "current_branch"
+
+
 def uses_default_engine(workflow_id: str, root: Path | None = None) -> bool:
     """内置的通用软件开发仍走 default.py，不按通用活动重编译。"""
     if not workflow_exists(workflow_id, root):
@@ -198,6 +209,8 @@ def import_workflow(text: str, root: Path | None = None) -> dict[str, Any]:
     }
     if loaded.get("subgraph"):
         payload["subgraph"] = True
+    if str(loaded.get("workspace") or "") == "current_branch":
+        payload["workspace"] = "current_branch"
     data = validate_workflow(payload, root=root, workflow_id=workflow_id)
     path = _workflow_path(workflow_id, root, must_exist=False)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -232,6 +245,8 @@ def copy_workflow(
     }
     if source.get("subgraph"):
         payload["subgraph"] = True
+    if str(source.get("workspace") or "") == "current_branch":
+        payload["workspace"] = "current_branch"
     path = _workflow_path(workflow_id, root, must_exist=False)
     if path.is_file():
         raise ConfigError(f"已有同名流程：{workflow_id}")
@@ -261,6 +276,23 @@ def save_workflow_yaml(workflow_id: str, text: str, root: Path | None = None) ->
     if not isinstance(loaded, dict):
         raise ConfigError("原文的根节点须为 mapping。")
     return save_workflow(workflow_id, loaded, root=root)
+
+
+def delete_workflow(workflow_id: str, root: Path | None = None) -> None:
+    """删除 workflows/<id>/。内置流程不能删。不检查是否仍被其他流程当作子图引用。"""
+    path = _workflow_path(workflow_id, root, must_exist=True)
+    current = _read_yaml(path)
+    if current.get("builtin"):
+        raise ConfigError("这是内置流程，不能删除。")
+    folder = path.parent.resolve()
+    workflows_root = ((root or factory_root()) / "workflows").resolve()
+    try:
+        folder.relative_to(workflows_root)
+    except ValueError as exc:
+        raise ConfigError("只能删除工厂 workflows 目录下的流程。") from exc
+    if folder == workflows_root:
+        raise ConfigError("只能删除工厂 workflows 目录下的流程。")
+    shutil.rmtree(folder)
 
 
 def _require_subgraph(subgraph_id: str, owner: str, root: Path | None, seen_graphs: set[str]) -> None:
@@ -456,7 +488,11 @@ def validate_workflow(
             if role not in roles:
                 raise ConfigError(f"活动「{name}」要选择已有角色。")
             decision = ""
+        if raw.get("commits_on_branch") and role != "developer":
+            raise ConfigError(f"活动「{name}」只有程序员可以提交入库。")
         item = {"id": node_id, "kind": kind, "name": name, "role": role, "returns_to": returns_to}
+        if kind == "activity" and raw.get("commits_on_branch"):
+            item["commits_on_branch"] = True
         if decision:
             item["decision"] = decision
         reject_to = str(raw.get("reject_to") or "").strip()
@@ -518,6 +554,11 @@ def validate_workflow(
     engine = str(payload.get("engine") or "").strip()
     if engine:
         result["engine"] = engine
+    workspace = str(payload.get("workspace") or "").strip()
+    if workspace == "current_branch":
+        result["workspace"] = workspace
+    elif workspace:
+        raise ConfigError("工作区只能声明为当前分支。")
     return result
 
 

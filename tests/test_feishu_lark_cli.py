@@ -14,6 +14,7 @@ def test_resolve_lark_backend_default_lark_cli(tmp_path, monkeypatch):
 
 def test_resolve_lark_backend_env_bot_when_app_id(tmp_path, monkeypatch):
     monkeypatch.setattr("geni_studio.hitl.feishu_config.factory_root", lambda: tmp_path)
+    monkeypatch.delenv("GENI_STUDIO_LARK_BACKEND", raising=False)
     (tmp_path / ".env").write_text("LARK_APP_ID=cli_x\n", encoding="utf-8")
     assert resolve_lark_backend(tmp_path) == "env_bot"
 

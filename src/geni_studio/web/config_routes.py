@@ -9,6 +9,7 @@ from geni_studio.config.context import ConfigError
 from geni_studio.config.identifiers import allocate_identifier
 from geni_studio.config.registry import (
     apply_project_form,
+    delete_project,
     describe_project_directory,
     effective_config_summary,
     get_project_yaml,
@@ -57,6 +58,17 @@ def api_list_projects() -> dict:
 
     items = [p.to_dict() for p in list_projects()]
     return {"projects": items, "nodes": sorted(DEFAULT_GRAPH_NODES)}
+
+
+@router.get("/projects/field-check")
+def api_project_field_check(workspace: str = Query("")) -> dict:
+    from geni_studio.workspace.layout import workspace_config_error
+
+    errors: dict[str, str] = {}
+    workspace_err = workspace_config_error(workspace.strip())
+    if workspace_err:
+        errors["workspace"] = workspace_err
+    return {"ok": not errors, "errors": errors}
 
 
 @router.get("/files")
@@ -131,7 +143,11 @@ def api_save_project_form(project_id: str, body: ProjectFormBody) -> dict:
     if body.skip_mode not in {"inherit", "custom"}:
         raise HTTPException(status_code=400, detail="节点裁剪须为沿用项目类型或自行指定")
     try:
-        text = apply_project_form(project_id, body.model_dump(), require_profile=True)
+        text = apply_project_form(
+            project_id,
+            body.model_dump(exclude_unset=True),
+            require_profile=True,
+        )
     except ConfigError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except ValueError as e:
@@ -146,6 +162,17 @@ def api_save_project(project_id: str, body: SaveProjectBody) -> dict:
     except ConfigError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"project_id": project_id, "saved": True}
+
+
+@router.delete("/projects/{project_id}")
+def api_delete_project(project_id: str) -> dict:
+    try:
+        delete_project(project_id)
+    except ConfigError as e:
+        message = str(e)
+        code = 404 if message.startswith("未知 project_id") else 400
+        raise HTTPException(status_code=code, detail=message) from e
+    return {"project_id": project_id, "deleted": True}
 
 
 @router.post("/projects")
@@ -189,10 +216,10 @@ def api_effective_config(
 
 
 @router.get("/models")
-def api_models() -> dict:
+def api_models(backend: str = "") -> dict:
     from geni_studio.backends.models import list_backend_models
 
-    return list_backend_models()
+    return list_backend_models(backend=backend.strip() or None)
 
 
 @router.get("/tools")
@@ -204,6 +231,9 @@ def api_tools() -> dict:
 
 @router.get("/settings")
 def api_settings() -> dict:
+    from geni_studio.config.env_loader import sync_env_secrets_to_dotenv
+
+    sync_env_secrets_to_dotenv()
     return settings_status()
 
 
@@ -230,3 +260,27 @@ def api_probe_settings() -> dict:
     from geni_studio.config.connectivity import probe_saved_settings
 
     return probe_saved_settings()
+
+
+class SaveSecretBody(BaseModel):
+    key: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+
+
+@router.post("/settings/secret")
+def api_save_secret(body: SaveSecretBody) -> dict:
+    """校验密钥后写入 .env；无效时不落盘。"""
+    from geni_studio.cli import env_path, write_env_key
+    from geni_studio.config.connectivity import validate_agent_secret
+    from geni_studio.config.env_loader import apply_env_file, sync_env_secrets_to_dotenv
+
+    ok, detail = validate_agent_secret(body.key, body.value)
+    if not ok:
+        raise HTTPException(status_code=400, detail=detail)
+    try:
+        write_env_key(env_path(), body.key, body.value.strip())
+    except SystemExit as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    apply_env_file(override=True)
+    sync_env_secrets_to_dotenv()
+    return settings_status()

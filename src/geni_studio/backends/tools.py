@@ -43,6 +43,13 @@ def clean_tool_ids(raw: object, label: str) -> list[str]:
 def list_backend_tools() -> dict:
     from geni_studio.backends.cursor_backend import _cursor_backend_enabled
 
+    if os.environ.get("GENI_STUDIO_BACKEND", "").strip().lower() == "codex":
+        from geni_studio.config.context import factory_root
+
+        skills = _skills_in(factory_root() / ".agents" / "skills", "project")
+        skills += _skills_in(Path.home() / ".agents" / "skills", "user")
+        skills += _skills_in(Path.home() / ".codex" / "skills", "user")
+        return {"skills": _unique(skills), "mcp": [], "source": "codex", "detail": ""}
     if not _cursor_backend_enabled():
         return {
             "skills": [],
@@ -75,6 +82,15 @@ def collect_cursor_tools(project_root: Path, user_root: Path) -> dict:
     mcp = _mcp_file(project_root / ".cursor" / "mcp.json", "project")
     mcp += _mcp_file(user_root / ".cursor" / "mcp.json", "user")
     return {"skills": _unique(skills), "mcp": _unique(mcp)}
+
+
+def _skills_in(base: Path, scope: str) -> list[dict]:
+    found: list[dict] = []
+    for path in _skill_files(base):
+        item = _skill_item(path, scope)
+        if item:
+            found.append(item)
+    return found
 
 
 def _skills(root: Path, scope: str) -> list[dict]:

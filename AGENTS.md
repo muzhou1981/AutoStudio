@@ -8,6 +8,10 @@
 2. 涉及架构或技术选型时，阅读 [`docs/architecture.md`](docs/architecture.md) 与 [`docs/decisions/`](docs/decisions/)。
 3. 涉及排期或里程碑时，阅读 [`docs/plans/roadmap.md`](docs/plans/roadmap.md)。
 
+## Web UI 优化
+
+涉及运行、项目、流程、角色、配置页的界面与交互时，优先阅读并按 [`.cursor/skills/geni-studio-web-ui/SKILL.md`](.cursor/skills/geni-studio-web-ui/SKILL.md) 执行；产品规范以 [`docs/design/ui-ux.md`](docs/design/ui-ux.md) 为准。
+
 ## 约束
 
 - 本目录上下文自包含：新的需求、计划、决策写入 `docs/`，不依赖会话记忆。

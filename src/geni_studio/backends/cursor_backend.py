@@ -41,8 +41,10 @@ class CursorBackend:
         self._client = _default_client()
         self._agents: dict[tuple[str, str, str, str], object] = {}
         self._role_sent: set[tuple[str, str, str, str]] = set()
-        # 需求 7：未显式指定时使用 SDK 的 Auto 路由（模型 ID 为 default）。
-        self._model = os.environ.get("GENI_STUDIO_CURSOR_MODEL", "").strip() or "default"
+        # 未指定默认模型时使用 SDK 的 Auto 路由（模型 ID 为 default）。
+        from geni_studio.backends.base import factory_default_model
+
+        self._model = factory_default_model("cursor") or "default"
 
     def _cwd(self) -> str:
         from geni_studio.workspace.context import current_worktree
@@ -133,10 +135,6 @@ class CursorBackend:
                 unregister_active_run(thread_id, run)
         if thread_id and is_stop_requested(thread_id):
             raise RunStopped("本轮已停止")
-        from geni_studio.hitl.control import RunPaused, is_pause_requested
-
-        if thread_id and is_pause_requested(thread_id):
-            raise RunPaused("本轮已暂停")
         from geni_studio.backends.cost import note_cost
 
         usage = getattr(getattr(run, "_terminal_result", None), "usage", None)
@@ -154,7 +152,7 @@ class CursorBackend:
 
 def _cursor_backend_enabled() -> bool:
     mode = os.environ.get("GENI_STUDIO_BACKEND", "").strip().lower()
-    if mode == "stub":
+    if mode in {"stub", "codex"}:
         return False
     if mode == "cursor":
         return True
@@ -162,8 +160,8 @@ def _cursor_backend_enabled() -> bool:
     return bool(os.environ.get("CURSOR_API_KEY", "").strip())
 
 
-def try_cursor_backend() -> AgentBackend | None:
-    if not _cursor_backend_enabled():
+def try_cursor_backend(*, force: bool = False) -> AgentBackend | None:
+    if not force and not _cursor_backend_enabled():
         return None
     bridge_errors: tuple[type[BaseException], ...] = (RuntimeError, OSError)
     try:

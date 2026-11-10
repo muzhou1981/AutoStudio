@@ -1,5 +1,6 @@
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -25,6 +26,93 @@ def test_start_persists_artifacts_and_worktree(tmp_path, monkeypatch):
         text=True,
     ).strip()
     assert branch == f"geni-studio/{st.thread_id}"
+
+
+def test_self_improve_starts_on_the_current_branch(tmp_path, monkeypatch):
+    monkeypatch.setenv("GENI_STUDIO_WORKSPACE", "1")
+    monkeypatch.setenv("GENI_STUDIO_TARGET_ROOT", str(tmp_path))
+    monkeypatch.setenv("GENI_STUDIO_BACKEND", "stub")
+    from geni_studio.config.context import build_run_context
+
+    def wrapped(*args, **kwargs):
+        ctx = build_run_context(*args, **kwargs)
+        workflow = dict(ctx.merged.get("workflow") or {})
+        workflow["profile_id"] = "self_improve"
+        ctx.merged["workflow"] = workflow
+        return ctx
+
+    monkeypatch.setattr("geni_studio.config.context.build_run_context", wrapped)
+    st = GraphRunService(graph).start(human_request="改一处说明")
+    assert st.phase == "awaiting_human"
+    assert Path(st.values["workspace_path"]) == tmp_path.resolve()
+    assert st.values["base_branch"]
+    assert not (tmp_path / ".geni_studio" / "worktrees").exists()
+    assert (tmp_path / ".geni_studio" / "runs" / st.thread_id / "base_branch.txt").is_file()
+
+
+def test_current_branch_layout_commits_after_approval(tmp_path):
+    from geni_studio.workspace.layout import (
+        commit_current_branch,
+        prepare_run_layout,
+    )
+
+    layout = prepare_run_layout(tmp_path, "run1", on_current_branch=True)
+    assert layout.worktree == tmp_path.resolve()
+    assert not (tmp_path / ".geni_studio" / "worktrees").exists()
+    (tmp_path / "note.txt").write_text("已改\n", encoding="utf-8")
+    record = commit_current_branch(str(layout.worktree), layout.base_branch, "补上一行说明")
+    assert "已由程序员" in record
+    assert "没有未提交" not in record
+    shown = subprocess.check_output(
+        ["git", "-C", os.fspath(tmp_path), "show", "HEAD:note.txt"],
+        text=True,
+    )
+    assert shown == "已改\n"
+    branch = subprocess.check_output(
+        ["git", "-C", os.fspath(tmp_path), "rev-parse", "--abbrev-ref", "HEAD"],
+        text=True,
+    ).strip()
+    assert branch == layout.base_branch
+    empty = commit_current_branch(str(layout.worktree), layout.base_branch, "")
+    assert "没有未提交" in empty
+
+
+def test_current_branch_allows_dirty_start_but_refuses_commit_on_wrong_branch(tmp_path):
+    from geni_studio.workspace.layout import (
+        WorkspaceError,
+        commit_current_branch,
+        prepare_run_layout,
+    )
+
+    layout = prepare_run_layout(tmp_path, "run1", on_current_branch=True)
+    (tmp_path / "dirty.txt").write_text("先写着\n", encoding="utf-8")
+    layout2 = prepare_run_layout(tmp_path, "run2", on_current_branch=True)
+    assert layout2.base_branch == layout.base_branch
+    subprocess.check_call(["git", "-C", os.fspath(tmp_path), "checkout", "-b", "other"])
+    with pytest.raises(WorkspaceError, match="拒绝提交"):
+        commit_current_branch(os.fspath(tmp_path), layout.base_branch, "不该提交")
+
+
+def test_current_branch_activity_does_not_commit_early(monkeypatch):
+    from geni_studio.workflows.executable import _activity
+
+    seen: dict[str, str] = {}
+
+    def fake(**kwargs):
+        seen["prompt"] = kwargs["user_prompt"]
+        return "ok"
+
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", fake)
+    node = {
+        "id": "change_code",
+        "name": "改代码",
+        "role": "developer",
+        "inputs": [],
+        "outputs": ["code_change"],
+        "on_current_branch": True,
+    }
+    _activity(node)({"human_request": "改一处"})
+    assert "不要执行 git commit" in seen["prompt"]
 
 
 def test_sqlite_checkpoint_resumes(tmp_path, monkeypatch):

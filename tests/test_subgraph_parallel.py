@@ -43,14 +43,9 @@ def test_builtin_subgraphs_are_listed_and_the_fullnet_calls_npu() -> None:
     parallel = next(node for node in loaded["nodes"] if node["kind"] == "parallel")
     assert [branch["name"] for branch in parallel["branches"]] == ["算子甲", "算子乙"]
     assert parallel["branches"][0]["nodes"][0]["subgraph_id"] == "npu_operator_dev"
-    _compiled, state = compile_for_project("llm_fullnet", checkpointer=MemorySaver())
-    labels = [node["label"] for node in state["workflow_nodes"]]
-    assert "整网适配" in labels
-    assert "算子甲 · 算子合同" in labels
-    assert "算子甲 · 分层验证" in labels
-    assert "算子乙 · 约束表" in labels
-    assert "算子乙 · 代表用例" in labels
-    assert "集成验证" in labels
+    # 目录中仍可查看与编辑，但不能把含人工关卡的并行图当作可执行能力。
+    with pytest.raises(ConfigError, match="并行支路暂不支持"):
+        compile_for_project("llm_fullnet", checkpointer=MemorySaver())
 
 
 def test_parallel_branches_run_together(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

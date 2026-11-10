@@ -1,5 +1,6 @@
 """Web 配置 API 与 registry 测试。"""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 from geni_studio.config.context import ConfigError
 from geni_studio.config.registry import (
     apply_project_form,
+    delete_project,
     describe_project_directory,
     effective_config_summary,
     list_directory_children,
@@ -40,6 +42,51 @@ def test_config_api_lists():
     r2 = client.get("/api/config/projects")
     assert r2.status_code == 200
     assert "_example" in {x["project_id"] for x in r2.json()["projects"]}
+
+
+def test_delete_project_removes_directory(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("geni_studio.config.registry.factory_root", lambda: tmp_path)
+    (tmp_path / "scenarios" / "npu_operator").mkdir(parents=True)
+    (tmp_path / "scenarios" / "npu_operator" / "scenario.yaml").write_text(
+        "scenario_key: npu_operator\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "projects").mkdir()
+    save_project_yaml(
+        "gone",
+        "project_id: gone\ntitle: Gone\nscenario_key: npu_operator\n",
+        root=tmp_path,
+        create=True,
+    )
+    delete_project("gone", root=tmp_path)
+    assert not (tmp_path / "projects" / "gone").exists()
+    client = TestClient(app)
+    still = client.post("/api/config/projects", json={"title": "api-del", "project_id": "api-del"})
+    assert still.status_code == 200
+    removed = client.delete("/api/config/projects/api-del")
+    assert removed.status_code == 200
+    assert removed.json()["deleted"] is True
+    assert client.get("/api/config/projects/api-del").status_code == 404
+
+
+def test_workspace_field_check_allows_factory_root(monkeypatch) -> None:
+    from geni_studio.config.context import factory_root
+    from geni_studio.workspace.layout import workspace_config_error
+
+    assert workspace_config_error(str(factory_root())) is None
+
+
+def test_project_field_check_api():
+    client = TestClient(app)
+    ok = client.get("/api/config/projects/field-check", params={"workspace": ""})
+    assert ok.status_code == 200
+    assert ok.json()["ok"] is True
+    bad_ws = client.get(
+        "/api/config/projects/field-check",
+        params={"workspace": "/tmp"},
+    )
+    assert bad_ws.json()["ok"] is False
+    assert "git" in bad_ws.json()["errors"]["workspace"]
 
 
 def test_describe_project_directory_matches_workspace(tmp_path: Path) -> None:
@@ -96,6 +143,62 @@ def test_config_api_settings():
     r = client.get("/api/config/settings")
     assert r.status_code == 200
     assert "keys" in r.json()
+
+
+def test_settings_secret_reports_length_not_value(tmp_path, monkeypatch):
+    monkeypatch.setattr("geni_studio.config.registry.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.cli.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.env_loader.factory_root", lambda: tmp_path)
+    (tmp_path / ".env").write_text("CURSOR_API_KEY=abcdef\n", encoding="utf-8")
+    from geni_studio.config.registry import settings_status
+
+    body = settings_status(tmp_path)
+    key = next(k for k in body["keys"] if k["name"] == "CURSOR_API_KEY")
+    assert key["configured"] is True
+    assert key["secret_length"] == 6
+    assert "abcdef" not in json.dumps(body, ensure_ascii=False)
+
+
+def test_save_secret_validates_before_persist(tmp_path, monkeypatch):
+    import json as json_mod
+
+    monkeypatch.setattr("geni_studio.config.registry.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.cli.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.env_loader.factory_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        "geni_studio.config.connectivity.validate_agent_secret",
+        lambda _key, _val: (True, "API Key 可用。"),
+    )
+    client = TestClient(app)
+    bad = client.post(
+        "/api/config/settings/secret",
+        json={"key": "PATH", "value": "x"},
+    )
+    assert bad.status_code == 400
+    ok = client.post(
+        "/api/config/settings/secret",
+        json={"key": "CURSOR_API_KEY", "value": "secret-value"},
+    )
+    assert ok.status_code == 200
+    body = ok.json()
+    key = next(k for k in body["keys"] if k["name"] == "CURSOR_API_KEY")
+    assert key["configured"] is True
+    assert key["secret_length"] == len("secret-value")
+    assert "secret-value" not in json_mod.dumps(body)
+
+
+def test_settings_cursor_key_from_environ_only(tmp_path, monkeypatch):
+    monkeypatch.delenv("GENI_STUDIO_BACKEND", raising=False)
+    monkeypatch.setattr("geni_studio.config.registry.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.env_loader.factory_root", lambda: tmp_path)
+    (tmp_path / ".env").write_text("CURSOR_API_KEY=\n", encoding="utf-8")
+    monkeypatch.setenv("CURSOR_API_KEY", "from-env")
+    from geni_studio.config.registry import settings_status
+
+    body = settings_status(tmp_path)
+    assert body["effective_backend"] == "cursor"
+    key = next(k for k in body["keys"] if k["name"] == "CURSOR_API_KEY")
+    assert key["configured"] is True
 
 
 def test_config_page_and_static():
@@ -212,13 +315,53 @@ def test_project_remote_url_roundtrip_and_rejects_a_path(tmp_path):
     assert project_form_view("webtest", tmp_path)["remote_url"] == ""
 
 
-def test_project_page_puts_remote_url_between_description_and_workspace():
+def test_api_form_save_preserves_remote_url_when_omitted(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("geni_studio.config.registry.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.workflow_defs.factory_root", lambda: tmp_path)
+    (tmp_path / "scenarios" / "npu_operator").mkdir(parents=True)
+    (tmp_path / "scenarios" / "npu_operator" / "scenario.yaml").write_text(
+        "scenario_key: npu_operator\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "workflows" / "alpha").mkdir(parents=True)
+    (tmp_path / "workflows" / "alpha" / "workflow.yaml").write_text(
+        "workflow_id: alpha\ntitle: Alpha\nnodes:\n- {id: start, kind: start, name: 启动, role: human}\n",
+        encoding="utf-8",
+    )
+    save_project_yaml(
+        "keep-remote",
+        "project_id: keep-remote\ntitle: T\nremote_url: https://github.com/org/r.git\n"
+        "scenario_key: npu_operator\n",
+        root=tmp_path,
+        create=True,
+    )
+    client = TestClient(app)
+    payload = {
+        "title": "T2",
+        "description": "",
+        "scenario_key": "npu_operator",
+        "profile_id": "alpha",
+        "max_dev_retries": None,
+        "design_track_mode": "inherit",
+        "skip_mode": "inherit",
+        "skip_nodes": [],
+        "notify_chat_id": "",
+        "notify_open_id": "",
+        "workspace": "",
+    }
+    r = client.put("/api/config/projects/keep-remote/form", json=payload)
+    assert r.status_code == 200
+    view = project_form_view("keep-remote", tmp_path)
+    assert view["title"] == "T2"
+    assert view["remote_url"] == "https://github.com/org/r.git"
+
+
+def test_project_page_workspace_follows_description():
     page = TestClient(app).get("/project").text
     description = page.index('id="fieldDescription"')
-    remote = page.index('id="fieldRemoteUrl"')
     workspace = page.index('id="fieldWorkspace"')
-    assert description < remote < workspace
-    assert 'label="远程仓库"' in page
+    assert description < workspace
+    assert 'id="fieldRemoteUrl"' not in page
 
 
 def test_project_workspace_overrides_default_root(tmp_path, monkeypatch):
@@ -311,7 +454,7 @@ def test_web_sets_backend_and_masks_api_key(tmp_path, monkeypatch):
     assert implied.json()["effective_backend"] == "cursor"
     assert "secret-value" not in implied.text
     hint = next(k for k in implied.json()["keys"] if k["name"] == "GENI_STUDIO_BACKEND")
-    assert "当前生效 cursor" in hint["value_hint"]
+    assert hint["value_hint"] == "cursor"  # 当前进程仍显式选择 cursor。
 
 
 def _ready_lark(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -339,7 +482,7 @@ def test_probe_reports_connected_for_stub(monkeypatch, tmp_path):
     assert names["飞书"] == "ok"
 
 
-def test_probe_skips_missing_cursor_key_and_keeps_saved_value(monkeypatch):
+def test_probe_reports_missing_cursor_key(monkeypatch):
     from geni_studio.config.connectivity import probe_saved_settings
 
     _ready_lark(monkeypatch)
@@ -347,9 +490,9 @@ def test_probe_skips_missing_cursor_key_and_keeps_saved_value(monkeypatch):
     monkeypatch.setenv("GENI_STUDIO_LARK_BACKEND", "lark_cli")
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     body = probe_saved_settings()
-    assert body["ok"] is True
+    assert body["ok"] is False
     agent = next(item for item in body["checks"] if item["name"] == "Agent")
-    assert agent["status"] == "skip"
+    assert agent["status"] == "fail"
     assert "未配置" in agent["detail"]
 
 

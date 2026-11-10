@@ -33,7 +33,7 @@
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css" />
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/utilities.css" />
   <link rel="stylesheet" href="/static/shared.css?v=20261109-roleicon" />
-  <link rel="stylesheet" href="/static/hitl.css?v=20261109-rolemodel" />
+  <link rel="stylesheet" href="/static/hitl.css?v=20261110-hitl-ux" />
   <script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
 </head>
 <body>
@@ -155,10 +155,6 @@
                 <wa-icon name="play" library="system"></wa-icon>
                 <span>Agent</span>
               </a>
-              <a class="sidebar-link sidebar-sub" href="/config#region-workspace">
-                <wa-icon name="file" library="system"></wa-icon>
-                <span>工作区</span>
-              </a>
               <a class="sidebar-link sidebar-sub" href="/config#region-feishu">
                 <wa-icon name="user" library="system"></wa-icon>
                 <span>飞书</span>
@@ -195,10 +191,13 @@
       <main id="workspace" class="workspace-main run-board" aria-label="操作区">
         <div class="run-board-scroll">
           <div class="func-region" id="region-new">
-          <div class="field-row">
-            <wa-select id="project" label="项目" placeholder="先选择项目"></wa-select>
+          <div class="field-row run-project-row">
+            <wa-select id="project" label="项目" placeholder="选择项目" placement="bottom-start"></wa-select>
             <wa-input id="runName" label="Run 命名" placeholder="先选择项目"></wa-input>
           </div>
+          <p class="hint-block" id="runProjectEmpty" hidden>
+            还没有项目。<a href="/project">去项目页新建</a>
+          </p>
           <p class="hint-block" id="runScenarioHint">命名默认是项目标识加递增序号，可改。</p>
           <input id="thread" type="hidden" />
           </div>
@@ -212,43 +211,19 @@
           <ol id="nodeRail" class="node-rail"></ol>
           </div>
 
-          <div class="func-region" id="region-todo">
-          <p class="section-title" id="hitlSectionTitle">人工待办</p>
-          <wa-card id="banner" class="gate-card" hidden with-header>
-            <h3 slot="header" id="bannerText">等待人工处理</h3>
-            <p class="gate-id" id="bannerGate"></p>
-            <article id="hitlReading" class="hitl-reading" hidden></article>
-            <ul id="questionList" hidden class="question-list"></ul>
-            <div id="fieldGateDecision">
-              <wa-select id="decision" label="关卡决定" value="approved">
-                <wa-option value="approved">批准 — 继续流程</wa-option>
-                <wa-option value="rejected">驳回 — 终止本轮</wa-option>
-              </wa-select>
+          <div class="func-region" id="region-setup">
+            <div id="runRoleModels" class="run-role-models">
+              <p class="section-title">角色模型</p>
+              <p class="hint-block" id="roleModelHint">留空表示沿用配置里的默认模型。启动前可改；运行中随当前节点只读。</p>
+              <p class="hint-block" id="roleModelEmpty" hidden>先选择项目。</p>
+              <div id="roleModelList"></div>
             </div>
-            <div id="fieldEscalation" hidden>
-              <wa-select id="escalationChoice" label="升级决策" value="continue">
-                <wa-option value="continue">继续 — 再跑开发</wa-option>
-                <wa-option value="pause">暂停 — 保留现场</wa-option>
-                <wa-option value="abort">终止 — 结束本轮</wa-option>
-              </wa-select>
+            <div class="row-actions region-setup-actions">
+              <wa-button id="btnSaveRun" appearance="outlined" variant="neutral">保存草稿</wa-button>
             </div>
-            <wa-textarea id="reply" label="附言" hint="可空" rows="3" placeholder="补充范围说明或驳回原因…"></wa-textarea>
-            <div class="row-actions">
-              <wa-button id="btnSubmit" variant="brand" disabled>提交并续跑</wa-button>
-              <wa-button id="btnRefresh" appearance="outlined" variant="neutral">刷新状态</wa-button>
-            </div>
-            <wa-callout id="hitlError" variant="danger" hidden></wa-callout>
-          </wa-card>
-          <p class="status-empty" id="gateIdleHint">本轮还没有待办。启动后，关卡、澄清或升级会停在这里。</p>
           </div>
         </div>
         <div class="run-composer" id="region-prompt">
-          <div id="runRoleModels" class="run-role-models">
-            <p class="section-title">角色模型</p>
-            <p class="hint-block" id="roleModelHint">留空表示沿用工厂默认。这一轮的选择不影响其它 Run。</p>
-            <p class="hint-block" id="roleModelEmpty" hidden>先选择项目。</p>
-            <div id="roleModelList"></div>
-          </div>
           <div class="prompt-box" id="promptBox">
             <div id="attachList" class="attach-list" hidden></div>
             <wa-textarea id="req" label="描述本轮交付目标" rows="3" placeholder="例如：为 npu_operator 场景实现 Mul 算子，含单测与性能基线…"></wa-textarea>
@@ -260,8 +235,8 @@
               <input id="attachInput" type="file" multiple hidden />
             </div>
           </div>
-          <div class="row-actions">
-            <wa-button id="btnSaveRun" appearance="outlined" variant="neutral">保存</wa-button>
+          <wa-callout id="startError" class="run-action-error" variant="danger" hidden aria-live="polite"></wa-callout>
+          <div class="row-actions run-primary-actions">
             <wa-button id="btnStart" variant="brand">启动</wa-button>
             <wa-button id="btnContinueRun" appearance="outlined" variant="neutral" hidden>续跑</wa-button>
             <wa-button id="btnPause" appearance="outlined" variant="neutral" hidden>暂停</wa-button>
@@ -271,7 +246,6 @@
           <p class="hint-block" id="interruptHint" hidden>这一轮在中途中断。已完成的节点不会重做。</p>
           <p class="save-note" id="runSaved" hidden aria-live="polite"></p>
           <p class="hint-block" id="feishuNote" hidden></p>
-          <wa-callout id="startError" variant="danger" hidden></wa-callout>
         </div>
       </main>
 
@@ -283,13 +257,47 @@
             <span id="phaseLabel">未启动</span>
           </wa-badge>
         </div>
-        <div class="inspect-body">
-          <div id="statusHuman">
-            <p class="status-empty">还没有运行记录。填写交付目标并启动后，阶段和产物会显示在这里。</p>
+        <div class="inspect-body inspect-body-run">
+          <div class="inspect-run-scroll">
+            <div id="statusHuman">
+              <p class="status-empty">还没有运行记录。填写交付目标并启动后，阶段和产物会显示在这里。</p>
+            </div>
+            <wa-details class="raw" summary="原始状态">
+              <pre id="out">{}</pre>
+            </wa-details>
           </div>
-          <wa-details class="raw" summary="原始状态">
-            <pre id="out">{}</pre>
-          </wa-details>
+          <div id="hitlDockResize" class="hitl-dock-resize" role="separator" aria-orientation="horizontal" aria-label="拖动调整人工待办区域高度" tabindex="0"></div>
+          <div class="func-region inspect-hitl-dock" id="region-todo">
+            <p class="section-title" id="hitlSectionTitle">人工待办</p>
+            <p id="hitlAgentStatus" class="hitl-agent-live" hidden aria-live="polite"></p>
+            <div id="hitlClarifyActions" class="hitl-clarify-actions" hidden></div>
+            <wa-card id="banner" class="gate-card" hidden with-header>
+              <h3 slot="header" id="bannerText">等待人工处理</h3>
+              <p class="gate-id" id="bannerGate"></p>
+              <article id="hitlReading" class="hitl-reading" hidden></article>
+              <ul id="questionList" hidden class="question-list"></ul>
+              <div id="fieldGateDecision">
+                <wa-select id="decision" label="关卡决定" value="approved">
+                  <wa-option value="approved">批准 — 继续流程</wa-option>
+                  <wa-option value="rejected">驳回 — 终止本轮</wa-option>
+                </wa-select>
+              </div>
+              <div id="fieldEscalation" hidden>
+                <wa-select id="escalationChoice" label="升级决策" value="continue">
+                  <wa-option value="continue">继续 — 再跑开发</wa-option>
+                  <wa-option value="pause">暂停 — 保留现场</wa-option>
+                  <wa-option value="abort">终止 — 结束本轮</wa-option>
+                </wa-select>
+              </div>
+              <wa-textarea id="reply" label="附言" hint="可空" rows="3" placeholder="补充范围说明或驳回原因…"></wa-textarea>
+              <div class="row-actions">
+                <wa-button id="btnSubmit" variant="brand" disabled>提交并续跑</wa-button>
+                <wa-button id="btnRefresh" appearance="outlined" variant="neutral">刷新状态</wa-button>
+              </div>
+              <wa-callout id="hitlError" variant="danger" hidden></wa-callout>
+            </wa-card>
+            <p class="status-empty gate-idle-hint" id="gateIdleHint" title="暂无待办；需批复或澄清时表单会出现在此。">暂无待办；需批复或澄清时表单会出现在此。</p>
+          </div>
         </div>
       </aside>
       </div>
@@ -348,6 +356,7 @@
             <div class="row-actions" id="flowSaveRow">
               <wa-button id="btnCopyLoaded" appearance="outlined" variant="neutral" hidden>复制</wa-button>
               <wa-button id="btnSaveFlow" appearance="outlined" variant="neutral" hidden>保存</wa-button>
+              <wa-button id="btnDeleteFlow" appearance="outlined" variant="danger" hidden>删除</wa-button>
             </div>
             </div>
             </div>
@@ -485,15 +494,12 @@
       <div class="app-view" data-route="config">
       <main id="config-main" class="workspace-main" aria-label="配置">
         <div class="composer-block">
-          <section class="config-pane-project" aria-labelledby="projectHeading">
+          <section class="config-pane-project config-form-half" aria-labelledby="projectHeading">
             <div class="func-region" id="region-project">
             <p class="section-title" id="projectHeading">项目</p>
             <div id="openPicker">
               <wa-select id="projectPick" label="选择项目" placeholder="选择项目"></wa-select>
-              <div class="row-actions" id="openChosenAction">
-                <wa-button id="btnOpenChosen" variant="brand">打开</wa-button>
-              </div>
-              <p class="hint-block" id="openHint">先选择要打开的项目。</p>
+              <p class="hint-block" id="openHint">从列表中选择项目即可打开。</p>
               <p class="hint-block" id="openEmpty" hidden>还没有项目。</p>
               <div class="row-actions" id="openEmptyAction" hidden>
                 <wa-button id="btnGoNew" appearance="outlined" variant="neutral">新建</wa-button>
@@ -521,9 +527,15 @@
             <div id="projectFields">
               <wa-input id="fieldTitle" label="标题"></wa-input>
               <wa-input id="fieldDescription" label="说明"></wa-input>
-              <wa-input id="fieldRemoteUrl" label="远程仓库" hint="git 远端地址，可空" placeholder="https://github.com/org/repo.git" spellcheck="false"></wa-input>
-              <wa-input id="fieldWorkspace" label="工作区" hint="待开发项目的 git 目录，可空" placeholder="/path/to/repo" spellcheck="false"></wa-input>
+              <div class="dir-path-row workspace-pick-row">
+                <wa-input id="fieldWorkspace" label="工作区" hint="待开发项目的 git 目录，可空" placeholder="未选择" spellcheck="false" readonly></wa-input>
+                <wa-button id="btnPickWorkspace" appearance="outlined" variant="neutral" aria-label="选择工作区目录">
+                  <svg viewBox="0 0 576 512" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M88.7 223.8L0 375.8 0 96C0 60.7 28.7 32 64 32l117.5 0c17 0 33.3 6.7 45.3 18.7l26.5 26.5c12 12 28.3 18.7 45.3 18.7L416 96c35.3 0 64 28.7 64 64l0 32-336 0c-22.8 0-43.8 12.1-55.3 31.8zm27.6 16.1C122.1 230 132.6 224 144 224l400 0c11.5 0 22 6.1 27.7 16.1s5.7 22.2-.1 32.1l-112 192C453.9 474 443.4 480 432 480L32 480c-11.5 0-22-6.1-27.7-16.1s-5.7-22.2 .1-32.1l112-192z"/></svg>
+                </wa-button>
+                <wa-button id="btnClearWorkspace" appearance="outlined" variant="neutral" size="s" hidden>清空</wa-button>
+              </div>
               <p class="hint-block" id="workspaceHint"></p>
+              <p id="fieldWorkspaceError" class="inline-error field-inline-error" hidden aria-live="polite"></p>
             </div>
             </div>
 
@@ -563,6 +575,7 @@
             <div class="row-actions" id="projectActions">
               <wa-button id="btnCreateProject" variant="brand">创建</wa-button>
               <wa-button id="btnSaveProject" appearance="outlined" variant="neutral" hidden>保存</wa-button>
+              <wa-button id="btnDeleteProject" appearance="outlined" variant="danger" hidden>删除</wa-button>
             </div>
             <wa-details class="raw" id="projectRaw" summary="原文 project.yaml">
               <wa-textarea id="projectYaml" label="整份 YAML" rows="12" spellcheck="false" placeholder="先选择项目，或新建一个。"></wa-textarea>
@@ -576,21 +589,23 @@
 
           <hr class="main-divider config-pane-split" />
 
-          <section class="config-pane-runtime" aria-labelledby="agentHeading">
+          <section class="config-pane-runtime config-form-half" aria-labelledby="agentHeading">
             <div class="func-region" id="region-agent">
             <p class="section-title" id="agentHeading">Agent</p>
-            <p class="panel-lead">这些值与具体项目无关，写入工厂根目录的 .env。API Key 只保存，页面不回显。</p>
             <wa-select id="backendPick" label="后端" value="stub">
-              <wa-option value="stub">stub，不调用 Cursor</wa-option>
-              <wa-option value="cursor">cursor，Cursor SDK</wa-option>
+              <wa-option value="stub">stub</wa-option>
+              <wa-option value="cursor">Cursor SDK</wa-option>
+              <wa-option value="codex">Codex SDK</wa-option>
             </wa-select>
-            <wa-input id="modelInput" label="模型" hint="留空使用 Auto" placeholder="留空即 Auto"></wa-input>
-            <wa-input id="apiKeyInput" label="Cursor API Key" hint="不改就留空" type="password" placeholder="只写入 .env"></wa-input>
+            <div class="config-field-api-key">
+              <label class="config-api-key-label" id="apiKeyFieldLabel" for="apiKeyInput">API Key</label>
+              <div class="config-api-key-row">
+                <wa-input id="apiKeyInput" class="config-api-key-readonly" label="" hint="stub 不调用外部模型，无需填写。" type="text" readonly disabled></wa-input>
+                <wa-button id="btnDeleteApiKey" appearance="outlined" variant="danger" size="s" hidden>删除</wa-button>
+              </div>
+              <wa-button id="btnAddApiKey" appearance="outlined" variant="neutral" hidden>添加密钥</wa-button>
             </div>
-
-            <div class="func-region" id="region-workspace">
-            <p class="section-title" id="defaultWorkspaceHeading">工作区</p>
-            <wa-input id="targetInput" label="默认工作区" hint="项目未填工作区时使用" placeholder="待开发仓库的绝对路径，可空"></wa-input>
+            <wa-select id="modelPick" label="默认模型" placeholder="后端默认"></wa-select>
             </div>
 
             <div class="func-region" id="region-feishu">
@@ -750,9 +765,9 @@
           <article class="help-copy" data-help-article="guide" hidden>
             <ul>
               <li>安装步骤写在仓库的 README，完整说明在 docs/install.md。装好后打开这个 Web 页面。</li>
-              <li>在「配置」的 Agent 里选择后端。想先熟悉界面，选 stub，它不调用 Cursor。</li>
-              <li>要让角色真正工作时，后端选 cursor，并写入 Cursor API Key。密钥只保存，页面不回显。</li>
-              <li>模型可以留空，留空时使用 Auto。写完后按「写入 .env」。</li>
+              <li>在「配置」的 Agent 里选择后端。想先熟悉界面，选 stub，它不调用外部模型。</li>
+              <li>要让角色真正工作时，后端选 cursor 并写入 Cursor API Key，或选 codex 并使用本机 Codex 登录。密钥只保存，页面不回显。</li>
+              <li>默认模型是每一轮里角色没有另选模型时使用的模型。留空则用该后端自己的默认模型。写完后按「写入 .env」。</li>
               <li>工作区可以先空着。项目里填写了工作区时用项目的目录；都没填时，才用配置页的默认工作区。</li>
               <li>飞书可以以后再配。需要通知和在飞书里批复时，再填写飞书后端、Web 地址，以及默认通知群或通知人。</li>
               <li>先准备流程。可以选内置的通用软件开发或自我改进，也可以先在「流程」里新建或复制。</li>
@@ -767,7 +782,7 @@
               <li>新建只写标题。标识按标题生成，中文标题会译成英文。</li>
               <li>打开之后标识只读，再改标题也不会改标识。</li>
               <li>从目录打开时，标识按目录名生成，工作区就是这个目录。</li>
-              <li>项目里可以选择项目类型、设计轨、节点裁剪、通知对象、远程仓库、工作区和流程。</li>
+              <li>项目里可以选择项目类型、设计轨、节点裁剪、通知对象、工作区和流程。本地仓库的初始化与拉取由用户自行完成。</li>
               <li>项目必须选定一份流程。没有流程时，先去创建。</li>
             </ul>
           </article>
@@ -784,6 +799,7 @@
           <article class="help-copy" data-help-article="workflow" hidden>
             <ul>
               <li>可以新建、编辑或导入一份流程。新建只写标题，标识按标题生成。编辑时选中一份就载入，选择框保持可用。导入读取 workflow.yaml，内置标记不会带入。</li>
+              <li>载入非内置流程后，可以在复制和保存旁边删除。删除前要确认。内置流程不能删除。</li>
               <li>宽屏用泳道排列活动和决策点。右栏左缘可以拖动，改变右栏宽度。</li>
               <li>活动要写出输入和输出。每项输出要有模板。</li>
               <li>模板是服务进程能读取的本地文件，或一个 http、https 链接。</li>
@@ -808,10 +824,11 @@
           <article class="help-copy" data-help-article="agent" hidden>
             <ul>
               <li>在「配置」的 Agent 中选择后端。</li>
-              <li>stub 不调用 Cursor。</li>
+              <li>stub 不调用外部模型。</li>
               <li>cursor 使用 Cursor SDK，并复用该工作区里已有的工具、规则和 Skill。</li>
-              <li>模型留空时使用 Auto。</li>
-              <li>API Key 只写入本机配置，页面不回显。</li>
+              <li>codex 使用 Codex SDK，在目标工作区里读写文件并执行命令。</li>
+              <li>默认模型是每一轮里角色没有另选模型时使用的模型。留空则用该后端自己的默认模型。</li>
+              <li>API Key 只有一个输入框，文字随后端变化。只写入本机配置，页面不回显。stub 不需要填写。</li>
             </ul>
           </article>
           <article class="help-copy" data-help-article="workspace" hidden>
@@ -850,8 +867,35 @@
   </div>
 
   <wa-button id="themeToggle" class="theme-fab" appearance="filled" variant="neutral" size="s" aria-label="切换浅色与深色主题">夜晚</wa-button>
+  <script src="/static/api-utils.js?v=20261110-web-ui"></script>
   <script>
     const $ = (id) => document.getElementById(id);
+    const readFetchResponse =
+      window.geniApi && window.geniApi.readFetchResponse
+        ? window.geniApi.readFetchResponse.bind(window.geniApi)
+        : async (response) => {
+            const raw = await response.text();
+            let data = {};
+            if (raw) {
+              try {
+                data = JSON.parse(raw);
+              } catch {
+                data = { detail: raw.trim() };
+              }
+            }
+            return { ok: response.ok, status: response.status, data, raw };
+          };
+    const apiErrorMessage =
+      (window.geniApi && window.geniApi.apiErrorMessage) ||
+      function (data, fallback) {
+        const d = data && data.detail;
+        return typeof d === "string" ? d : fallback;
+      };
+    const formatApiDetail =
+      (window.geniApi && window.geniApi.formatApiDetail) ||
+      function (msg) {
+        return msg == null ? "" : String(msg);
+      };
     let awaitingKind = null;
     const PHASE_LABELS = {
       idle: "未启动",
@@ -945,13 +989,14 @@
     }
 
     function showError(el, msg) {
-      if (!msg) {
+      const text = formatApiDetail(msg);
+      if (!text) {
         el.hidden = true;
         el.textContent = "";
         return;
       }
       el.hidden = false;
-      el.textContent = msg;
+      el.textContent = text;
     }
 
     function setLoading(btn, on) {
@@ -1092,9 +1137,9 @@
             headers: { "X-Filename": encodeURIComponent(file.name) },
             body: file,
           });
-          const data = await r.json();
-          if (!r.ok) {
-            showError($("startError"), data.detail || "附件没有上传。");
+          const { ok, data } = await readFetchResponse(r);
+          if (!ok) {
+            showError($("startError"), apiErrorMessage(data, "附件没有上传。"));
             return;
           }
           runAttachments.push({ id: data.id, name: data.name, size: data.size });
@@ -1110,10 +1155,15 @@
 
     function syncThreadChrome(tid, name) {
       const el = $("sidebarThread");
-      const label = (name || "").trim() || tid || "尚未绑定";
-      $("sidebarThreadLabel").textContent = label;
-      el.classList.toggle("is-active", !!tid);
-      el.title = tid ? (name ? name + " · " + tid : tid) : "";
+      if (el) el.hidden = true;
+    }
+
+    function focusRunRailView(options) {
+      if (document.documentElement.dataset.route !== "hitl") return;
+      applyRoute("/", "#region-rail", {
+        historyMode: "replace",
+        smooth: !!(options && options.smooth),
+      });
     }
 
     function applyBoundRunName(data) {
@@ -1154,9 +1204,10 @@
       const select = document.createElement("wa-select");
       select.label = label;
       select.dataset.role = role;
+      select.setAttribute("placement", "bottom-start");
       const blank = document.createElement("wa-option");
       blank.value = "";
-      blank.textContent = "沿用工厂默认";
+      blank.textContent = "沿用默认模型";
       select.appendChild(blank);
       const known = window.__backendModels || [];
       known.forEach((item) => {
@@ -1192,6 +1243,9 @@
       if (!list) return;
       const projectId = String($("project").value || "").trim();
       const chosen = saved && typeof saved === "object" ? saved : {};
+      if (projectId && typeof window.syncRunBackendModels === "function") {
+        await window.syncRunBackendModels();
+      }
       if (!projectId) {
         list.replaceChildren();
         if (empty) {
@@ -1224,23 +1278,47 @@
       } catch (_) {
         roles = [];
       }
-      const stamp = projectId + ":" + roles.map((role) => role.id).join(",") + ":" + JSON.stringify(chosen) + ":" + (locked ? "1" : "0");
+      const modelKey = (window.__backendModels || []).map((item) => item.id).join(",");
+      const stamp =
+        projectId +
+        ":" +
+        roles.map((role) => role.id).join(",") +
+        ":" +
+        JSON.stringify(chosen) +
+        ":" +
+        (locked ? "1" : "0") +
+        ":" +
+        modelKey;
       if (stamp === roleModelStamp) return;
       ignoreRoleModelChange = true;
       list.replaceChildren();
-      roles.forEach((role) => {
+      for (const role of roles) {
         const select = runModelSelect(role.id, role.label || role.id, chosen[role.id] || "");
-        select.disabled = Boolean(locked);
+        if (locked) select.disabled = true;
         list.appendChild(select);
-      });
+      }
       ignoreRoleModelChange = false;
       pendingRoleModels = roleModelsFromList();
       if (empty) {
         empty.hidden = roles.length > 0;
         empty.textContent = "这个流程里没有需要模型的角色。";
       }
-      roleModelStamp = projectId + ":" + roles.map((role) => role.id).join(",") + ":" + JSON.stringify(pendingRoleModels) + ":" + (locked ? "1" : "0");
+      roleModelStamp =
+        projectId +
+        ":" +
+        roles.map((role) => role.id).join(",") +
+        ":" +
+        JSON.stringify(pendingRoleModels) +
+        ":" +
+        (locked ? "1" : "0") +
+        ":" +
+        modelKey;
     }
+
+    document.addEventListener("geni-run-backend-models", () => {
+      roleModelStamp = "";
+      refreshRunRoleModels(pendingRoleModels || {}, false);
+    });
 
     function clearCurrentRun() {
       stopPoll();
@@ -1403,7 +1481,8 @@
             clearAttachments();
             $("thread").value = item.thread_id;
             syncUrlThread(item.thread_id);
-            refresh();
+            lastRailCurrent = "";
+            void refresh().then(() => focusRunRailView({ smooth: true }));
           });
           const del = document.createElement("button");
           del.type = "button";
@@ -1450,6 +1529,7 @@
       finished: "结束",
     };
     let lastStatus = null;
+    let lastRailCurrent = "";
     let pendingNodeTools = {};
     let pendingRoleModels = {};
     let roleModelStamp = "";
@@ -2035,9 +2115,15 @@
       const retryText = Number.isFinite(limit)
         ? "已用 " + used + " / 上限 " + limit + (used >= limit ? "。已碰到开发重试上限。" : "。未碰到开发重试上限。")
         : "已用 " + used + "。";
-      const session = conversations[cell.id]
-        ? formatConversation(conversations[cell.id])
-        : "<p class=\"artifact-empty\">这一步还没有会话。</p>";
+      const convPayload = conversations[cell.id];
+      const convLive = data.phase === "running" && rail && cell.id === rail.current;
+      const session = convPayload
+        ? formatConversation(convPayload, {
+            live: convLive && (conversationTurnInFlight((convPayload.turns || []).slice(-1)[0]) || !(convPayload.turns || []).length),
+          })
+        : convLive
+          ? formatConversation(null, { live: true })
+          : "<p class=\"artifact-empty\">这一步还没有会话。</p>";
       box.replaceChildren(
         dl,
         conversationSection(cell.id, session),
@@ -2400,12 +2486,26 @@
 
     const conversations = {};
 
-    function formatConversation(payload) {
+    function conversationTurnInFlight(turn) {
+      if (!turn || !turn.events || !turn.events.length) return true;
+      return !turn.events.some((event) => event.kind === "result");
+    }
+
+    function formatConversation(payload, options) {
       const turns = (payload && payload.turns) || [];
-      if (!turns.length) return "<p class=\"artifact-empty\">这一步还没有会话。</p>";
-      return turns.map((turn) => {
+      const live = !!(options && options.live);
+      if (!turns.length) {
+        return live
+          ? "<p class=\"conv-live-status\"><span class=\"conv-live-dot\" aria-hidden=\"true\"></span>思考中…</p>"
+          : "<p class=\"artifact-empty\">这一步还没有会话。</p>";
+      }
+      return turns.map((turn, turnIndex) => {
         const tools = [];
+        const turnLive = live && turnIndex === turns.length - 1 && conversationTurnInFlight(turn);
         let html = "<article class=\"conv-turn\"><h4>第 " + escapeHtml(turn.seq) + " 次</h4>";
+        if (turnLive) {
+          html += "<p class=\"conv-live-status\"><span class=\"conv-live-dot\" aria-hidden=\"true\"></span>思考中…</p>";
+        }
         for (const event of turn.events || []) {
           if (event.kind === "turn") {
             html += "<details><summary>提示</summary><pre class=\"artifact-code\"><code>" + escapeHtml(String(event.prompt || "").slice(0, 4000)) + "</code></pre></details>";
@@ -2417,9 +2517,17 @@
             const message = typeof step.message === "string" ? step.message : JSON.stringify(step.message || "");
             const body = escapeHtml(message).slice(0, 2000);
             if (type === "thinkingMessage") {
-              html += "<details><summary>思考</summary><p>" + body + "</p></details>";
+              if (turnLive) {
+                html += "<pre class=\"artifact-code conv-thinking\"><code>" + body + "</code></pre>";
+              } else {
+                html += "<details><summary>思考</summary><p>" + body + "</p></details>";
+              }
             } else if (type === "toolCall") {
-              tools.push("<li><pre class=\"artifact-code\"><code>" + body + "</code></pre></li>");
+              if (turnLive) {
+                html += "<p class=\"conv-live-tool\">调用工具…</p><pre class=\"artifact-code\"><code>" + body + "</code></pre>";
+              } else {
+                tools.push("<li><pre class=\"artifact-code\"><code>" + body + "</code></pre></li>");
+              }
             } else {
               html += "<p>" + body + "</p>";
             }
@@ -2472,7 +2580,19 @@
       return section;
     }
 
+    function shouldFollowRailPhase(phase) {
+      return phase === "running" || phase === "paused" || phase === "interrupted";
+    }
+
     function applyStatus(data) {
+      const prevCurrent = lastRailCurrent;
+      const nextCurrent = (data && data.rail && data.rail.current) || "";
+      const phase = data && data.phase;
+      const railMoved = nextCurrent && nextCurrent !== prevCurrent;
+      if (shouldFollowRailPhase(phase) && railMoved) {
+        setNodeParam("");
+      }
+      lastRailCurrent = nextCurrent;
       const key = JSON.stringify({
         phase: data && data.phase,
         rail: data && data.rail,
@@ -2481,9 +2601,8 @@
       const same = key === statusKey && data && data.thread_id;
       statusKey = key;
       lastStatus = data;
-      if (same) return;
       renderRail(data && data.rail);
-      renderInspect(data);
+      if (!same || railMoved) renderInspect(data);
     }
 
     async function loadIdleRail() {
@@ -2517,6 +2636,49 @@
       }
     }
 
+    function appendReplySnippet(text) {
+      const area = $("reply");
+      if (!area) return;
+      const chunk = String(text || "").trim();
+      if (!chunk) return;
+      const base = String(area.value || "").trim();
+      area.value = base ? base + "\n\n" + chunk + "\n" : chunk + "\n";
+      area.focus();
+    }
+
+    function renderClarifyActions(questions) {
+      const box = $("hitlClarifyActions");
+      if (!box) return;
+      box.replaceChildren();
+      if (!questions || !questions.length) {
+        box.hidden = true;
+        return;
+      }
+      box.hidden = false;
+      const title = document.createElement("p");
+      title.className = "section-title";
+      title.textContent = "待澄清";
+      box.appendChild(title);
+      const list = document.createElement("ul");
+      list.className = "question-list question-actions";
+      questions.forEach((question, index) => {
+        const li = document.createElement("li");
+        const text = document.createElement("span");
+        text.className = "question-text";
+        text.textContent = (index + 1) + ". " + question;
+        const use = document.createElement("button");
+        use.type = "button";
+        use.className = "question-use";
+        use.textContent = "填入附言";
+        use.addEventListener("click", () => {
+          appendReplySnippet((index + 1) + ". " + question);
+        });
+        li.append(text, use);
+        list.appendChild(li);
+      });
+      box.appendChild(list);
+    }
+
     function renderReading(sections) {
       const box = $("hitlReading");
       box.replaceChildren();
@@ -2525,14 +2687,36 @@
         return;
       }
       box.hidden = false;
-      $("questionList").hidden = true;
       for (const section of sections) {
+        if (section.title === "待澄清") continue;
         const heading = document.createElement("h4");
         heading.textContent = section.title;
         const body = document.createElement("p");
         body.textContent = section.body;
         box.append(heading, body);
       }
+      if (!box.childElementCount) box.hidden = true;
+    }
+
+    function syncAgentLiveBanner(data) {
+      const el = $("hitlAgentStatus");
+      if (!el) return;
+      const phase = data && data.phase;
+      if (data && data.awaiting_human) {
+        el.hidden = true;
+        el.textContent = "";
+        return;
+      }
+      if (phase === "running") {
+        const cell = currentCell(data.rail);
+        el.hidden = false;
+        el.className = "hitl-agent-live is-busy";
+        el.textContent = cell && cell.label ? "正在执行：" + cell.label + "…" : "流程推进中…";
+        return;
+      }
+      el.hidden = true;
+      el.className = "hitl-agent-live";
+      el.textContent = "";
     }
 
     function escapeHtml(s) {
@@ -2548,25 +2732,23 @@
         $("reply").label = "澄清答复";
         $("reply").hint = "必填";
         $("reply").placeholder = "逐条回答待澄清问题…";
-        if (ah.questions && ah.questions.length) {
-          qList.hidden = false;
-          qList.innerHTML = ah.questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("");
-        } else {
-          qList.hidden = true;
-          qList.innerHTML = "";
-        }
+        qList.hidden = true;
+        qList.replaceChildren();
+        renderClarifyActions(ah.questions || []);
       } else if (ah && ah.kind === "escalation") {
         $("reply").label = "说明";
         $("reply").hint = "可空";
         $("reply").placeholder = "补充决策理由…";
         qList.hidden = true;
-        qList.innerHTML = "";
+        qList.replaceChildren();
+        renderClarifyActions([]);
       } else {
         $("reply").label = "附言";
         $("reply").hint = "可空";
         $("reply").placeholder = "补充范围说明或驳回原因…";
         qList.hidden = true;
-        qList.innerHTML = "";
+        qList.replaceChildren();
+        renderClarifyActions([]);
       }
     }
 
@@ -2578,6 +2760,7 @@
       const btn = $("btnStart");
       const open = roundIsOpen(phase);
       btn.disabled = open;
+      btn.loading = false;
       btn.textContent = open ? "进行中" : "启动";
       const save = $("btnSaveRun");
       if (save) {
@@ -2630,6 +2813,26 @@
 
     let pushSource = null;
     let pushThread = "";
+    let startPollTimer = null;
+
+    function stopStartPoll() {
+      if (startPollTimer) {
+        clearInterval(startPollTimer);
+        startPollTimer = null;
+      }
+    }
+
+    function armStartPoll() {
+      stopStartPoll();
+      if (!startInFlight) return;
+      startPollTimer = setInterval(() => {
+        if (!startInFlight) {
+          stopStartPoll();
+          return;
+        }
+        void refresh({ quiet: true });
+      }, 1200);
+    }
 
     function ingestStatus(data) {
       $("out").textContent = JSON.stringify(data, null, 2);
@@ -2641,6 +2844,7 @@
       syncStopButton(data.phase);
       const ah = data.awaiting_human;
       $("btnSubmit").disabled = data.phase !== "awaiting_human";
+      syncAgentLiveBanner(data);
       if (ah) {
         $("banner").hidden = false;
         $("gateIdleHint").hidden = true;
@@ -2654,15 +2858,15 @@
         $("gateIdleHint").hidden = data.phase === "awaiting_human";
         if (data.phase === "completed") {
           $("gateIdleHint").hidden = false;
-          $("gateIdleHint").textContent = "这一轮已结束。右侧是最后一步的产物。";
+          $("gateIdleHint").textContent = "本轮已结束，右侧为最后一步产物。";
         } else if (data.phase === "rejected") {
           $("gateIdleHint").hidden = false;
-          $("gateIdleHint").textContent = "这一轮已驳回。";
+          $("gateIdleHint").textContent = "本轮已驳回。";
         } else if (data.phase === "stopped") {
           $("gateIdleHint").hidden = false;
-          $("gateIdleHint").textContent = "这一轮已停止。";
+          $("gateIdleHint").textContent = "本轮已停止。";
         } else {
-          $("gateIdleHint").textContent = "本轮还没有待办。启动后，关卡、澄清或升级会停在这里。";
+          $("gateIdleHint").textContent = "暂无待办；需批复或澄清时表单会出现在此。";
         }
         applyHitlFormMode(null);
         renderReading([]);
@@ -2707,6 +2911,7 @@
       showError($("hitlError"), "");
       if (!tid) {
         stopPoll();
+        lastRailCurrent = "";
         renderInspect(null);
         syncThreadChrome("");
         applyBoundRunName(null);
@@ -2725,64 +2930,33 @@
       if (!quiet) setLoading($("btnRefresh"), true);
       try {
         const r = await fetch("/api/runs/" + encodeURIComponent(tid));
-        const data = await r.json();
-        $("out").textContent = JSON.stringify(data, null, 2);
-        if (!r.ok) {
+        const { ok, status, data, raw } = await readFetchResponse(r);
+        $("out").textContent = raw || JSON.stringify(data, null, 2);
+        if (!ok) {
+          if (startInFlight && (status === 404 || status === 503)) {
+            return;
+          }
           showError(
             $("startError"),
-            r.status === 404
+            status === 404
               ? "没有这一轮。核对地址栏中的 thread_id。"
-              : "读不到这一轮的状态。检查服务是否还在，然后刷新。"
+              : apiErrorMessage(data, "读不到这一轮的状态。检查服务是否还在，然后刷新。")
           );
           if (startInFlight) {
             syncStartButton("running");
             syncStopButton("running");
             return;
           }
-          syncStartButton(r.status === 404 ? "idle" : (lastStatus && lastStatus.phase));
-          syncStopButton(r.status === 404 ? "idle" : (lastStatus && lastStatus.phase));
+          syncStartButton(status === 404 ? "idle" : (lastStatus && lastStatus.phase));
+          syncStopButton(status === 404 ? "idle" : (lastStatus && lastStatus.phase));
           return;
         }
         showError($("startError"), "");
-        applyStatus(data);
         const models = (data.values && data.values.role_models) || {};
         pendingRoleModels = models;
         const ended = data.phase === "completed" || data.phase === "rejected" || data.phase === "stopped";
+        ingestStatus(data);
         refreshRunRoleModels(models, ended);
-        applyBoundRunName(data);
-        syncThreadChrome(tid, data.values && data.values.run_name);
-        syncStartButton(data.phase);
-        syncStopButton(data.phase);
-        const ah = data.awaiting_human;
-        $("btnSubmit").disabled = data.phase !== "awaiting_human";
-        if (ah) {
-          $("banner").hidden = false;
-          $("gateIdleHint").hidden = true;
-          $("bannerText").textContent = ah.summary || "等待人工处理";
-          const current = data.rail && data.rail.cells.find((cell) => cell.id === data.rail.current);
-          $("bannerGate").textContent = current ? current.label : "";
-          applyHitlFormMode(ah);
-          renderReading(data.reading);
-        } else {
-          $("banner").hidden = true;
-          $("gateIdleHint").hidden = data.phase === "awaiting_human";
-          if (data.phase === "completed") {
-            $("gateIdleHint").hidden = false;
-            $("gateIdleHint").textContent = "这一轮已结束。右侧是最后一步的产物。";
-          } else if (data.phase === "rejected") {
-            $("gateIdleHint").hidden = false;
-            $("gateIdleHint").textContent = "这一轮已驳回。";
-          } else if (data.phase === "stopped") {
-            $("gateIdleHint").hidden = false;
-            $("gateIdleHint").textContent = "这一轮已停止。";
-          } else {
-            $("gateIdleHint").textContent = "本轮还没有待办。启动后，关卡、澄清或升级会停在这里。";
-          }
-          applyHitlFormMode(null);
-          renderReading([]);
-        }
-        armPoll(data.phase);
-        await loadRunList();
       } catch (err) {
         showError($("startError"), "读不到这一轮的状态。检查服务是否还在，然后刷新。");
       } finally {
@@ -2816,7 +2990,7 @@
         return;
       }
       if (!body.human_request) {
-        showError($("startError"), "请先填写需求说明。");
+        showError($("startError"), "请先填写交付目标。");
         $("req").focus();
         return;
       }
@@ -2826,25 +3000,29 @@
         body.thread_id = tid;
         $("thread").value = tid;
         syncUrlThread(tid);
+        syncThreadChrome(tid, String($("runName").value || "").trim());
+        focusRunRailView({ smooth: true });
       }
       const btn = $("btnStart");
       startInFlight = true;
       syncStartButton("running");
       syncStopButton("running");
-      setLoading(btn, true);
+      armStartPoll();
       try {
         const r = await fetch("/api/runs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const data = await r.json();
-        $("out").textContent = JSON.stringify(data, null, 2);
-        if (!r.ok) {
+        const parsed = await readFetchResponse(r);
+        const { ok, data, raw } = parsed;
+        $("out").textContent = raw || "(空响应)";
+        if (!ok) {
           $("thread").value = previousThread;
           syncUrlThread(previousThread);
+          syncThreadChrome(previousThread, "");
           if (!previousThread && draftId) syncUrlDraft(draftId);
-          showError($("startError"), data.detail || "启动失败，请检查项目类型或项目配置。");
+          showError($("startError"), apiErrorMessage(data, "启动失败，请检查项目类型或项目配置。"));
           syncStartButton(lastStatus && lastStatus.phase);
           syncStopButton(lastStatus && lastStatus.phase);
           return;
@@ -2866,11 +3044,15 @@
         pendingNodeTools = {};
         clearAttachments();
         roleModelStamp = "";
-        await refresh();
+        ingestStatus(data);
+        focusRunRailView({ smooth: true });
+        armPoll(data.phase);
+        await refresh({ quiet: true });
       } catch (err) {
         if (!$("thread").value.trim() || $("thread").value.trim() === tid) {
           $("thread").value = previousThread;
           syncUrlThread(previousThread);
+          syncThreadChrome(previousThread, "");
           if (!previousThread && draftId) syncUrlDraft(draftId);
         }
         showError($("startError"), "启动没有返回。检查服务是否还在，然后重试。");
@@ -2878,7 +3060,8 @@
         syncStopButton(lastStatus && lastStatus.phase);
       } finally {
         startInFlight = false;
-        setLoading(btn, false);
+        stopStartPoll();
+        btn.loading = false;
         syncStartButton((lastStatus && lastStatus.phase) || "idle");
         syncStopButton((lastStatus && lastStatus.phase) || "idle");
       }
@@ -2896,11 +3079,11 @@
         const r = await fetch("/api/runs/" + encodeURIComponent(tid) + "/stop", {
           method: "POST",
         });
-        const data = await r.json();
-        $("out").textContent = JSON.stringify(data, null, 2);
-        if (!r.ok) {
+        const { ok, data, raw } = await readFetchResponse(r);
+        $("out").textContent = raw || JSON.stringify(data, null, 2);
+        if (!ok) {
           if (lastStatus) lastStatus.stop_requested = false;
-          showError($("startError"), data.detail || "停不了这一轮。刷新后再看阶段。");
+          showError($("startError"), apiErrorMessage(data, "停不了这一轮。刷新后再看阶段。"));
           syncStopButton((lastStatus && lastStatus.phase) || "running");
           return;
         }
@@ -2927,10 +3110,10 @@
       btn.loading = true;
       try {
         const r = await fetch("/api/runs/" + encodeURIComponent(tid) + "/continue", { method: "POST" });
-        const data = await r.json();
-        $("out").textContent = JSON.stringify(data, null, 2);
-        if (!r.ok) {
-          showError($("startError"), data.detail || "没能续跑。");
+        const { ok, data, raw } = await readFetchResponse(r);
+        $("out").textContent = raw || JSON.stringify(data, null, 2);
+        if (!ok) {
+          showError($("startError"), apiErrorMessage(data, "没能续跑。"));
           syncStopButton((lastStatus && lastStatus.phase) || "interrupted");
           return;
         }
@@ -2958,11 +3141,14 @@
           "/api/runs/" + encodeURIComponent(tid) + (resume ? "/resume" : "/pause"),
           { method: "POST" }
         );
-        const data = await r.json();
-        $("out").textContent = JSON.stringify(data, null, 2);
-        if (!r.ok) {
+        const { ok, data, raw } = await readFetchResponse(r);
+        $("out").textContent = raw || JSON.stringify(data, null, 2);
+        if (!ok) {
           if (lastStatus) lastStatus.pause_requested = false;
-          showError($("startError"), data.detail || (resume ? "继续不了这一轮。" : "暂停不了这一轮。"));
+          showError(
+            $("startError"),
+            apiErrorMessage(data, resume ? "继续不了这一轮。" : "暂停不了这一轮。")
+          );
           syncStopButton((lastStatus && lastStatus.phase) || "running");
           return;
         }
@@ -2998,10 +3184,10 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        const data = await r.json();
-        $("out").textContent = JSON.stringify(data, null, 2);
-        if (!r.ok) {
-          showError($("hitlError"), data.detail || "提交失败，当前可能不在等待人工状态。");
+        const { ok, data, raw } = await readFetchResponse(r);
+        $("out").textContent = raw || JSON.stringify(data, null, 2);
+        if (!ok) {
+          showError($("hitlError"), apiErrorMessage(data, "提交失败，当前可能不在等待人工状态。"));
           return;
         }
         $("reply").value = "";
@@ -3063,9 +3249,9 @@
             role_models: pendingRoleModels,
           }),
         });
-        const data = await r.json();
-        if (!r.ok) {
-          showError($("startError"), data.detail || "没有保存。");
+        const { ok, data } = await readFetchResponse(r);
+        if (!ok) {
+          showError($("startError"), apiErrorMessage(data, "没有保存。"));
           return;
         }
         draftId = data.draft_id;
@@ -3125,22 +3311,36 @@
     });
 
     async function loadRunConfigOptions() {
+      const pj = $("project");
+      if (!pj) return;
+      const previous = String(pj.value || "").trim();
       try {
         const pr = await fetch("/api/config/projects").then((r) => r.json());
-        const pj = $("project");
         pj.replaceChildren();
         const blankProject = document.createElement("wa-option");
         blankProject.value = "";
         blankProject.textContent = "（不指定项目）";
         pj.append(blankProject);
-        for (const p of pr.projects || []) {
+        const items = pr.projects || [];
+        for (const p of items) {
           const o = document.createElement("wa-option");
           o.value = p.project_id;
-          o.textContent = p.project_id;
+          const title = (p.title || p.project_id || "").trim();
+          o.textContent = title === p.project_id ? p.project_id : title + " (" + p.project_id + ")";
           pj.appendChild(o);
         }
+        const fromUrl = new URLSearchParams(location.search).get("project") || "";
+        const pick =
+          (fromUrl && items.some((p) => p.project_id === fromUrl) && fromUrl) ||
+          (previous && items.some((p) => p.project_id === previous) && previous) ||
+          "";
+        pj.value = pick;
+        const emptyHint = $("runProjectEmpty");
+        if (emptyHint) emptyHint.hidden = items.length > 0;
+        if (pick) syncRunScenarioHint();
       } catch (_) { /* 离线或未启动 API */ }
     }
+    window.loadRunConfigOptions = loadRunConfigOptions;
 
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) stopPoll();
@@ -3152,6 +3352,7 @@
     }
 
     $("project").addEventListener("change", () => {
+      void (async () => {
       const next = String($("project").value || "").trim();
       if (ignoreProjectChange || (draftId && next === loadedDraftProject)) {
         syncRunScenarioHint();
@@ -3162,12 +3363,13 @@
       roleModelStamp = "";
       loadedDraftProject = "";
       syncRunScenarioHint();
-      refreshRunRoleModels({}, false);
+      await refreshRunRoleModels({}, false);
       if (!$("thread").value.trim()) {
         runNameTouched = false;
         fillRunNameSuggestion();
         loadIdleRail();
       }
+      })();
     });
     $("runName").addEventListener("input", () => {
       if (!$("thread").value.trim()) runNameTouched = true;
@@ -3175,7 +3377,11 @@
 
     (function initFromUrl() {
       loadRunToolCatalog();
-      customElements.whenDefined("wa-select").then(() => loadRoleTitles()).then(() => loadRunConfigOptions()).then(() => {
+      customElements.whenDefined("wa-select")
+        .then(() => loadRoleTitles())
+        .then(() => loadRunConfigOptions())
+        .then(() => (typeof window.syncRunBackendModels === "function" ? window.syncRunBackendModels() : null))
+        .then(() => {
         const params = new URLSearchParams(window.location.search);
         const tid = params.get("thread_id") || params.get("thread");
         const draft = params.get("draft") || "";
@@ -3187,7 +3393,7 @@
           openDraft(draft);
         } else {
           loadIdleRail();
-          refreshRunRoleModels({}, false);
+          void refreshRunRoleModels({}, false);
           loadRunList();
           syncStartButton("idle");
         }
@@ -3245,6 +3451,54 @@
         event.preventDefault();
         const delta = event.key === "ArrowRight" ? 16 : -16;
         const next = applyWidth(widthPx() + delta);
+        localStorage.setItem(key, next + "px");
+      });
+    })();
+
+    (function initHitlDockResize() {
+      const handle = $("hitlDockResize");
+      const dock = $("region-todo");
+      if (!handle || !dock) return;
+      const key = "geni_studio_hitl_dock_h";
+      const saved = localStorage.getItem(key);
+      if (saved) document.documentElement.style.setProperty("--hitl-dock-h", saved);
+
+      function applyHeight(px) {
+        const shell = handle.closest(".inspect-body-run");
+        const max = shell ? Math.max(120, shell.clientHeight - 80) : 480;
+        const next = Math.round(Math.min(Math.max(px, 120), max));
+        document.documentElement.style.setProperty("--hitl-dock-h", next + "px");
+        return next;
+      }
+
+      handle.addEventListener("pointerdown", (event) => {
+        if (window.innerWidth < 900) return;
+        event.preventDefault();
+        handle.classList.add("is-dragging");
+        try { handle.setPointerCapture(event.pointerId); } catch (_) { /* 非真实指针 */ }
+        const originY = event.clientY;
+        const originH = dock.getBoundingClientRect().height;
+        function move(ev) {
+          applyHeight(originH + originY - ev.clientY);
+        }
+        function end(ev) {
+          handle.classList.remove("is-dragging");
+          try { handle.releasePointerCapture(ev.pointerId); } catch (_) { /* 未捕获指针 */ }
+          localStorage.setItem(key, applyHeight(dock.getBoundingClientRect().height) + "px");
+          handle.removeEventListener("pointermove", move);
+          handle.removeEventListener("pointerup", end);
+          handle.removeEventListener("pointercancel", end);
+        }
+        handle.addEventListener("pointermove", move);
+        handle.addEventListener("pointerup", end);
+        handle.addEventListener("pointercancel", end);
+      });
+
+      handle.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        const delta = event.key === "ArrowUp" ? 16 : -16;
+        const next = applyHeight(dock.getBoundingClientRect().height + delta);
         localStorage.setItem(key, next + "px");
       });
     })();
@@ -3408,6 +3662,13 @@
         showHelp(helpHash);
         return;
       }
+      if (route === "config" && typeof window.refreshConfigRuntime === "function") {
+        void window.refreshConfigRuntime();
+      }
+      if (route === "hitl") {
+        if (typeof window.loadRunConfigOptions === "function") void window.loadRunConfigOptions();
+        if (typeof window.syncRunBackendModels === "function") void window.syncRunBackendModels();
+      }
       if (!hash || route === "project" || route === "workflow" || route === "role") return;
       const target = document.getElementById(decodeURIComponent(hash.slice(1)));
       const region = markRegion(target);
@@ -3476,6 +3737,17 @@
       <wa-callout id="filePickerError" variant="danger" hidden></wa-callout>
     </div>
   </div>
+  <div id="apiKeyDialog" class="dir-picker" hidden>
+    <div class="dir-picker-card" role="dialog" aria-modal="true" aria-labelledby="apiKeyDialogTitle">
+      <p class="section-title" id="apiKeyDialogTitle">添加 API Key</p>
+      <wa-input id="apiKeyDialogInput" label="API Key" type="password" placeholder="粘贴密钥"></wa-input>
+      <wa-callout id="apiKeyDialogError" variant="danger" hidden></wa-callout>
+      <div class="row-actions">
+        <wa-button id="btnApiKeyDialogSave" variant="brand">保存</wa-button>
+        <wa-button id="btnApiKeyDialogCancel" appearance="outlined" variant="neutral">取消</wa-button>
+      </div>
+    </div>
+  </div>
   <div id="dirPicker" class="dir-picker" hidden>
     <div class="dir-picker-card" role="dialog" aria-modal="true" aria-labelledby="dirPickerTitle">
       <p class="section-title" id="dirPickerTitle">选择目录</p>
@@ -3490,8 +3762,8 @@
       <wa-callout id="dirPickerError" variant="danger" hidden></wa-callout>
     </div>
   </div>
-  <script src="/static/config.js?v=20261109-rolemodel"></script>
-  <script src="/static/workflow.js?v=20261109-edit"></script>
+  <script src="/static/config.js?v=20261110-runtime-rebase"></script>
+  <script src="/static/workflow.js?v=20261110-delete"></script>
   <script src="/static/role.js?v=20261109-role"></script>
 </body>
 </html>

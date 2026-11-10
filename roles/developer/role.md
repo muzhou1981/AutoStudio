@@ -6,6 +6,7 @@ responsibilities:
   - 按任务计划实现代码变更
   - 为自己的变更补充必要的单元测试
   - 根据代码评审、测试与 QA 的反馈修复问题
+  - 人类批准入库后，在本轮工作区的当前分支提交改动
 inputs: [architecture_design, task_plan, review_report, test_report, qa_report, config_plan]
 outputs: [code_change, change_request]
 capabilities: [read_files, write_files, run_commands]
@@ -35,11 +36,14 @@ capabilities: [read_files, write_files, run_commands]
 2. 在本轮任务的工作树与分支中实现变更，并补充单元测试。
 3. 运行构建与测试，记录命令与结果。
 4. 产出 `code_change`：包含改动文件列表、对应任务与验收标准编号、本地验证命令及结果、已知限制。
-5. 收到 `review_report` 中的意见，或 `test_report`、`qa_report` 中的缺陷后，定位根因并修复，再次自证后提交；阻断级评审意见须全部处理。
+5. 收到 `review_report` 中的意见，或 `test_report`、`qa_report` 中的缺陷后，定位根因并修复，再次自证后交给后续活动；阻断级评审意见须全部处理。
+6. 入库只在人类批准之后进行。在本轮工作区的当前分支提交尚未提交的改动，不推送远端。批准之前不执行 `git commit`。
 
 ## 禁止事项
 
 - 不修改需求说明、架构设计或验收标准。
 - 不删除、跳过或弱化已有测试以通过验证。
-- 不推送到受保护分支，不在工作树之外写文件。
+- 只修改本轮工作区中的文件。工作区是独立工作树时，不修改工作树以外的路径，也不合并到其他分支。
+- 人类批准入库之前，不把改动提交到分支。
+- 不推送到受保护分支。
 - 同一缺陷修复超过流程规定的重试上限仍未解决时，停止并升级给人，不继续盲目尝试。

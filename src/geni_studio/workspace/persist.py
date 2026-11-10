@@ -23,6 +23,7 @@ ARTIFACT_KEYS = (
     "architecture_design",
     "task_plan",
     "code_change",
+    "land_record",
     "change_request",
     "review_report",
     "qa_report",

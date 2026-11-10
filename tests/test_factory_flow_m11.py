@@ -11,6 +11,7 @@ from geni_studio.config.registry import (
 )
 from geni_studio.config.workflow_defs import (
     copy_workflow,
+    delete_workflow,
     get_workflow,
     list_workflows,
     save_workflow,
@@ -71,14 +72,24 @@ def test_self_improve_is_builtin_and_executable():
     loaded = get_workflow("self_improve")["workflow"]
     prepared = resolve_executable(loaded)
     names = [node["name"] for node in prepared["nodes"]]
-    assert names == ["启动", "听清改动", "确认改动", "改代码", "自行核对", "看结果", "写交付说明", "确认入库", "结束"]
+    assert names == ["启动", "听清改动", "确认改动", "改代码", "自行核对", "看结果", "写交付说明", "确认入库", "提交入库", "结束"]
+    assert loaded["workspace"] == "current_branch"
+    land = next(node for node in prepared["nodes"] if node["id"] == "land_commit")
+    assert land["role"] == "developer"
+    assert land["commits_on_branch"] is True
+    assert land["outputs"] == ["land_record"]
+    assert land["on_current_branch"] is True
     check = next(node for node in prepared["nodes"] if node["id"] == "self_check")
     assert check["returns_to"] == "change_code"
     assert check["max_loops"] == 3
     review = next(node for node in prepared["nodes"] if node["id"] == "review")
     assert review["reject_to"] == "change_code"
+
     with pytest.raises(ConfigError, match="先复制"):
         save_workflow("self_improve", loaded)
+    with pytest.raises(ConfigError, match="不能删除"):
+        delete_workflow("self_improve")
+    assert get_workflow("self_improve")["workflow"]["workflow_id"] == "self_improve"
 
 
 def test_copy_drops_the_builtin_flag(tmp_path):
@@ -143,10 +154,14 @@ def test_project_form_requires_a_real_workflow_and_stores_role_models(tmp_path, 
 def test_models_endpoint_uses_the_backend_list(monkeypatch):
     monkeypatch.setattr(
         "geni_studio.backends.models.list_backend_models",
-        lambda: {"models": [{"id": "composer-2", "label": "Composer 2"}], "source": "cursor", "detail": ""},
+        lambda *, backend=None: {
+            "models": [{"id": "composer-2", "label": "Composer 2"}],
+            "source": "cursor" if backend == "cursor" else "stub",
+            "detail": "",
+        },
     )
     # The route imports the function inside the handler, so patch the source module.
-    body = TestClient(app).get("/api/config/models").json()
+    body = TestClient(app).get("/api/config/models?backend=cursor").json()
     assert body["models"][0]["id"] == "composer-2"
 
 

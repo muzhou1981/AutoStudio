@@ -5,12 +5,11 @@ from __future__ import annotations
 import os
 
 
-def list_backend_models() -> dict:
-    from geni_studio.backends.base import StubBackend, get_default_backend
+def _stub_models() -> dict:
+    return {"models": [], "source": "stub", "detail": "stub 不调用外部模型。"}
 
-    backend = get_default_backend()
-    if isinstance(backend, StubBackend):
-        return {"models": [], "source": "stub", "detail": ""}
+
+def _list_cursor_models() -> dict:
     try:
         from cursor_sdk import Cursor
     except ImportError:
@@ -30,3 +29,19 @@ def list_backend_models() -> dict:
         label = str(getattr(item, "display_name", "") or "").strip() or model_id
         models.append({"id": model_id, "label": label})
     return {"models": models, "source": "cursor", "detail": ""}
+
+
+def list_backend_models(*, backend: str | None = None) -> dict:
+    """按指定或当前生效后端列出模型。配置页可传 backend=cursor 且尚未写入 .env。"""
+    mode = (backend or os.environ.get("GENI_STUDIO_BACKEND", "")).strip().lower()
+    if not mode:
+        mode = "cursor"
+    if mode == "stub":
+        return _stub_models()
+    if mode == "codex":
+        from geni_studio.backends.codex_backend import list_codex_models
+
+        return list_codex_models()
+    if mode == "cursor":
+        return _list_cursor_models()
+    return {"models": [], "source": mode, "detail": "未知 Agent 后端。"}

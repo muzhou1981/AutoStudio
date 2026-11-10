@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -182,6 +183,24 @@ def save_project_yaml(
 
     scenario_key = str(data.get("scenario_key") or "")
     build_run_context(scenario_key=scenario_key, project_id=pid, root=root)
+
+
+def delete_project(project_id: str, *, root: Path | None = None) -> None:
+    """删除 projects/<id>/ 目录（须含 project.yaml）。"""
+    root = root or factory_root()
+    pid = project_id.strip()
+    _validate_project_id(pid)
+    proj_dir = _project_dir(root, pid)
+    pf = proj_dir / "project.yaml"
+    if not pf.is_file():
+        raise ConfigError(f"未知 project_id={pid!r}")
+    projects_root = (root / "projects").resolve()
+    resolved = proj_dir.resolve()
+    try:
+        resolved.relative_to(projects_root)
+    except ValueError as exc:
+        raise ConfigError("只能删除工厂 projects 目录下的项目。") from exc
+    shutil.rmtree(proj_dir)
 
 
 def list_directory_children(raw: str) -> dict[str, Any]:
@@ -472,14 +491,15 @@ def apply_project_form(
     data = _parse_project_yaml_text(get_project_yaml(project_id, root))
     data["title"] = str(fields.get("title") or "").strip()
     data["description"] = str(fields.get("description") or "").strip()
-    remote_url = str(fields.get("remote_url") or "").strip()
-    remote_error = remote_url_error(remote_url)
-    if remote_error:
-        raise ConfigError(remote_error)
-    if remote_url:
-        data["remote_url"] = remote_url
-    else:
-        data.pop("remote_url", None)
+    if "remote_url" in fields:
+        remote_url = str(fields.get("remote_url") or "").strip()
+        remote_error = remote_url_error(remote_url)
+        if remote_error:
+            raise ConfigError(remote_error)
+        if remote_url:
+            data["remote_url"] = remote_url
+        else:
+            data.pop("remote_url", None)
     data["scenario_key"] = str(fields.get("scenario_key") or "").strip()
 
     from geni_studio.workspace.layout import workspace_config_error
@@ -487,7 +507,7 @@ def apply_project_form(
     workspace = str(fields.get("workspace") or "").strip()
     workspace_error = workspace_config_error(workspace)
     if workspace_error:
-        raise ValueError(workspace_error)
+        raise ConfigError(workspace_error)
     if workspace:
         data["workspace"] = workspace
     else:
@@ -512,7 +532,10 @@ def apply_project_form(
     if retries is None or retries == "":
         limits.pop("max_dev_retries", None)
     else:
-        limits["max_dev_retries"] = int(retries)
+        try:
+            limits["max_dev_retries"] = int(retries)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("开发重试上限要填整数，或留空沿用项目类型。") from exc
     if limits:
         workflow["limits"] = limits
     else:
@@ -590,8 +613,17 @@ def effective_config_summary(
 
 
 # Web 一期：仅报告密钥是否已配置，不回传明文
+_SETTINGS_SECRET_KEYS = frozenset(
+    {
+        "CURSOR_API_KEY",
+        "OPENAI_API_KEY",
+        "LANGSMITH_API_KEY",
+        "LARK_APP_SECRET",
+    }
+)
 _SETTINGS_KEYS = (
     "CURSOR_API_KEY",
+    "OPENAI_API_KEY",
     "LANGSMITH_API_KEY",
     "LANGSMITH_TRACING",
     "LARK_APP_ID",
@@ -603,6 +635,8 @@ _SETTINGS_KEYS = (
     "GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID",
     "GENI_STUDIO_BACKEND",
     "GENI_STUDIO_CURSOR_MODEL",
+    "GENI_STUDIO_CODEX_MODEL",
+    "GENI_STUDIO_DEFAULT_MODEL",
     "GENI_STUDIO_TARGET_ROOT",
 )
 
@@ -619,25 +653,41 @@ def settings_status(root: Path | None = None) -> dict[str, Any]:
             k, _, v = line.partition("=")
             env_vars[k.strip()] = v.strip()
 
-    explicit_backend = env_vars.get("GENI_STUDIO_BACKEND", "").strip().lower()
-    if explicit_backend in {"stub", "cursor"}:
+    effective_vars = {**env_vars, **os.environ}
+    explicit_backend = effective_vars.get("GENI_STUDIO_BACKEND", "").strip().lower()
+    cursor_key = env_vars.get("CURSOR_API_KEY", "").strip() or os.environ.get(
+        "CURSOR_API_KEY", ""
+    ).strip()
+    if explicit_backend in {"stub", "cursor", "codex"}:
         effective_backend = explicit_backend
-    elif env_vars.get("CURSOR_API_KEY", "").strip():
+    elif cursor_key:
         effective_backend = "cursor"
     else:
-        effective_backend = "stub"
+        effective_backend = "cursor"
 
     keys = []
     for name in _SETTINGS_KEYS:
-        val = env_vars.get(name, "")
+        val = effective_vars.get(name, "")
         if name == "GENI_STUDIO_BACKEND":
             hint = val or f"未设置（当前生效 {effective_backend}）"
             keys.append({"name": name, "configured": bool(val), "value_hint": hint})
+        elif name == "GENI_STUDIO_DEFAULT_MODEL":
+            keys.append({
+                "name": name,
+                "configured": bool(val),
+                "value_hint": val or "后端默认",
+            })
         elif name == "GENI_STUDIO_CURSOR_MODEL":
             keys.append({
                 "name": name,
                 "configured": bool(val),
                 "value_hint": val or "Auto（default）",
+            })
+        elif name == "GENI_STUDIO_CODEX_MODEL":
+            keys.append({
+                "name": name,
+                "configured": bool(val),
+                "value_hint": val or "Codex 默认",
             })
         elif name in {
             "GENI_STUDIO_TARGET_ROOT",
@@ -648,6 +698,16 @@ def settings_status(root: Path | None = None) -> dict[str, Any]:
             keys.append({"name": name, "configured": bool(val), "value_hint": val})
         elif name == "LANGSMITH_TRACING":
             keys.append({"name": name, "configured": True, "value_hint": val or "false"})
+        elif name in _SETTINGS_SECRET_KEYS:
+            effective = val or os.environ.get(name, "").strip()
+            keys.append(
+                {
+                    "name": name,
+                    "configured": bool(effective),
+                    "value_hint": "已设置" if effective else "",
+                    "secret_length": len(effective) if effective else 0,
+                }
+            )
         else:
             keys.append({"name": name, "configured": bool(val), "value_hint": "已设置" if val else ""})
 

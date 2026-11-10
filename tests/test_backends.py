@@ -11,11 +11,11 @@ def test_stub_backend():
     assert "pm" in out
 
 
-def test_default_backend_is_stub_without_env(monkeypatch):
+def test_default_backend_does_not_simulate_without_credentials(monkeypatch):
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     monkeypatch.delenv("GENI_STUDIO_BACKEND", raising=False)
-    b = get_default_backend()
-    assert isinstance(b, StubBackend)
+    with pytest.raises(RuntimeError, match="Cursor"):
+        get_default_backend()
 
 
 def test_default_backend_uses_cursor_when_api_key(monkeypatch):
@@ -33,6 +33,14 @@ def test_default_backend_uses_cursor_when_api_key(monkeypatch):
     )
     b = get_default_backend()
     assert b.complete(role_name="x", system_prompt="s", user_prompt="u") == "cursor-ok"
+
+
+def test_empty_role_model_uses_configured_default(monkeypatch):
+    from geni_studio.backends.runner import model_for_role
+
+    monkeypatch.setenv("GENI_STUDIO_DEFAULT_MODEL", "gpt-factory")
+    monkeypatch.delenv("GENI_STUDIO_CURSOR_MODEL", raising=False)
+    assert model_for_role("developer") == "gpt-factory"
 
 
 def test_geni_studio_backend_stub_overrides_key(monkeypatch):

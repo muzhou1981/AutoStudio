@@ -65,15 +65,38 @@ geni-studio-web
 
 ### Cursor SDK 后端
 
-图节点经 `invoke_role` 调用后端。未配置时走 **Stub**；设置 `CURSOR_API_KEY` 后默认启用 Cursor Local Agent（亦可显式 `GENI_STUDIO_BACKEND=cursor`，强制 Stub 用 `GENI_STUDIO_BACKEND=stub`）。
+图节点经 `invoke_role` 调用后端。默认选择 Cursor；SDK、凭证或桥接不可用时会报错。只演示流程时显式设置 `GENI_STUDIO_BACKEND=stub`。
 
 ```bash
 export CURSOR_API_KEY=...
-export GENI_STUDIO_CURSOR_MODEL=composer-2   # 可选，默认 composer-2
+# export GENI_STUDIO_CURSOR_MODEL=<模型名>   # 可选，留空使用 SDK 默认模型
 python scripts/smoke_cursor_backend.py       # Bridge + 密钥连通性
 python scripts/smoke_feishu_hitl.py          # 需另开 geni-studio-web
 geni-studio-web
 ```
+
+### Codex SDK 后端
+
+在项目虚拟环境中安装并启动：
+
+```bash
+uv pip install -e '.[codex,dev]'
+export GENI_STUDIO_BACKEND=codex
+export GENI_STUDIO_WORKSPACE=1
+# export GENI_STUDIO_CODEX_MODEL=<模型名>  # 可选，留空使用 SDK 默认模型
+.venv/bin/geni-studio-web
+```
+
+使用启动服务的同一系统用户登录 Codex，即可复用本机登录状态，无需另填 API Key；也可在配置页保存 `OPENAI_API_KEY`。环境中有该 Key 时优先使用 Key 登录。打开 `http://127.0.0.1:8765/`，为项目选择流程和目标 Git 工作区，在运行页启动任务。Codex 必须有有效工作区，不能把关闭工作区的模拟运行当作真实开发。
+
+需要工厂自动判定测试是否通过时，在项目 YAML 中配置验证命令，例如：
+
+```yaml
+verification:
+  command: python -m unittest discover -v
+```
+
+配置页的连通检查只检查 SDK 启动和认证状态；模型是否可调用，以实际任务结果为准。
 
 ### 飞书 HITL（lark-cli）
 

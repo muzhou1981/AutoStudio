@@ -1,7 +1,39 @@
 (function () {
 const $ = (id) => document.getElementById(id);
 
+const formatApiDetail =
+  (window.geniApi && window.geniApi.formatApiDetail) ||
+  function (detail) {
+    return detail == null ? "" : String(detail);
+  };
+
+const apiErrorMessage =
+  (window.geniApi && window.geniApi.apiErrorMessage) ||
+  function (data, fallback) {
+    const text = formatApiDetail(data && data.detail);
+    return text || fallback;
+  };
+
 function showError(el, msg) {
+  const text = formatApiDetail(msg);
+  if (!text) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  el.hidden = false;
+  el.textContent = text;
+}
+
+function showSaved(el, msg) {
+  if (!el) return;
+  el.hidden = !msg;
+  el.textContent = msg || "";
+}
+
+function showFieldInline(id, msg) {
+  const el = $(id);
+  if (!el) return;
   if (!msg) {
     el.hidden = true;
     el.textContent = "";
@@ -11,13 +43,38 @@ function showError(el, msg) {
   el.textContent = msg;
 }
 
-function showSaved(el, msg) {
-  if (!el) return;
-  el.hidden = !msg;
-  el.textContent = msg || "";
+async function fetchWorkspaceFieldCheck(workspace) {
+  const q = new URLSearchParams();
+  if (workspace !== undefined) q.set("workspace", workspace);
+  const r = await fetch("/api/config/projects/field-check?" + q.toString());
+  const data = await r.json();
+  if (!r.ok) return { ok: false, errors: {} };
+  return data;
+}
+
+async function validateWorkspaceField() {
+  const value = ($("fieldWorkspace").value || "").trim();
+  if (!value) {
+    showFieldInline("fieldWorkspaceError", "");
+    syncWorkspaceClearButton();
+    return true;
+  }
+  const data = await fetchWorkspaceFieldCheck(value);
+  const msg = (data.errors && data.errors.workspace) || "";
+  showFieldInline("fieldWorkspaceError", msg);
+  syncWorkspaceClearButton();
+  return !msg;
+}
+
+function syncWorkspaceClearButton() {
+  const btn = $("btnClearWorkspace");
+  if (!btn) return;
+  const has = Boolean(($("fieldWorkspace").value || "").trim());
+  btn.hidden = !has;
 }
 
 function chipFor(item) {
+  if (item.name === "GENI_STUDIO_DEFAULT_MODEL" && !item.configured) return ["后端默认", "is-ok"];
   if (item.name === "GENI_STUDIO_CURSOR_MODEL" && !item.configured) return ["默认", "is-ok"];
   if (item.name === "GENI_STUDIO_BACKEND" && !item.configured) return ["自动", "is-ok"];
   if (item.name === "GENI_STUDIO_LARK_BACKEND" && !item.configured) return ["默认", "is-ok"];
@@ -25,9 +82,22 @@ function chipFor(item) {
   return ["未配置", "is-missing"];
 }
 
+const HIDDEN_SETTINGS = new Set(["GENI_STUDIO_TARGET_ROOT"]);
+let runtimeSettingsCache = null;
+
+function apiKeyEnvName(backend) {
+  if (backend === "cursor") return "CURSOR_API_KEY";
+  if (backend === "codex") return "OPENAI_API_KEY";
+  return "";
+}
+
+function secretMask(length) {
+  const n = Math.max(0, Number(length) || 0);
+  return n ? "*".repeat(n) : "";
+}
+
 const GROUP_ORDER = {
-  Agent: ["GENI_STUDIO_BACKEND", "GENI_STUDIO_CURSOR_MODEL", "CURSOR_API_KEY", "LANGSMITH_API_KEY", "LANGSMITH_TRACING"],
-  工作区: ["GENI_STUDIO_TARGET_ROOT"],
+  Agent: ["GENI_STUDIO_BACKEND", "GENI_STUDIO_DEFAULT_MODEL", "GENI_STUDIO_CURSOR_MODEL", "GENI_STUDIO_CODEX_MODEL", "CURSOR_API_KEY", "OPENAI_API_KEY", "LANGSMITH_API_KEY", "LANGSMITH_TRACING"],
   飞书: [
     "GENI_STUDIO_LARK_BACKEND",
     "GENI_STUDIO_PUBLIC_BASE_URL",
@@ -42,11 +112,13 @@ const GROUP_ORDER = {
 
 const SETTING_GROUPS = {
   CURSOR_API_KEY: ["Agent", "Cursor API Key"],
+  OPENAI_API_KEY: ["Agent", "OpenAI API Key"],
   GENI_STUDIO_BACKEND: ["Agent", "后端"],
-  GENI_STUDIO_CURSOR_MODEL: ["Agent", "模型"],
+  GENI_STUDIO_DEFAULT_MODEL: ["Agent", "默认模型"],
+  GENI_STUDIO_CODEX_MODEL: ["Agent", "Codex 模型"],
+  GENI_STUDIO_CURSOR_MODEL: ["Agent", "Cursor 模型"],
   LANGSMITH_API_KEY: ["Agent", "LangSmith API Key"],
   LANGSMITH_TRACING: ["Agent", "LangSmith 追踪"],
-  GENI_STUDIO_TARGET_ROOT: ["工作区", "默认工作区"],
   GENI_STUDIO_LARK_BACKEND: ["飞书", "飞书后端"],
   LARK_APP_ID: ["飞书", "应用标识"],
   LARK_APP_SECRET: ["飞书", "应用密钥"],
@@ -60,6 +132,7 @@ const SETTING_GROUPS = {
 function settingDetail(item) {
   const hint = (item.value_hint || "").trim();
   if (!hint || hint === "已设置") return "";
+  if (item.name === "GENI_STUDIO_DEFAULT_MODEL" && hint === "后端默认") return "";
   if (item.name === "GENI_STUDIO_CURSOR_MODEL" && hint.startsWith("Auto")) return "Auto";
   if (item.name === "GENI_STUDIO_BACKEND" && hint.startsWith("未设置")) {
     const matched = hint.match(/当前生效\s+([^）)\s]+)/);
@@ -171,6 +244,10 @@ function fillWorkflowOptions(selected) {
   if ($("goCreateFlow")) $("goCreateFlow").hidden = !none;
 }
 
+window.refreshWorkflowOptions = () => {
+  fillWorkflowOptions($("fieldProfile") && $("fieldProfile").value);
+};
+
 async function loadLists() {
   const [sr, pr, wr] = await Promise.all([
     fetch("/api/config/scenarios").then((r) => r.json()),
@@ -183,17 +260,29 @@ async function loadLists() {
   window.__scenarios = sr.scenarios || [];
   if (sp) fillScenarioOptions(sp, window.__scenarios, sp.value);
   if ($("fieldScenario")) fillScenarioOptions($("fieldScenario"), window.__scenarios, $("fieldScenario").value);
-  await loadBackendModels();
   const pp = $("projectPick");
-  const selected = pp.value;
+  const selected = (pp.value || "").trim();
   pp.replaceChildren(waOption("", "— 选择 —"));
   window.__projects = pr.projects || [];
   window.__nodes = pr.nodes || [];
   for (const p of window.__projects) {
     pp.appendChild(waOption(p.project_id, `${p.title} (${p.project_id})`));
   }
-  if (selected) pp.value = selected;
+  const stillThere = selected && window.__projects.some((p) => p.project_id === selected);
+  pp.value = stillThere ? selected : "";
   fillScenarioOptions($("fieldDirScenario"), window.__scenarios, $("fieldDirScenario").value);
+}
+
+async function resolveEffectiveBackend() {
+  try {
+    const r = await fetch("/api/config/settings");
+    const data = await r.json();
+    if (r.ok) return resolveBackendPick(data);
+  } catch (_) {
+    /* 忽略 */
+  }
+  const pick = ($("backendPick") && $("backendPick").value) || "";
+  return pick || "stub";
 }
 
 async function loadScenarioYaml(key) {
@@ -242,7 +331,6 @@ async function fillProjectForm(data) {
   fillScenarioOptions($("fieldScenario"), window.__scenarios || [], data.scenario_key);
   $("fieldTitle").value = data.title || "";
   $("fieldDescription").value = data.description || "";
-  $("fieldRemoteUrl").value = data.remote_url || "";
   fillWorkflowOptions(data.profile_id || "");
   $("fieldRetries").value = data.max_dev_retries == null ? "" : String(data.max_dev_retries);
   $("fieldDesign").value = data.design_track_mode || "inherit";
@@ -250,6 +338,9 @@ async function fillProjectForm(data) {
   $("fieldChat").value = data.notify_chat_id || "";
   $("fieldOpen").value = data.notify_open_id || "";
   $("fieldWorkspace").value = data.workspace || "";
+  syncWorkspaceClearButton();
+  showFieldInline("fieldWorkspaceError", "");
+  void validateWorkspaceField();
   const hint = $("workspaceHint");
   if (data.workspace) {
     hint.textContent = "启动后在这个目录下建立本轮工作树。";
@@ -264,7 +355,7 @@ async function fillProjectForm(data) {
 }
 
 function clearProjectForm() {
-  for (const id of ["fieldTitle", "fieldDescription", "fieldRemoteUrl", "fieldProfile", "fieldRetries", "fieldChat", "fieldOpen", "fieldWorkspace"]) {
+  for (const id of ["fieldTitle", "fieldDescription", "fieldProfile", "fieldRetries", "fieldChat", "fieldOpen", "fieldWorkspace"]) {
     $(id).value = "";
   }
   $("workspaceHint").textContent = "";
@@ -273,6 +364,8 @@ function clearProjectForm() {
   renderSkipNodes(window.__nodes || [], []);
   syncSkipWrap();
   updateProjectFlowSummary();
+  syncWorkspaceClearButton();
+  showFieldInline("fieldWorkspaceError", "");
 }
 
 async function loadProjectYaml(id) {
@@ -302,33 +395,40 @@ async function saveRuntime() {
   showSaved($("runtimeSaved"), "");
   btn.disabled = true;
   btn.loading = true;
+  const backend = $("backendPick").value;
+  const previous = resolveBackendPick(runtimeSettingsCache || {});
+  const legacy = (runtimeSettingsCache?.keys || []).find((k) => k.name === "GENI_STUDIO_DEFAULT_MODEL");
+  const modelPairs = [];
+  if (legacy?.configured && previous !== backend && ["cursor", "codex"].includes(previous)) {
+    modelPairs.push([`GENI_STUDIO_${previous.toUpperCase()}_MODEL`, defaultModelFromSettings(runtimeSettingsCache, previous)]);
+  }
+  if (["cursor", "codex"].includes(backend)) {
+    modelPairs.push([`GENI_STUDIO_${backend.toUpperCase()}_MODEL`, (($("modelPick") || $("modelInput"))?.value || "").trim()]);
+  }
   const pairs = [
-    ["GENI_STUDIO_BACKEND", $("backendPick").value],
-    ["GENI_STUDIO_CURSOR_MODEL", $("modelInput").value.trim()],
-    ["GENI_STUDIO_TARGET_ROOT", $("targetInput").value.trim()],
+    ...modelPairs,
+    ["GENI_STUDIO_BACKEND", backend],
+    ["GENI_STUDIO_DEFAULT_MODEL", ""],
     ["GENI_STUDIO_LARK_BACKEND", $("larkBackend").value],
     ["GENI_STUDIO_PUBLIC_BASE_URL", $("publicBase").value.trim()],
     ["GENI_STUDIO_FEISHU_NOTIFY_CHAT_ID", $("feishuChat").value.trim()],
     ["GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID", $("feishuOpen").value.trim()],
   ];
-  const key = $("apiKeyInput").value;
-  if (key) pairs.push(["CURSOR_API_KEY", key]);
-  for (const [name, value] of pairs) {
-    const r = await fetch("/api/config/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: name, value }),
-    });
-    const data = await r.json();
-    if (!r.ok) {
-      showError(err, data.detail || "保存失败");
-      btn.disabled = false;
-      btn.loading = false;
-      return;
-    }
-  }
-  $("apiKeyInput").value = "";
   try {
+    for (const [name, value] of pairs) {
+      const r = await fetch("/api/config/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: name, value }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        showError(err, data.detail || "保存失败");
+        btn.disabled = false;
+        btn.loading = false;
+        return;
+      }
+    }
     const probe = await fetch("/api/config/settings/probe", { method: "POST" });
     const pdata = await probe.json();
     await loadSettings();
@@ -339,24 +439,205 @@ async function saveRuntime() {
     if (pdata.ok) showSaved($("runtimeSaved"), pdata.summary || "已连通。");
     else showError(err, pdata.summary || "连不上。");
   } catch (e) {
-    showError(err, "连通测试没有返回。配置已经写入，可再点一次写入。");
+    showError(err, "写入或连通测试失败，部分配置可能已保存。请检查后重试。");
   } finally {
     btn.disabled = false;
     btn.loading = false;
   }
 }
 
+function agentFieldCopy(backend) {
+  if (backend === "cursor") {
+    return {
+      keyLabel: "Cursor API Key",
+      keyHint: "不改就留空。只写入 .env，页面不回显。",
+      keyDisabled: false,
+    };
+  }
+  if (backend === "codex") {
+    return {
+      keyLabel: "OpenAI API Key",
+      keyHint: "本机已登录 Codex 时留空。不改就留空，页面不回显。",
+      keyDisabled: false,
+    };
+  }
+  return {
+    keyLabel: "API Key",
+    keyHint: "stub 不调用外部模型，无需填写。",
+    keyDisabled: true,
+  };
+}
+
+function setInputReadonly(el, on) {
+  if (!el) return;
+  el.readonly = on;
+  if (on) el.setAttribute("readonly", "");
+  else el.removeAttribute("readonly");
+}
+
+function syncApiKeyActions(backend, keyMeta) {
+  const del = $("btnDeleteApiKey");
+  const add = $("btnAddApiKey");
+  if (!del || !add) return;
+  const envName = apiKeyEnvName(backend);
+  if (!envName) {
+    del.hidden = true;
+    add.hidden = true;
+    return;
+  }
+  const configured = Boolean(keyMeta && keyMeta.configured);
+  del.hidden = !configured;
+  add.hidden = configured;
+}
+
+function applyApiKeyField(backend, keyMeta) {
+  const copy = agentFieldCopy(backend);
+  const key = $("apiKeyInput");
+  const labelEl = $("apiKeyFieldLabel");
+  if (!key) return;
+  if (labelEl) labelEl.textContent = copy.keyLabel;
+  key.label = "";
+  key.type = "text";
+  setInputReadonly(key, true);
+  if (copy.keyDisabled) {
+    key.disabled = true;
+    key.value = "";
+    key.hint = copy.keyHint;
+    key.placeholder = "";
+    syncApiKeyActions(backend, keyMeta);
+    return;
+  }
+  key.disabled = false;
+  const configured = Boolean(keyMeta && keyMeta.configured);
+  if (configured) {
+    const len = keyMeta.secret_length || 0;
+    key.value = secretMask(len);
+    key.hint = "";
+    key.placeholder = "";
+  } else {
+    key.value = "";
+    key.hint = "";
+    key.placeholder = "—";
+  }
+  syncApiKeyActions(backend, keyMeta);
+}
+
+function openApiKeyDialog() {
+  const backend = $("backendPick").value;
+  const copy = agentFieldCopy(backend);
+  const shell = $("apiKeyDialog");
+  const title = $("apiKeyDialogTitle");
+  const input = $("apiKeyDialogInput");
+  if (!shell || !input) return;
+  if (title) title.textContent = `添加 ${copy.keyLabel}`;
+  input.label = copy.keyLabel;
+  input.value = "";
+  showError($("apiKeyDialogError"), "");
+  shell.hidden = false;
+  input.focus();
+}
+
+function closeApiKeyDialog() {
+  const shell = $("apiKeyDialog");
+  if (shell) shell.hidden = true;
+  showError($("apiKeyDialogError"), "");
+  const input = $("apiKeyDialogInput");
+  if (input) input.value = "";
+}
+
+async function saveApiKeyDialog() {
+  const backend = $("backendPick").value;
+  const name = apiKeyEnvName(backend);
+  const input = $("apiKeyDialogInput");
+  const btn = $("btnApiKeyDialogSave");
+  const err = $("apiKeyDialogError");
+  if (!name || !input) return;
+  const value = (input.value || "").trim();
+  if (!value) {
+    showError(err, "请先输入 API Key。");
+    return;
+  }
+  showError(err, "");
+  if (btn) {
+    btn.disabled = true;
+    btn.loading = true;
+  }
+  try {
+    const r = await fetch("/api/config/settings/secret", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: name, value }),
+    });
+    let data = {};
+    try {
+      data = await r.json();
+    } catch (_parse) {
+      data = {};
+    }
+    if (!r.ok) {
+      if (r.status === 404) {
+        showError(err, "服务端未加载密钥保存接口。请重启 geni-studio-web 后重试。");
+        return;
+      }
+      showError(err, data.detail || "校验或保存失败");
+      return;
+    }
+    runtimeSettingsCache = data;
+    closeApiKeyDialog();
+    applyApiKeyField(backend, (data.keys || []).find((k) => k.name === name));
+    await refreshDefaultModelPick(backend, defaultModelFromSettings(data));
+    const saved = $("runtimeSaved");
+    if (saved) showSaved(saved, "API Key 已校验并保存。");
+  } catch (e) {
+    showError(err, "请求失败。请稍后再试。");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.loading = false;
+    }
+  }
+}
+
+async function deleteConfiguredApiKey() {
+  const backend = $("backendPick").value;
+  const name = apiKeyEnvName(backend);
+  if (!name) return;
+  if (!window.confirm("确定删除已保存的 API Key？")) return;
+  const err = $("runtimeError");
+  showError(err, "");
+  const r = await fetch("/api/config/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: name, value: "" }),
+  });
+  const data = await r.json();
+  if (!r.ok) {
+    showError(err, data.detail || "删除失败");
+    return;
+  }
+  runtimeSettingsCache = data;
+  applyApiKeyField(backend, (data.keys || []).find((k) => k.name === name));
+  await refreshDefaultModelPick(backend, defaultModelFromSettings(data));
+}
+
+function resolveBackendPick(data) {
+  const backendKey = (data.keys || []).find((k) => k.name === "GENI_STUDIO_BACKEND");
+  if (backendKey?.configured) {
+    const raw = (backendKey.value_hint || "").trim().toLowerCase();
+    if (raw === "cursor" || raw === "codex" || raw === "stub") return raw;
+  }
+  const eff = (data.effective_backend || "stub").toLowerCase();
+  if (eff === "cursor" || eff === "codex") return eff;
+  return "stub";
+}
+
 function fillRuntime(data) {
+  runtimeSettingsCache = data;
   const find = (name) => (data.keys || []).find((k) => k.name === name);
-  if ($("backendPick")) {
-    $("backendPick").value = data.effective_backend === "cursor" ? "cursor" : "stub";
-  }
-  const model = find("GENI_STUDIO_CURSOR_MODEL");
-  if (model && $("modelInput") && model.value_hint && !model.value_hint.startsWith("Auto")) {
-    $("modelInput").value = model.value_hint;
-  }
-  const target = find("GENI_STUDIO_TARGET_ROOT");
-  if (target && $("targetInput")) $("targetInput").value = target.value_hint || "";
+  const backend = resolveBackendPick(data);
+  if ($("backendPick")) $("backendPick").value = backend;
+  const pickBackend = ($("backendPick") && $("backendPick").value) || backend;
+  applyApiKeyField(pickBackend, find(apiKeyEnvName(pickBackend)));
   if ($("larkBackend")) {
     $("larkBackend").value = data.lark_backend === "env_bot" ? "env_bot" : "lark_cli";
   }
@@ -367,6 +648,121 @@ function fillRuntime(data) {
   const open = find("GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID");
   if (open && $("feishuOpen")) $("feishuOpen").value = open.value_hint || "";
 }
+
+function wireApiKeyButtons() {
+  const add = $("btnAddApiKey");
+  const del = $("btnDeleteApiKey");
+  if (add && add.dataset.wired !== "1") {
+    add.dataset.wired = "1";
+    add.onclick = () => openApiKeyDialog();
+  }
+  if (del && del.dataset.wired !== "1") {
+    del.dataset.wired = "1";
+    del.onclick = () => {
+      void deleteConfiguredApiKey();
+    };
+  }
+  const save = $("btnApiKeyDialogSave");
+  const cancel = $("btnApiKeyDialogCancel");
+  const shell = $("apiKeyDialog");
+  if (save && save.dataset.wired !== "1") {
+    save.dataset.wired = "1";
+    save.onclick = () => {
+      void saveApiKeyDialog();
+    };
+  }
+  if (cancel && cancel.dataset.wired !== "1") {
+    cancel.dataset.wired = "1";
+    cancel.onclick = () => closeApiKeyDialog();
+  }
+  if (shell && shell.dataset.wired !== "1") {
+    shell.dataset.wired = "1";
+    shell.addEventListener("click", (event) => {
+      if (event.target === shell) closeApiKeyDialog();
+    });
+  }
+}
+
+function defaultModelFromSettings(data, backend = resolveBackendPick(data)) {
+  if (backend === "stub") return "";
+  const rows = data?.keys || [];
+  const key = backend === "codex" ? "GENI_STUDIO_CODEX_MODEL" : "GENI_STUDIO_CURSOR_MODEL";
+  const scoped = rows.find((k) => k.name === key);
+  if (scoped?.configured) return scoped.value_hint || "";
+  const legacy = rows.find((k) => k.name === "GENI_STUDIO_DEFAULT_MODEL");
+  return backend === resolveBackendPick(data) && legacy?.configured ? legacy.value_hint || "" : "";
+}
+
+let modelRequestVersion = 0;
+async function refreshDefaultModelPick(backend, selected) {
+  const version = ++modelRequestVersion;
+  const el = $("modelPick") || $("modelInput");
+  if (!el) return;
+  const value = selected !== undefined ? selected : el.value || "";
+  let data = { models: [], detail: "" };
+  try {
+    const q = new URLSearchParams();
+    if (backend) q.set("backend", backend);
+    const r = await fetch("/api/config/models?" + q.toString());
+    if (r.ok) data = await r.json();
+    else data.detail = "读不到模型列表。";
+  } catch (_err) {
+    data.detail = "读不到模型列表。";
+  }
+  if (version !== modelRequestVersion || ($("backendPick") && $("backendPick").value !== backend)) return;
+  const defaultLabel =
+    backend === "cursor" ? "Auto（后端默认）" : backend === "codex" ? "Codex 默认" : "后端默认";
+  if (el.tagName === "WA-SELECT") {
+    el.replaceChildren(waOption("", defaultLabel));
+    for (const item of data.models || []) {
+      const id = item.id || "";
+      if (!id) continue;
+      const label = item.label && item.label !== id ? `${item.label} (${id})` : id;
+      el.appendChild(waOption(id, label));
+    }
+    const has = [...el.querySelectorAll("wa-option")].some((o) => o.value === value);
+    if (value && !has) el.appendChild(waOption(value, value));
+    el.value = value;
+  } else {
+    el.value = value;
+  }
+  if (data.detail) el.hint = data.detail;
+  else if (backend === "stub") el.hint = "stub 不调用外部模型。";
+  else el.hint = "";
+  window.__backendModels = data.models || [];
+}
+
+async function syncBackendFields() {
+  const backend = $("backendPick").value;
+  const envName = apiKeyEnvName(backend);
+  let data = runtimeSettingsCache;
+  if (envName) {
+    try {
+      const r = await fetch("/api/config/settings");
+      if (r.ok) {
+        data = await r.json();
+        runtimeSettingsCache = data;
+      }
+    } catch (_err) {
+      /* 使用缓存 */
+    }
+  }
+  const find = (name) => (data?.keys || []).find((k) => k.name === name);
+  if ($("backendPick").value !== backend) return;
+  applyApiKeyField(backend, envName ? find(envName) : null);
+  const selected = defaultModelFromSettings(data, backend);
+  await refreshDefaultModelPick(backend, selected);
+}
+
+if ($("backendPick")) {
+  $("backendPick").addEventListener("change", () => {
+    void syncBackendFields();
+  });
+  $("backendPick").addEventListener("input", () => {
+    void syncBackendFields();
+  });
+}
+wireApiKeyButtons();
 
 async function loadSettings() {
   const root = $("settingsList");
@@ -384,11 +780,12 @@ async function loadSettings() {
   }
   const grouped = new Map();
   for (const item of data.keys || []) {
+    if (HIDDEN_SETTINGS.has(item.name)) continue;
     const title = (SETTING_GROUPS[item.name] || ["其他"])[0];
     if (!grouped.has(title)) grouped.set(title, []);
     grouped.get(title).push(item);
   }
-  for (const title of ["Agent", "工作区", "飞书", "其他"]) {
+  for (const title of ["Agent", "飞书", "其他"]) {
     const items = grouped.get(title);
     if (!items || !items.length) continue;
     const order = GROUP_ORDER[title] || [];
@@ -419,7 +816,30 @@ async function loadSettings() {
     block.hidden = true;
   }
   fillRuntime(data);
+  const backend = ($("backendPick") && $("backendPick").value) || resolveBackendPick(data);
+  await refreshDefaultModelPick(backend, defaultModelFromSettings(data));
+  await loadBackendModels(backend);
 }
+
+let syncRunBackendModelsInflight = null;
+
+async function syncRunBackendModels() {
+  if (syncRunBackendModelsInflight) return syncRunBackendModelsInflight;
+  syncRunBackendModelsInflight = (async () => {
+    const backend = await resolveEffectiveBackend();
+    if ($("backendPick")) $("backendPick").value = backend;
+    await loadBackendModels(backend);
+    window.__runBackendSynced = backend;
+    window.dispatchEvent(new CustomEvent("geni-run-backend-models", { detail: { backend } }));
+  })();
+  try {
+    await syncRunBackendModelsInflight;
+  } finally {
+    syncRunBackendModelsInflight = null;
+  }
+}
+
+window.syncRunBackendModels = syncRunBackendModels;
 
 async function refreshEffective() {
   const scenario_key = $("scenarioPick").value;
@@ -496,6 +916,7 @@ function showProjectPieces(mode) {
   $("projectActions").hidden = isDir;
   $("btnCreateProject").hidden = !isNew;
   $("btnSaveProject").hidden = !isOpen || !loadedProjectId;
+  if ($("btnDeleteProject")) $("btnDeleteProject").hidden = !isOpen || !loadedProjectId;
   $("projectRaw").hidden = !isOpen;
   if ($("dirPicker")) $("dirPicker").hidden = true;
   highlightProjectMode(mode);
@@ -509,7 +930,6 @@ async function enterOpen(id, replace) {
   $("openEmpty").hidden = !none;
   $("openEmptyAction").hidden = !none;
   $("projectPick").hidden = none;
-  if ($("openChosenAction")) $("openChosenAction").hidden = none;
   $("openHint").hidden = none || Boolean(id);
   if (!id) {
     $("projectPick").value = "";
@@ -519,12 +939,14 @@ async function enterOpen(id, replace) {
     $("projectYaml").value = "";
     markFormClean();
     writeProjectUrl("open", "", replace);
+    await refreshEffective();
     return;
   }
   $("projectPick").value = id;
   await loadProjectYaml(id);
   loadedProjectId = id;
   $("btnSaveProject").hidden = false;
+  if ($("btnDeleteProject")) $("btnDeleteProject").hidden = false;
   $("openProjectId").hidden = false;
   $("openProjectId").textContent = "项目标识：" + id;
   $("openHint").hidden = true;
@@ -581,37 +1003,50 @@ window.setProjectMode = (mode, options) => {
   });
 };
 
-if ($("btnOpenChosen")) $("btnOpenChosen").onclick = async () => {
-  const next = $("projectPick").value;
-  showError($("projectError"), "");
-  showSaved($("projectSaved"), "");
-  if (!next) {
-    showError($("projectError"), "先选择要打开的项目。");
-    $("projectPick").focus();
-    return;
-  }
-  if (next === loadedProjectId) return;
-  if (!confirmLeave()) {
-    $("projectPick").value = loadedProjectId;
-    return;
-  }
-  await enterOpen(next, false);
-};
+if ($("projectPick")) {
+  $("projectPick").addEventListener("change", async () => {
+    if (projectMode !== "open") return;
+    const next = ($("projectPick").value || "").trim();
+    showError($("projectError"), "");
+    showSaved($("projectSaved"), "");
+    if (!next) {
+      if (loadedProjectId && !confirmLeave()) {
+        $("projectPick").value = loadedProjectId;
+        return;
+      }
+      await enterOpen("", false);
+      return;
+    }
+    if (next === loadedProjectId) return;
+    if (!confirmLeave()) {
+      $("projectPick").value = loadedProjectId;
+      return;
+    }
+    await enterOpen(next, false);
+  });
+}
 
 function projectFormPayload() {
-  const retries = $("fieldRetries").value.trim();
-  const skip_nodes = [...$("skipBox").querySelectorAll("wa-checkbox")]
-    .filter((el) => el.checked)
-    .map((el) => el.value);
+  const retries = ($("fieldRetries") && $("fieldRetries").value || "").trim();
+  const skipHost = $("skipBox");
+  const skip_nodes = skipHost
+    ? [...skipHost.querySelectorAll("wa-checkbox")]
+        .filter((el) => el.checked)
+        .map((el) => el.value)
+    : [];
   return {
     title: $("fieldTitle").value.trim(),
     description: $("fieldDescription").value.trim(),
-    remote_url: $("fieldRemoteUrl").value.trim(),
-    scenario_key: $("fieldScenario").value,
+    scenario_key: ($("fieldScenario") && $("fieldScenario").value) || "",
     profile_id: ($("fieldProfile").value || "").trim(),
-    max_dev_retries: retries === "" ? null : Number(retries),
-    design_track_mode: $("fieldDesign").value,
-    skip_mode: $("fieldSkipMode").value,
+    max_dev_retries:
+      retries === ""
+        ? null
+        : Number.isFinite(Number(retries)) && Number.isInteger(Number(retries))
+          ? Number(retries)
+          : null,
+    design_track_mode: ($("fieldDesign") && $("fieldDesign").value) || "inherit",
+    skip_mode: ($("fieldSkipMode") && $("fieldSkipMode").value) || "inherit",
     skip_nodes,
     notify_chat_id: $("fieldChat").value.trim(),
     notify_open_id: $("fieldOpen").value.trim(),
@@ -619,15 +1054,25 @@ function projectFormPayload() {
   };
 }
 
-async function loadBackendModels() {
-  const response = await fetch("/api/config/models");
+async function loadBackendModels(backend) {
+  const mode = backend || (await resolveEffectiveBackend());
+  const q = new URLSearchParams();
+  if (mode) q.set("backend", mode);
+  const response = await fetch("/api/config/models?" + q.toString());
   const data = await response.json();
   window.__backendModels = (data && data.models) || [];
   const hint = $("roleModelHint");
   if (hint) {
-    hint.textContent = data && data.detail
-      ? data.detail
-      : "留空表示沿用工厂默认。这一轮的选择不影响其它 Run。";
+    const detail = (data && data.detail) || "";
+    const source = ((data && data.source) || mode || "").toLowerCase();
+    if (source === "stub" || mode === "stub") {
+      hint.textContent =
+        "当前后端为 stub，不调用外部模型。请在「配置」中选择 Cursor 或 Codex SDK 并写入 .env。";
+    } else if (detail) {
+      hint.textContent = detail;
+    } else {
+      hint.textContent = "留空表示沿用配置里的默认模型。这一轮的选择不影响其它 Run。";
+    }
   }
 }
 
@@ -670,6 +1115,8 @@ $("btnSaveProject").onclick = async () => {
     $("fieldRetries").focus();
     return;
   }
+  const workspaceOk = await validateWorkspaceField();
+  if (!workspaceOk) return;
   const r = await fetch("/api/config/projects/" + encodeURIComponent(id) + "/form", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -685,6 +1132,44 @@ $("btnSaveProject").onclick = async () => {
   markFormClean();
   refreshEffective();
 };
+
+if ($("btnDeleteProject")) {
+  $("btnDeleteProject").onclick = async () => {
+    const id = loadedProjectId;
+    showError($("projectError"), "");
+    showSaved($("projectSaved"), "");
+    if (!id || projectMode !== "open") {
+      showError($("projectError"), "先选择要打开的项目。");
+      return;
+    }
+    const title = ($("fieldTitle").value || "").trim() || id;
+    if (
+      !window.confirm(
+        "确定删除项目「" + title + "」（" + id + "）？将永久删除 projects/" + id + "/，无法恢复。",
+      )
+    ) {
+      return;
+    }
+    const button = $("btnDeleteProject");
+    button.loading = true;
+    button.disabled = true;
+    try {
+      const r = await fetch("/api/config/projects/" + encodeURIComponent(id), { method: "DELETE" });
+      const data = await r.json();
+      if (!r.ok) {
+        showError($("projectError"), apiErrorMessage(data, "没能删除项目。"));
+        return;
+      }
+      showSaved($("projectSaved"), "已删除项目 " + id + "。");
+      loadedProjectId = "";
+      await loadLists();
+      await enterOpen("", true);
+    } finally {
+      button.loading = false;
+      button.disabled = false;
+    }
+  };
+}
 
 $("btnSaveRaw").onclick = async () => {
   const id = loadedProjectId;
@@ -717,7 +1202,7 @@ async function createProjectRecord(title) {
     body: JSON.stringify({ title: title }),
   });
   const data = await r.json();
-  if (!r.ok) throw new Error(data.detail || "没能创建项目。");
+  if (!r.ok) throw new Error(apiErrorMessage(data, "没能创建项目。"));
   return data.project_id;
 }
 
@@ -728,7 +1213,7 @@ async function saveProjectForm(id, payload) {
     body: JSON.stringify(payload),
   });
   const data = await r.json();
-  if (!r.ok) throw new Error(data.detail || "没能写入项目。检查选项后再试。");
+  if (!r.ok) throw new Error(apiErrorMessage(data, "没能写入项目。检查选项后再试。"));
   return data;
 }
 
@@ -756,6 +1241,8 @@ $("btnCreateProject").onclick = async () => {
     $("fieldRetries").focus();
     return;
   }
+  const workspaceOk = await validateWorkspaceField();
+  if (!workspaceOk) return;
   const button = $("btnCreateProject");
   button.loading = true;
   button.disabled = true;
@@ -773,15 +1260,26 @@ $("btnCreateProject").onclick = async () => {
   await loadLists();
   showSaved($("projectSaved"), "已创建项目 " + id + "。");
   await enterOpen(id, false);
+  if (typeof window.loadRunConfigOptions === "function") await window.loadRunConfigOptions();
 };
 
 $("btnGoNew").onclick = () => requestProjectMode("new");
 
 let dirPickerPath = "";
+let dirPickerOnUse = null;
 
 function closeDirPicker() {
   const picker = $("dirPicker");
   if (picker) picker.hidden = true;
+  dirPickerOnUse = null;
+}
+
+async function openDirPicker(initialPath, onUse) {
+  dirPickerOnUse = onUse;
+  $("dirPicker").hidden = false;
+  const start = (initialPath || "").trim();
+  const ok = await loadDirPicker(start);
+  if (!ok && start) await loadDirPicker("");
 }
 
 async function loadDirPicker(path) {
@@ -829,25 +1327,45 @@ async function loadDirPicker(path) {
 }
 
 if ($("btnPickDirectory")) {
-  $("btnPickDirectory").onclick = async () => {
-    $("dirPicker").hidden = false;
-    const current = ($("dirPath").value || "").trim();
-    const ok = await loadDirPicker(current);
-    if (!ok && current) await loadDirPicker("");
+  $("btnPickDirectory").onclick = () =>
+    openDirPicker(($("dirPath").value || "").trim(), async (path) => {
+      $("dirPath").value = path;
+      await openChosenDirectory(path);
+    });
+}
+if ($("btnPickWorkspace")) {
+  $("btnPickWorkspace").onclick = () =>
+    openDirPicker(($("fieldWorkspace").value || "").trim(), async (path) => {
+      $("fieldWorkspace").value = path;
+      markFormDirty();
+      syncWorkspaceClearButton();
+      await validateWorkspaceField();
+    });
+}
+if ($("btnClearWorkspace")) {
+  $("btnClearWorkspace").onclick = async () => {
+    $("fieldWorkspace").value = "";
+    markFormDirty();
+    syncWorkspaceClearButton();
+    await validateWorkspaceField();
   };
+}
+if ($("dirPicker")) {
   $("btnDirUp").onclick = () => loadDirPicker($("btnDirUp").dataset.path || "");
   $("btnDirUse").onclick = async () => {
     const path = dirPickerPath;
+    const onUse = dirPickerOnUse;
     closeDirPicker();
-    if (!path) return;
-    $("dirPath").value = path;
-    await openChosenDirectory(path);
+    if (!path || !onUse) return;
+    await onUse(path);
   };
-  $("dirPath").addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    openChosenDirectory(($("dirPath").value || "").trim());
-  });
+  if ($("dirPath")) {
+    $("dirPath").addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      openChosenDirectory(($("dirPath").value || "").trim());
+    });
+  }
   $("btnDirCancel").onclick = closeDirPicker;
   $("dirPicker").addEventListener("click", (event) => {
     if (event.target === $("dirPicker")) closeDirPicker();
@@ -855,25 +1373,6 @@ if ($("btnPickDirectory")) {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && $("dirPicker") && !$("dirPicker").hidden) closeDirPicker();
   });
-}
-
-async function fillRemoteFromGit(remote) {
-  const url = (remote || "").trim();
-  if (!url || ($("fieldRemoteUrl").value || "").trim() || !loadedProjectId) return false;
-  $("fieldRemoteUrl").value = url;
-  const r = await fetch("/api/config/projects/" + encodeURIComponent(loadedProjectId) + "/form", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(projectFormPayload()),
-  });
-  const data = await r.json();
-  if (!r.ok) {
-    showError($("projectError"), data.detail || "没能写入远程仓库。");
-    return false;
-  }
-  if (data.yaml) $("projectYaml").value = data.yaml;
-  markFormClean();
-  return true;
 }
 
 async function openChosenDirectory(path) {
@@ -888,15 +1387,10 @@ async function openChosenDirectory(path) {
     return;
   }
   $("dirPane").dataset.path = data.path || path;
-  $("dirPane").dataset.remoteUrl = data.remote_url || "";
   const ids = data.project_ids || [];
   if (ids.length === 1) {
     await enterOpen(ids[0], false);
-    const wrote = await fillRemoteFromGit(data.remote_url);
-    showSaved(
-      $("projectSaved"),
-      "这个目录已经是项目 " + ids[0] + "。" + (wrote ? "已从 git 写入远程仓库。" : ""),
-    );
+    showSaved($("projectSaved"), "这个目录已经是项目 " + ids[0] + "。");
     return;
   }
   if (ids.length > 1) {
@@ -909,7 +1403,6 @@ async function openChosenDirectory(path) {
       btn.textContent = pid;
       btn.addEventListener("click", async () => {
         await enterOpen(pid, false);
-        await fillRemoteFromGit($("dirPane").dataset.remoteUrl || "");
       });
       box.appendChild(btn);
     });
@@ -941,7 +1434,6 @@ $("btnCreateFromDir").onclick = async () => {
     await saveProjectForm(id, {
       title: folder,
       description: "",
-      remote_url: $("dirPane").dataset.remoteUrl || "",
       scenario_key: "",
       profile_id: profile,
       max_dev_retries: null,
@@ -962,10 +1454,13 @@ $("btnCreateFromDir").onclick = async () => {
   await loadLists();
   showSaved($("projectSaved"), "已创建项目 " + id + "。");
   await enterOpen(id, false);
+  if (typeof window.loadRunConfigOptions === "function") await window.loadRunConfigOptions();
 };
 
 $("btnEffective").onclick = refreshEffective;
 $("btnSaveRuntime").onclick = saveRuntime;
+
+window.refreshConfigRuntime = loadSettings;
 
 (async function init() {
   try {

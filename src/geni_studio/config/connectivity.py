@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -12,10 +13,12 @@ from typing import Any
 
 def probe_saved_settings() -> dict[str, Any]:
     """按当前已生效的配置做探测。调用方应先完成写入。"""
-    backend = os.environ.get("GENI_STUDIO_BACKEND", "").strip().lower()
-    if backend not in {"stub", "cursor"}:
-        backend = "cursor" if os.environ.get("CURSOR_API_KEY", "").strip() else "stub"
-    model = os.environ.get("GENI_STUDIO_CURSOR_MODEL", "").strip()
+    backend = os.environ.get("GENI_STUDIO_BACKEND", "").strip().lower() or "cursor"
+    if backend not in {"stub", "cursor", "codex"}:
+        return {"ok": False, "summary": "未知 Agent 后端。", "checks": []}
+    from geni_studio.backends.base import factory_default_model
+
+    model = factory_default_model()
     target = os.environ.get("GENI_STUDIO_TARGET_ROOT", "").strip()
     from geni_studio.hitl.feishu_config import resolve_lark_backend
 
@@ -50,9 +53,8 @@ def _workspace(path: str) -> tuple[str, str]:
         if folder.exists():
             if not folder.is_dir():
                 return "fail", "默认工作区不是目录。换一个可写目录后再写入。"
-            probe = folder / ".geni_studio_write_probe"
-            probe.write_text("ok", encoding="utf-8")
-            probe.unlink()
+            with tempfile.TemporaryFile(dir=folder) as probe:
+                probe.write(b"ok")
             return "ok", "默认工作区可写。"
         parent = folder.parent
         if parent.is_dir() and os.access(parent, os.W_OK):
@@ -63,12 +65,66 @@ def _workspace(path: str) -> tuple[str, str]:
 
 
 def _agent(backend: str, model: str) -> tuple[str, str]:
+    if backend == "codex":
+        return probe_codex(model)
     if backend != "cursor":
         return "ok", "当前后端是 stub，不调用外部模型。"
     key = os.environ.get("CURSOR_API_KEY", "").strip()
     if not key:
-        return "skip", "未配置 API Key，未测试。"
+        return "fail", "未配置 Cursor API Key，无法启动真实后端。"
     return probe_cursor_key(key, model)
+
+
+def probe_codex(model: str) -> tuple[str, str]:
+    """确认 SDK 启动与账号状态，不把本地目录当作推理成功证据。"""
+    try:
+        from geni_studio.backends.codex_backend import _open_codex
+    except ImportError:
+        return "fail", "未安装 openai-codex。安装后再写入。"
+    try:
+        with _open_codex() as client:
+            account = client.account()
+            if account.requires_openai_auth and account.account is None:
+                return "fail", "Codex 未登录。先在本机登录 Codex，或写入 OpenAI API Key。"
+    except ImportError:
+        return "fail", "未安装 openai-codex。安装后再写入。"
+    except Exception:  # noqa: BLE001 — 失败原因不带回密钥或登录口令
+        return "fail", "Codex 未登录。先在本机登录 Codex，或写入 OpenAI API Key。"
+    chosen = model.strip() or "Codex 默认"
+    return "ok", f"Codex 已启动且认证状态就绪。模型为 {chosen}；尚未验证实际推理。"
+
+
+def probe_openai_api_key(api_key: str) -> tuple[str, str]:
+    """向 API 核实密钥；SDK login/model-list 可能只写本地认证并返回目录。"""
+    text = api_key.strip()
+    if not text:
+        return "fail", "密钥不能为空。"
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {text}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.load(response)
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            return "fail", "OpenAI API 没有返回可识别的模型列表。"
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return "fail", "无法验证 OpenAI API Key，请检查密钥权限与网络。"
+    return "ok", "API Key 已通过模型列表接口认证；模型推理权限仍以实际运行结果为准。"
+
+
+def validate_agent_secret(key: str, value: str) -> tuple[bool, str]:
+    """校验 Agent 密钥是否可用。通过时返回 (True, 摘要)；失败返回 (False, 原因)。"""
+    name = key.strip()
+    secret = value.strip()
+    if name not in {"CURSOR_API_KEY", "OPENAI_API_KEY"}:
+        return False, f"不允许配置项 {name}"
+    if not secret:
+        return False, "密钥不能为空。"
+    if name == "CURSOR_API_KEY":
+        status, detail = probe_cursor_key(secret, "")
+    else:
+        status, detail = probe_openai_api_key(secret)
+    return status == "ok", detail
 
 
 def probe_cursor_key(api_key: str, model: str) -> tuple[str, str]:

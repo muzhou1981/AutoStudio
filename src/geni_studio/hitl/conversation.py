@@ -26,8 +26,14 @@ def begin_turn(
 ) -> Path:
     folder = conversation_dir(thread_id, workspace_path) / _safe(role)
     folder.mkdir(parents=True, exist_ok=True)
-    seq = len(list(folder.glob("*.jsonl"))) + 1
-    path = folder / f"{seq:03d}.jsonl"
+    seq = 1
+    while True:
+        path = folder / f"{seq:03d}.jsonl"
+        try:
+            path.touch(exist_ok=False)
+            break
+        except FileExistsError:
+            seq += 1
     _append(path, {
         "kind": "turn",
         "agent_id": agent_id,
@@ -81,11 +87,11 @@ def step_to_dict(step: Any) -> dict[str, Any]:
 
 
 def _run_root(thread_id: str, workspace_path: str) -> Path:
-    worktree = Path(workspace_path) if workspace_path else None
-    if worktree is not None and worktree.parent.name == "worktrees":
-        dot = worktree.parent.parent
-        if dot.name == ".geni_studio":
-            return dot / "runs" / thread_id
+    from geni_studio.workspace.layout import run_dir_for_workspace
+
+    found = run_dir_for_workspace(workspace_path, thread_id)
+    if found is not None:
+        return found
     return factory_root() / ".geni_studio" / "runs" / thread_id
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import uuid
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -23,6 +24,7 @@ from geni_studio.hitl.hitl_audit import audit_patch
 from geni_studio.hitl.pm_clarification import merge_clarification_reply
 from geni_studio.hitl.rail import build_rail
 from geni_studio.hitl.reading import human_reading
+from geni_studio.hitl.transaction import observation_mutation, run_mutation
 from geni_studio.workspace.context import use_worktree
 from geni_studio.workspace.layout import (
     prepare_run_layout,
@@ -42,6 +44,9 @@ RunPhase = Literal[
 ]
 HitlKind = Literal["gate", "pm_clarification", "escalation"]
 EscalationChoice = Literal["continue", "pause", "abort"]
+
+_start_failures: dict[str, str] = {}
+_start_failures_lock = threading.Lock()
 
 
 @dataclass
@@ -66,6 +71,10 @@ class HitlError(ValueError):
     """HITL 状态或提交不合法。"""
 
 
+class RunBusy(HitlError):
+    """本轮已有检查点变更正在执行。"""
+
+
 class StopPending(Exception):
     """停止已记下，检查点尚未建立或图仍在执行。"""
 
@@ -77,10 +86,27 @@ class StopPending(Exception):
 class GraphRunService:
     """对单一已编译图提供启动、查询与 HITL 续跑。"""
 
+    @staticmethod
+    def start_failure_message(thread_id: str) -> str | None:
+        with _start_failures_lock:
+            return _start_failures.get(thread_id)
+
+    @staticmethod
+    def _record_start_failure(thread_id: str, exc: BaseException) -> None:
+        from geni_studio.workspace.layout import WorkspaceError
+
+        msg = str(exc) if isinstance(exc, (WorkspaceError, ConfigError, ValueError)) else str(exc) or type(exc).__name__
+        with _start_failures_lock:
+            _start_failures[thread_id] = msg
+
+    @staticmethod
+    def _clear_start_failure(thread_id: str) -> None:
+        with _start_failures_lock:
+            _start_failures.pop(thread_id, None)
+
     def __init__(self, compiled_graph: CompiledStateGraph) -> None:
         self._graph = compiled_graph
         self._graphs: dict[str, CompiledStateGraph] = {}
-        self._compiled: dict[str, CompiledStateGraph] = {}
 
     def _bound(self, thread_id: str) -> CompiledStateGraph:
         """未选流程时用默认图。选定流程的轮次用那张编译图。"""
@@ -91,17 +117,20 @@ class GraphRunService:
         workflow_id = str((snap.values or {}).get("workflow_id") or "").strip()
         if not workflow_id:
             return self._graph
-        compiled = self._compiled.get(workflow_id)
-        if compiled is None:
-            from geni_studio.workflows.executable import compile_for_project
+        definition = (snap.values or {}).get("workflow_definition")
+        if not isinstance(definition, dict):
+            # 允许历史记录查询、停止和删除；恢复前另外检查定义快照。
+            return self._graph
+        from geni_studio.workflows.executable import compile_workflow
 
-            compiled, _extra = compile_for_project(
-                workflow_id,
-                checkpointer=self._graph.checkpointer,
-            )
-            self._compiled[workflow_id] = compiled
+        compiled = compile_workflow(definition, checkpointer=self._graph.checkpointer)
         self._graphs[thread_id] = compiled
         return compiled
+
+    def _require_resume_definition(self, thread_id: str) -> None:
+        values = self._graph.get_state(self._config(thread_id)).values or {}
+        if values.get("workflow_id") and not isinstance(values.get("workflow_definition"), dict):
+            raise HitlError("历史 Run 缺少流程定义快照，无法安全续跑，请新建一轮")
 
     @staticmethod
     def new_thread_id() -> str:
@@ -118,7 +147,10 @@ class GraphRunService:
         except HitlError:
             return ""
 
+    @run_mutation
     def _invoke(self, thread_id: str, payload: dict[str, Any] | None) -> None:
+        if payload is None:
+            self._require_resume_definition(thread_id)
         from geni_studio.hitl.control import (
             bind_thread,
             enter_inflight,
@@ -136,8 +168,10 @@ class GraphRunService:
                 return
             try:
                 self._invoke_body(thread_id, payload)
-            except Exception:
-                if not is_stop_requested(thread_id) and not is_pause_requested(thread_id):
+            except Exception as exc:
+                from geni_studio.hitl.control import RunPaused, RunStopped
+
+                if not isinstance(exc, (RunPaused, RunStopped)) and not is_stop_requested(thread_id):
                     self._mark_interrupted(thread_id)
                     raise
         finally:
@@ -171,9 +205,9 @@ class GraphRunService:
         ctx = use_worktree(path) if path else nullcontext()
         lock_root = None
         if path:
-            from geni_studio.evolution.proposals import target_root_from_worktree
+            from geni_studio.workspace.layout import workspace_lock_root
 
-            lock_root = target_root_from_worktree(path)
+            lock_root = workspace_lock_root(path)
         from geni_studio.workspace.policy import exclusive_write
 
         write_lock = exclusive_write(lock_root) if lock_root is not None else nullcontext()
@@ -192,8 +226,11 @@ class GraphRunService:
         project_token = set_project_id(project_id)
         role_token = set_role_models(models)
         cost_token = begin_cost_log()
+        from geni_studio.backends.runtime import use_config
+
+        state = payload if payload is not None else self.status(thread_id).values
         try:
-            with write_lock, ctx:
+            with write_lock, ctx, use_config(state.get("config_snapshot_effective")):
                 self._bound(thread_id).invoke(payload, self._config(thread_id))
         finally:
             lines = take_cost_lines()
@@ -209,10 +246,8 @@ class GraphRunService:
             prior = str(self.status(thread_id).values.get("cost_ledger") or "")
         except HitlError:
             return
-        extra = [line for line in lines if line not in prior]
-        if not extra:
-            return
-        merged = (prior + "\n" + "\n".join(extra)).strip()
+        # 相同 token 用量可能来自不同调用，不能用整行相等来去重。
+        merged = (prior + "\n" + "\n".join(lines)).strip()
         self._bound(thread_id).update_state(self._config(thread_id), {"cost_ledger": merged})
 
     def _done(self, thread_id: str) -> RunStatus:
@@ -298,7 +333,7 @@ class GraphRunService:
             values=values,
         )
 
-    def start(
+    def _prepare_start(
         self,
         *,
         human_request: str,
@@ -309,7 +344,7 @@ class GraphRunService:
         node_tools: dict[str, dict[str, list[str]]] | None = None,
         attachment_ids: list[str] | None = None,
         role_models: dict[str, str] | None = None,
-    ) -> RunStatus:
+    ) -> tuple[str, dict[str, Any]]:
         from geni_studio.config.context import build_run_context, factory_root
         from geni_studio.config.precheck import precheck_scenario_materials
         from geni_studio.config.snapshot import capture_config_snapshot
@@ -323,16 +358,40 @@ class GraphRunService:
             scenario_key=snap["scenario_key"] or scenario_key,
             project_id=snap["project_id"] or project_id,
         )
+        import os
+        from copy import deepcopy
+
+        from geni_studio.backends.base import factory_default_model
+
+        effective = deepcopy(ctx.merged)
+        effective["_backend"] = os.environ.get("GENI_STUDIO_BACKEND", "").strip().lower() or "cursor"
+        effective["_models"] = {name: factory_default_model(name) for name in ("cursor", "codex", "stub")}
+        effective["_test_command"] = str(
+            os.environ.get("GENI_STUDIO_TEST_COMMAND")
+            or (ctx.merged.get("verification") or {}).get("command") or ""
+        )
+        effective["_roles"] = {
+            path.parent.name: path.read_text(encoding="utf-8")
+            for path in (factory_root() / "roles").glob("*/role.md")
+        }
         initial: dict[str, Any] = {
             "human_request": human_request,
             "run_name": assign_run_name(snap["project_id"] or project_id, run_name, taken),
             "finance_enabled": ctx.feature_finance(),
+            "project_id": snap.get("project_id") or project_id,
+            "scenario_key": snap.get("scenario_key") or scenario_key,
             **snap,
+            "config_snapshot_effective": effective,
         }
         profile = ctx.profile_id.strip()
-        from geni_studio.config.workflow_defs import uses_default_engine, workflow_exists  # noqa: I001
+        from geni_studio.config.workflow_defs import (
+            uses_current_branch,
+            uses_default_engine,
+            workflow_exists,
+        )
 
         root = factory_root()
+        direct_branch = uses_current_branch(profile, root)
         if profile and workflow_exists(profile, root) and not uses_default_engine(profile, root):
             from geni_studio.workflows.executable import compile_for_project
 
@@ -341,12 +400,17 @@ class GraphRunService:
                 checkpointer=self._graph.checkpointer,
                 root=root,
             )
-            self._compiled[profile] = compiled
             self._graphs[tid] = compiled
             initial.update(extra)
         if workspace_enabled():
-            layout = prepare_run_layout(resolve_target_root(project_id), tid)
+            layout = prepare_run_layout(
+                resolve_target_root(project_id),
+                tid,
+                on_current_branch=direct_branch,
+            )
             initial["workspace_path"] = str(layout.worktree)
+            if layout.base_branch:
+                initial["base_branch"] = layout.base_branch
         if node_tools:
             initial["node_tools"] = node_tools
         if role_models:
@@ -356,15 +420,137 @@ class GraphRunService:
 
             from geni_studio.hitl.attachments import stage_attachments
 
-            base = Path(initial["workspace_path"]) if initial.get("workspace_path") else root / "runs" / "inbox" / tid
-            relative = stage_attachments(attachment_ids, base / "attachments")
-            if initial.get("workspace_path"):
-                initial["attachments"] = relative
+            if direct_branch and initial.get("workspace_path"):
+                base = Path(initial["workspace_path"]) / ".geni_studio" / "runs" / tid
+                relative = stage_attachments(attachment_ids, base / "attachments")
+                initial["attachments"] = [
+                    str(Path(".geni_studio") / "runs" / tid / "attachments" / Path(item).name)
+                    for item in relative
+                ]
             else:
-                initial["attachments"] = [str(base / "attachments" / Path(item).name) for item in relative]
+                base = Path(initial["workspace_path"]) if initial.get("workspace_path") else root / "runs" / "inbox" / tid
+                relative = stage_attachments(attachment_ids, base / "attachments")
+                if initial.get("workspace_path"):
+                    initial["attachments"] = relative
+                else:
+                    initial["attachments"] = [str(base / "attachments" / Path(item).name) for item in relative]
+        return tid, initial
+
+    def start(
+        self,
+        *,
+        human_request: str,
+        scenario_key: str = "",
+        project_id: str = "",
+        thread_id: str | None = None,
+        run_name: str = "",
+        node_tools: dict[str, dict[str, list[str]]] | None = None,
+        attachment_ids: list[str] | None = None,
+        role_models: dict[str, str] | None = None,
+    ) -> RunStatus:
+        tid, initial = self._prepare_start(
+            human_request=human_request,
+            scenario_key=scenario_key,
+            project_id=project_id,
+            thread_id=thread_id,
+            run_name=run_name,
+            node_tools=node_tools,
+            attachment_ids=attachment_ids,
+            role_models=role_models,
+        )
+        from geni_studio.workspace.layout import workspace_lock_root
+        from geni_studio.workspace.policy import assert_write_available
+
+        lock_root = workspace_lock_root(str(initial.get("workspace_path") or ""))
+        if lock_root is not None:
+            assert_write_available(lock_root)
         self._invoke(tid, initial)
         return self._done(tid)
 
+    def enqueue_start(
+        self,
+        *,
+        human_request: str,
+        scenario_key: str = "",
+        project_id: str = "",
+        thread_id: str | None = None,
+        run_name: str = "",
+        node_tools: dict[str, dict[str, list[str]]] | None = None,
+        attachment_ids: list[str] | None = None,
+        role_models: dict[str, str] | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """在后台执行图 invoke，HTTP 可立即返回 thread_id。"""
+        import threading
+
+        from geni_studio.hitl.control import clear_starting, mark_starting
+
+        tid, initial = self._prepare_start(
+            human_request=human_request,
+            scenario_key=scenario_key,
+            project_id=project_id,
+            thread_id=thread_id,
+            run_name=run_name,
+            node_tools=node_tools,
+            attachment_ids=attachment_ids,
+            role_models=role_models,
+        )
+        from geni_studio.workspace.layout import workspace_lock_root
+        from geni_studio.workspace.policy import assert_write_available
+
+        path = str(initial.get("workspace_path") or "")
+        lock_root = workspace_lock_root(path)
+        if lock_root is not None:
+            assert_write_available(lock_root)
+
+        mark_starting(tid)
+        self._clear_start_failure(tid)
+
+        def work() -> None:
+            try:
+                self._invoke(tid, initial)
+                self._clear_start_failure(tid)
+            except Exception as exc:  # noqa: BLE001 — 后台线程必须记录失败，供状态接口查询。
+                self._record_start_failure(tid, exc)
+            finally:
+                clear_starting(tid)
+
+        threading.Thread(target=work, name=f"geni-start-{tid[:8]}", daemon=True).start()
+        return tid, initial
+
+    def provisional_status_dict(self, thread_id: str, initial: dict[str, Any]) -> dict[str, Any]:
+        """检查点尚未写入时，给前端一帧运行中状态。"""
+        st = RunStatus(
+            thread_id=thread_id,
+            phase="running",
+            next_nodes=("project_manager_draft",),
+            awaiting_human=None,
+            values=dict(initial),
+        )
+        ah = st.awaiting_human
+        return {
+            "thread_id": st.thread_id,
+            "phase": st.phase,
+            "stop_requested": False,
+            "pause_requested": False,
+            "next_nodes": list(st.next_nodes),
+            "awaiting_human": None,
+            "values": _public_values(st.values),
+            "limits": {"max_dev_retries": _dev_retry_limit(st.values)},
+            "rail": _rail_for(st),
+            "reading": human_reading(
+                {
+                    "kind": ah.kind,
+                    "gate_id": ah.gate_id,
+                    "questions": ah.questions,
+                    "summary": ah.summary,
+                }
+                if ah
+                else None,
+                st.values,
+            ),
+        }
+
+    @run_mutation
     def set_node_tools(
         self,
         thread_id: str,
@@ -386,6 +572,7 @@ class GraphRunService:
         self._bound(thread_id).update_state(self._config(thread_id), {"node_tools": chosen})
         return self._done(thread_id)
 
+    @run_mutation
     def set_role_models(self, thread_id: str, role_models: dict[str, str]) -> RunStatus:
         """记下这一轮各角色选用的模型。"""
         st = self.status(thread_id)
@@ -410,6 +597,7 @@ class GraphRunService:
             self._invoke(thread_id, None)
         return self._done(thread_id)
 
+    @run_mutation
     def open_hitl(
         self,
         thread_id: str,
@@ -439,6 +627,7 @@ class GraphRunService:
             "hitl_pending_since": None,
         }
 
+    @run_mutation
     def submit_hitl(
         self,
         thread_id: str,
@@ -451,6 +640,7 @@ class GraphRunService:
         st = self.status(thread_id)
         if st.phase != "awaiting_human" or st.awaiting_human is None:
             raise HitlError("当前 Run 不在 awaiting_human，无法提交 HITL")
+        self._require_resume_definition(thread_id)
         awaiting = st.awaiting_human
         cfg = self._config(thread_id)
         audit = audit_patch(
@@ -495,7 +685,11 @@ class GraphRunService:
             snap = self._bound(thread_id).get_state(cfg)
             if not snap.next:
                 self._bound(thread_id).update_state(cfg, None, as_node="tester_testability")
-            self._invoke(thread_id, None)
+            # 澄清答复只解决提问，不等同于批准当前或即将进入的关卡。
+            snap = self._bound(thread_id).get_state(cfg)
+            gates = set(GATE_NODES) | set(snap.values.get("workflow_gates") or [])
+            if not any(node in gates for node in snap.next):
+                self._invoke(thread_id, None)
             return self._done(thread_id)
 
         if awaiting.kind == "escalation":
@@ -589,6 +783,7 @@ class GraphRunService:
             return self.status(thread_id)
         return self._finish_pause(thread_id)
 
+    @run_mutation
     def resume(self, thread_id: str) -> RunStatus:
         """从暂停的节点继续，不重做已完成节点。"""
         from geni_studio.hitl.control import clear_pause_request
@@ -596,6 +791,7 @@ class GraphRunService:
         st = self.status(thread_id)
         if st.phase != "paused":
             raise HitlError(f"当前阶段是{st.phase}，不能继续")
+        self._require_resume_definition(thread_id)
         clear_pause_request(thread_id)
         self._bound(thread_id).update_state(
             self._config(thread_id),
@@ -604,11 +800,13 @@ class GraphRunService:
         self._invoke(thread_id, None)
         return self._done(thread_id)
 
+    @run_mutation
     def continue_interrupted(self, thread_id: str) -> RunStatus:
         """从中断的节点接着做，不重做已完成的节点。"""
         st = self.status(thread_id)
         if st.phase != "interrupted":
             raise HitlError(f"当前阶段是{st.phase}，不能续跑")
+        self._require_resume_definition(thread_id)
         self._bound(thread_id).update_state(
             self._config(thread_id),
             {"run_interrupted": False, "interrupted_at": ""},
@@ -732,6 +930,7 @@ class GraphRunService:
             )
         return rows
 
+    @run_mutation
     def delete_run(self, thread_id: str, *, confirm_name: str) -> None:
         """删除一轮检查点。名称必须一致，运行中的一轮要先停止。"""
         from geni_studio.hitl.control import clear_pause_request, clear_stop_request
@@ -746,9 +945,11 @@ class GraphRunService:
         if saver is None or not hasattr(saver, "delete_thread"):
             raise HitlError("当前检查点不能删除这一轮。")
         saver.delete_thread(thread_id)
+        self._graphs.pop(thread_id, None)
         clear_stop_request(thread_id)
         clear_pause_request(thread_id)
 
+    @observation_mutation
     def note_gate_timeout(self, thread_id: str) -> RunStatus:
         """等待超过时限时记一笔未批复，关卡仍停在原地，不自动批准或驳回。"""
         st = self.status(thread_id)
@@ -784,18 +985,22 @@ class GraphRunService:
         )
         return self.status(thread_id)
 
+    @observation_mutation
     def _observe(self, thread_id: str) -> RunStatus:
         """对外查看时，把已经没有执行体的运行中轮次记为中断。"""
         from geni_studio.hitl.control import (
             is_inflight,
             is_pause_requested,
+            is_starting,
             is_stop_requested,
         )
 
         st = self.status(thread_id)
+
         if (
             st.phase == "running"
             and not is_inflight(thread_id)
+            and not is_starting(thread_id)
             and not is_pause_requested(thread_id)
             and not is_stop_requested(thread_id)
         ):
@@ -957,16 +1162,9 @@ def _workflow_gate_summary(values: dict[str, Any], gate_id: str) -> str:
 
 
 def _run_dir_for(values: dict[str, Any], thread_id: str):
-    from pathlib import Path
+    from geni_studio.workspace.layout import run_dir_for_workspace
 
-    worktree = str(values.get("workspace_path") or "").strip()
-    if not worktree:
-        return None
-    # 工作树在 <target>/.geni_studio/worktrees/<thread_id>
-    dot = Path(worktree).parent.parent
-    if dot.name != ".geni_studio":
-        return None
-    return dot / "runs" / thread_id
+    return run_dir_for_workspace(str(values.get("workspace_path") or ""), thread_id)
 
 
 def latest_run_records(graph) -> list[tuple[str, dict[str, Any]]]:
@@ -993,6 +1191,8 @@ def latest_run_records(graph) -> list[tuple[str, dict[str, Any]]]:
 def _public_values(values: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, val in values.items():
+        if key in {"workflow_definition", "config_snapshot_effective"}:
+            continue
         if val is None:
             continue
         if isinstance(val, str) and len(val) > 2000:
