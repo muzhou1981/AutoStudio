@@ -288,3 +288,27 @@ def test_run_record_from_hitl_audit(svc: GraphRunService) -> None:
     assert st.phase == "completed"
     assert "hitl" in (st.values.get("run_record") or "").lower()
     assert "backend=stub" in (st.values.get("cost_ledger") or "")
+
+
+def test_copy_run_template_from_awaiting_gate(svc: GraphRunService) -> None:
+    st = svc.start(human_request="copy me", scenario_key="npu_operator", project_id="_example")
+    payload = svc.copy_run_template(st.thread_id)
+    assert payload["source_kind"] == "run"
+    assert payload["human_request"] == "copy me"
+    assert payload["project_id"]
+    assert "复制" in payload["run_name"]
+    assert payload["source_phase"] == "awaiting_human"
+
+
+def test_api_copy_run() -> None:
+    client = TestClient(app)
+    started = client.post(
+        "/api/runs",
+        json={"human_request": "api copy", "scenario_key": "npu_operator", "project_id": "_example"},
+    )
+    tid = started.json()["thread_id"]
+    copied = client.post(f"/api/runs/{tid}/copy")
+    assert copied.status_code == 200
+    data = copied.json()
+    assert data["human_request"] == "api copy"
+    assert data["attachments"] == []

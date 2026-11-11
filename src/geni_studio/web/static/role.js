@@ -58,13 +58,22 @@
 
   window.confirmLeaveRole = confirmLeave;
 
+  function syncRolePick() {
+    const pick = $("rolePick");
+    if (!pick) return;
+    pick.hidden = mode !== "open" || !roles.length;
+  }
+
   function showPieces() {
     const editing = mode === "new" || Boolean(loadedId);
-    $("roleOpen").hidden = mode !== "open" || Boolean(loadedId);
+    const selecting = mode === "open" && !loadedId;
+    $("roleOpen").hidden = !selecting;
     $("roleEditor").hidden = !editing;
     const created = mode === "open" && Boolean(loadedId);
     $("roleCreateRow").hidden = mode !== "new";
     $("roleWork").hidden = !created;
+    syncRolePick();
+    $("roleHint").hidden = !selecting || !roles.length;
     $("roleIdHint").hidden = created;
     $("roleIdLine").hidden = !created;
     $("roleUsage").hidden = !created;
@@ -154,7 +163,8 @@
     const none = !roles.length;
     $("roleEmpty").hidden = !none;
     $("roleEmptyAction").hidden = !none;
-    $("roleHint").hidden = none;
+    syncRolePick();
+    if (mode === "open" && !loadedId) $("roleHint").hidden = none;
   }
 
   function writeUrl(nextMode, id, replace) {
@@ -184,6 +194,7 @@
     if (!id) {
       loadedId = "";
       showSaved("");
+      $("rolePick").value = "";
       await loadLists();
       showPieces();
       writeUrl("open", "", replace);
@@ -229,15 +240,29 @@
   };
 
   $("btnRoleGoNew").onclick = () => enterNew(false);
-  $("btnOpenRole").onclick = () => {
-    const id = $("rolePick").value;
-    if (!id) {
-      showError("先选择要打开的角色。");
-      return;
-    }
-    showError("");
-    enterOpen(id, false);
-  };
+
+  if ($("rolePick")) {
+    $("rolePick").addEventListener("change", async () => {
+      if (mode !== "open") return;
+      const next = ($("rolePick").value || "").trim();
+      showError("");
+      showSaved("");
+      if (!next) {
+        if (loadedId && !confirmLeave()) {
+          $("rolePick").value = loadedId;
+          return;
+        }
+        if (loadedId) await enterOpen("", false);
+        return;
+      }
+      if (next === loadedId) return;
+      if (!confirmLeave()) {
+        $("rolePick").value = loadedId || "";
+        return;
+      }
+      await enterOpen(next, false);
+    });
+  }
 
   $("btnCreateRole").onclick = async () => {
     const title = ($("roleTitle").value || "").trim();

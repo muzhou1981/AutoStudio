@@ -216,6 +216,11 @@ def _activity_contract(node: dict[str, Any], root: Any) -> tuple[list[str], list
         if item in seen_inputs:
             problems.append(f"活动「{name}」的产物名「{item}」重复。")
         seen_inputs.add(item)
+    primary = str(node.get("primary_output") or "").strip()
+    if primary:
+        if primary in seen_inputs:
+            problems.append(f"活动「{name}」的产物名「{primary}」重复。")
+        return inputs, [primary], problems
     if "outputs" in node:
         items = _explicit_outputs(node.get("outputs"))
         if not items:

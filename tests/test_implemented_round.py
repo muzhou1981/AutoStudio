@@ -91,11 +91,13 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert "runListSeq" in text
     assert "conversationSection" in text
     assert "展开全文" in text
+    assert 'card.classList.add("is-open")' in text
     assert "renderMarkdown" in text
     assert 'id="swimRail"' in text
     assert ">运行状态</p>" in text
     assert "从目录打开" in text
-    assert ">运行状态</span>" in text
+    assert 'href="/#region-rail"' not in text
+    assert 'href="/#region-todo"' not in text
     assert 'href="/workflow#new"' in text
     assert 'href="/help#overview"' in text
     assert 'href="/help#architecture"' in text
@@ -116,6 +118,11 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert 'id="btnPickWorkspace"' in text
     assert 'id="btnDeleteProject"' in text
     assert 'id="btnOpenChosen"' not in text
+    assert 'id="btnOpenRole"' not in text
+    assert 'id="rolePick"' in text
+    assert text.index('id="rolePick"') < text.index('id="roleTitle"')
+    role_js = TestClient(app).get("/static/role.js?v=20261112-role-pick-top").text
+    assert 'rolePick").addEventListener("change"' in role_js
     assert 'aria-label="选择目录"' in text
     assert 'id="btnSaveProject" appearance="outlined"' in text
     assert ">项目配置</span>" not in text
@@ -146,8 +153,8 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert 'del.textContent = "删除"' not in text
     assert 'id="sidebarResize"' in text
     assert 'class="inspect-resize"' in text
-    assert "调用次数" in text
-    assert "开发重试" in text
+    assert 'inspectSection("调用次数"' not in text
+    assert "未碰到开发重试上限" not in text
     assert ">启动</wa-button>" in text
     assert ">暂停</wa-button>" in text
     assert ">停止</wa-button>" in text
@@ -165,6 +172,14 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert 'id="region-setup"' in text
     assert "inspect-body-run" in text
     assert "inspect-hitl-dock" in text
+    assert "原始状态" not in text
+    assert 'id="out"' not in text
+    assert '$("out")' not in text
+    assert "这一步还没有指定 " not in text
+    # 口径 A：保留分组标题与「增加」，仅去掉未选项空态提示；后端空目录提示仍在
+    assert 'label.textContent = title;' in text
+    assert 'button.textContent = "增加";' in text
+    assert '"后端没有列出 " + title + "。"' in text
     assert ">保存草稿</wa-button>" in text
     todo_at = text.index('id="region-todo"')
     inspect_run_at = text.index("inspect-body-run")
@@ -188,6 +203,67 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert 'showSaved("已删除 " + id + "。");' in script
     config = TestClient(app).get("/static/config.js").text
     assert "refreshWorkflowOptions" in config
+
+
+def test_run_prompt_has_no_example_placeholder() -> None:
+    text = TestClient(app).get("/").text
+    start = text.index('id="req"')
+    tag = text[start:text.index(">", start)]
+    assert 'label="描述本轮交付目标"' in tag
+    assert "placeholder=" not in tag
+    assert "例如：为 npu_operator 场景实现 Mul 算子，含单测与性能基线" not in text
+    assert 'id="runName" label="Run 命名" placeholder="先选择项目"' in text
+    assert "project.disabled = bound" in text
+    assert 'placeholder="补充范围说明或驳回原因…"' in text
+
+
+def test_run_role_model_hint_stays_empty_unless_stub_or_detail() -> None:
+    page = TestClient(app).get("/").text
+    hint_at = page.index('id="roleModelHint"')
+    open_gt = page.index(">", hint_at) + 1
+    hint_tag = page[page.rindex("<", 0, hint_at) : open_gt]
+    hint_inner = page[open_gt : page.index("</p>", open_gt)]
+    assert "hidden" in hint_tag
+    assert hint_inner.strip() == ""
+    assert "留空表示沿用配置里的默认模型" not in page
+    assert "这一轮的选择不影响其它 Run" not in page
+    assert "启动前可改；运行中随当前节点只读" not in page
+    config = TestClient(app).get("/static/config.js").text
+    assert "留空表示沿用配置里的默认模型" not in config
+    assert "这一轮的选择不影响其它 Run" not in config
+    assert 'hint.textContent = "";' in config
+    assert "hint.hidden = true;" in config
+    assert "当前后端为 stub，不调用外部模型" in config
+    assert 'hint.textContent = detail;' in config
+    assert config.count("hint.hidden = false;") >= 2
+
+
+def test_hitl_reading_fills_parent_width() -> None:
+    text = TestClient(app).get("/").text
+    todo = text[text.index('id="region-todo"'):text.index('id="gateIdleHint"')]
+    assert 'id="hitlReading" class="hitl-reading"' in todo
+    assert 'id="hitlChoiceActions"' in todo
+    assert 'href="/static/hitl.css?v=20261113-skill-pick-down"' in text
+    assert "skillPickMenu" in text
+    assert "skill-pick-shell" in text
+    assert "closeSkillPick" in text
+    assert 'key !== "skills"' in text
+    css = TestClient(app).get("/static/hitl.css?v=20261113-skill-pick-down").text
+    assert "wa-color-surface-raised" in css
+    assert "wa-color-neutral-fill-normal" in css
+    assert "inspect-run-scroll .status-empty" in css
+    assert "white-space: nowrap" in css
+    assert '["状态", STATE_LABEL' not in text
+    assert "这一步还没有会话" not in text
+    assert "renderChoiceSurvey" in text or "hitl-choice-grid" in text
+    assert 'class="run-copy"' in text or "run-copy" in text
+    css = TestClient(app).get("/static/hitl.css").text
+    start = css.index(".hitl-reading {")
+    block = css[start:css.index("}", start)]
+    assert "width: 100%" in block
+    assert "max-width: 100%" in block
+    assert "min-width: 0" in block
+    assert "65ch" not in block
 
 
 def test_command_cwd_allows_a_subdirectory_and_rejects_a_sibling(tmp_path) -> None:

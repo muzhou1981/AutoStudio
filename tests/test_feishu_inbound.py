@@ -191,6 +191,53 @@ def test_gate_card_has_buttons():
     assert "待批复 · 需求确认" in body
 
 
+def test_gate_card_shows_abc_choice_buttons():
+    choices = [
+        {"id": "A", "label": "只删 placeholder，保留 label", "recommended": True},
+        {"id": "B", "label": "placeholder 和 label 都去掉", "recommended": False},
+        {"id": "C", "label": "其他（请说明）", "recommended": False},
+    ]
+    card = build_gate_interactive_card(
+        thread_id="tid",
+        summary="请确认",
+        gate_id="confirm_change",
+        web_url="http://127.0.0.1:8765/?thread_id=tid",
+        choices=choices,
+    )
+    blob = str(card)
+    assert "请择一" in blob
+    assert "选择 A（推荐）：只删 placeholder" in blob
+    assert "gate_decision" in blob and "approved" in blob
+    assert "A（推荐）" in blob
+
+
+def test_clarification_card_choice_submits_reply():
+    card = build_pm_clarification_interactive_card(
+        thread_id="tid",
+        summary="请确认",
+        questions=["范围？"],
+        web_url="http://127.0.0.1:8765/?thread_id=tid",
+        choices=[
+            {"id": "A", "label": "方案一", "recommended": True},
+            {"id": "B", "label": "方案二", "recommended": False},
+        ],
+    )
+    blob = str(card)
+    assert "点选即提交答复" in blob
+    assert "选择 A（推荐）：方案一" in blob
+    event = {
+        "action": {
+            "value": {
+                "thread_id": "tid",
+                "hitl_action": "pm_clarification",
+                "human_reply": "选择 A（推荐）：方案一",
+            }
+        }
+    }
+    parsed = parse_card_action_trigger(event)
+    assert parsed["human_reply"].startswith("选择 A")
+
+
 def test_feishu_main_webhook_card_trigger():
     client = TestClient(app)
     r = client.post(

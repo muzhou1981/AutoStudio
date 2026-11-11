@@ -184,6 +184,8 @@ def notify_awaiting_human_via_lark_cli(
         return NotifyResult(False, "")
     ah = st.awaiting_human
     web_url = _web_url(cfg, thread_id)
+    status = service.status_dict(thread_id)
+    choices = status.get("choices") if isinstance(status.get("choices"), list) else []
     try:
         if ah.kind == "gate" and _use_interactive_card():
             label, reject_label = gate_presentation(st.values, ah.gate_id or "")
@@ -195,6 +197,7 @@ def notify_awaiting_human_via_lark_cli(
                 node_label=label,
                 reject_label=reject_label,
                 excerpt=gate_excerpt(st.values, ah.gate_id or "", ah.summary),
+                choices=choices,
             )
             _send_to_target(cfg, card_json=card_content_json(card))
         elif ah.kind == "escalation" and _use_interactive_card():
@@ -210,6 +213,7 @@ def notify_awaiting_human_via_lark_cli(
                 summary=ah.summary,
                 questions=ah.questions,
                 web_url=web_url,
+                choices=choices,
             )
             _send_to_target(cfg, card_json=card_content_json(card))
         else:

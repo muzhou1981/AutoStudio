@@ -529,7 +529,9 @@ section.config-form-half > .main-divider {
 
 .hitl-reading {
   margin: 0.75rem 0 0.25rem;
-  max-width: 65ch;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   max-height: 18rem;
   overflow: auto;
   padding: 0.75rem 0.85rem;
@@ -896,6 +898,11 @@ html[data-theme="dark"] .swim-cell.is-gate {
   color: var(--text-muted);
   font-size: 0.8125rem;
   max-width: 42ch;
+}
+
+html[data-route="hitl"] .inspect-run-scroll .status-empty {
+  max-width: none;
+  white-space: nowrap;
 }
 
 .status-dl {
@@ -1276,11 +1283,50 @@ html[data-route="hitl"] .hitl-agent-live.is-busy::before {
   50% { opacity: 1; }
 }
 
-html[data-route="hitl"] .hitl-clarify-actions {
+html[data-route="hitl"] .hitl-clarify-actions,
+html[data-route="hitl"] .hitl-choice-actions {
   margin-bottom: 0.5rem;
 }
 
-html[data-route="hitl"] .question-list.question-actions {
+html[data-route="hitl"] .hitl-choice-grid {
+  margin: 0.35rem 0 0.5rem;
+}
+
+html[data-route="hitl"] .choice-survey-prompt {
+  margin: 0.25rem 0 0.35rem;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+html[data-route="hitl"] .choice-survey-done {
+  margin: 0.15rem 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+html[data-route="hitl"] .choice-survey-nav {
+  margin-top: 0.35rem;
+}
+
+html[data-route="hitl"] .run-copy {
+  flex: none;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+html[data-route="hitl"] .run-copy:hover {
+  border-color: var(--focus-border);
+  color: var(--text-primary);
+}
+
+html[data-route="hitl"] .question-list.question-actions,
+html[data-route="hitl"] .question-list.choice-actions {
   list-style: none;
   margin: 0.35rem 0 0;
   padding: 0;
@@ -1447,6 +1493,27 @@ html[data-route="hitl"] .inspect-hitl-dock .status-empty {
     height: 100vh;
   }
 
+  html[data-route="hitl"] .run-board.is-run-bound .run-board-scroll,
+  html[data-route="hitl"] .run-board.is-run-compose .run-board-scroll {
+    overflow: hidden;
+  }
+
+  html[data-route="hitl"] .run-board.is-run-bound .run-board-scroll::after,
+  html[data-route="hitl"] .run-board.is-run-compose .run-board-scroll::after {
+    display: none;
+  }
+
+  html[data-route="hitl"] .run-board.is-run-bound #runRoleModels,
+  html[data-route="hitl"] .run-board.is-run-compose #runRoleModels {
+    margin-top: 0.35rem;
+  }
+
+  html[data-route="hitl"] .run-board.is-run-bound #runRoleModels .section-title,
+  html[data-route="hitl"] .run-board.is-run-compose #runRoleModels .section-title {
+    font-size: 0.8125rem;
+    margin-bottom: 0.25rem;
+  }
+
   html[data-route="hitl"] .run-composer #req {
     min-height: 4.5rem;
   }
@@ -1510,6 +1577,76 @@ html[data-route="hitl"] .inspect-hitl-dock .status-empty {
 .tool-add wa-select {
   display: block;
   margin-bottom: 0.45rem;
+}
+
+.skill-pick-shell {
+  position: relative;
+}
+
+.skill-pick-wrap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 6;
+}
+
+.skill-pick-options {
+  list-style: none;
+  margin: 0;
+  padding: 0.25em;
+  max-height: min(26rem, 52vh);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125em;
+  border: var(--wa-border-width-s, 1px) var(--wa-border-style, solid) var(--wa-color-surface-border, var(--border));
+  border-radius: var(--wa-border-radius-m, var(--radius-sm, 0.375rem));
+  background: var(--wa-color-surface-raised, var(--bg-elevated));
+  box-shadow: var(--wa-shadow-m);
+  overscroll-behavior: none;
+}
+
+.skill-pick-option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.5em 1em 0.5em 0.25em;
+  border: 0;
+  border-radius: var(--wa-border-radius-s, 0.25rem);
+  background: transparent;
+  color: var(--wa-color-text-normal, var(--text-primary));
+  font: inherit;
+  font-size: inherit;
+  line-height: var(--wa-line-height-condensed, 1.35);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--wa-transition-fast, 80ms) var(--wa-transition-easing, ease);
+}
+
+.skill-pick-option:hover,
+.skill-pick-option:focus-visible,
+.skill-pick-option.is-active {
+  background: var(--wa-color-neutral-fill-normal);
+  color: var(--wa-color-neutral-on-normal, var(--text-primary));
+  outline: none;
+}
+
+.skill-pick-tip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  margin: 0;
+  padding: 0.45rem 0.65rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  background: var(--bg-surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 0.375rem);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+  pointer-events: none;
 }
 
 .io-row .tool-note {

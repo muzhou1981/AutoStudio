@@ -222,6 +222,15 @@ def api_get_run_draft(draft_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
+@app.post("/api/runs/{thread_id}/copy")
+def api_copy_run(thread_id: str) -> dict:
+    try:
+        return _run_service.copy_run_template(thread_id.strip())
+    except HitlError as e:
+        missing = "未知" in str(e) or "无法识别" in str(e)
+        raise HTTPException(status_code=404 if missing else 400, detail=str(e)) from e
+
+
 @app.post("/api/runs/drafts/{draft_id}/delete")
 def api_delete_run_draft(draft_id: str, body: DeleteRunBody) -> dict:
     from geni_studio.hitl.drafts import delete_draft

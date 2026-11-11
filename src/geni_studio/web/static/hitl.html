@@ -33,7 +33,7 @@
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css" />
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/utilities.css" />
   <link rel="stylesheet" href="/static/shared.css?v=20261109-roleicon" />
-  <link rel="stylesheet" href="/static/hitl.css?v=20261110-hitl-ux" />
+  <link rel="stylesheet" href="/static/hitl.css?v=20261113-skill-pick-down" />
   <script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
 </head>
 <body>
@@ -74,14 +74,6 @@
               <a class="sidebar-link sidebar-sub" id="btnSidebarNew" href="/#region-new">
                 <wa-icon name="plus" library="system"></wa-icon>
                 <span>新建 Run</span>
-              </a>
-              <a class="sidebar-link sidebar-sub" href="/#region-rail">
-                <wa-icon name="gauge" library="system"></wa-icon>
-                <span>运行状态</span>
-              </a>
-              <a class="sidebar-link sidebar-sub" href="/#region-todo">
-                <wa-icon name="check" library="system"></wa-icon>
-                <span>待办</span>
               </a>
               <label class="run-filter sidebar-sub">
                 <span>Run列表</span>
@@ -214,7 +206,7 @@
           <div class="func-region" id="region-setup">
             <div id="runRoleModels" class="run-role-models">
               <p class="section-title">角色模型</p>
-              <p class="hint-block" id="roleModelHint">留空表示沿用配置里的默认模型。启动前可改；运行中随当前节点只读。</p>
+              <p class="hint-block" id="roleModelHint" hidden></p>
               <p class="hint-block" id="roleModelEmpty" hidden>先选择项目。</p>
               <div id="roleModelList"></div>
             </div>
@@ -226,7 +218,7 @@
         <div class="run-composer" id="region-prompt">
           <div class="prompt-box" id="promptBox">
             <div id="attachList" class="attach-list" hidden></div>
-            <wa-textarea id="req" label="描述本轮交付目标" rows="3" placeholder="例如：为 npu_operator 场景实现 Mul 算子，含单测与性能基线…"></wa-textarea>
+            <wa-textarea id="req" label="描述本轮交付目标" rows="3"></wa-textarea>
             <div class="prompt-toolbar">
               <button type="button" id="btnAttach" class="prompt-attach" aria-label="上传附件">
                 <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></svg>
@@ -262,15 +254,13 @@
             <div id="statusHuman">
               <p class="status-empty">还没有运行记录。填写交付目标并启动后，阶段和产物会显示在这里。</p>
             </div>
-            <wa-details class="raw" summary="原始状态">
-              <pre id="out">{}</pre>
-            </wa-details>
           </div>
           <div id="hitlDockResize" class="hitl-dock-resize" role="separator" aria-orientation="horizontal" aria-label="拖动调整人工待办区域高度" tabindex="0"></div>
           <div class="func-region inspect-hitl-dock" id="region-todo">
             <p class="section-title" id="hitlSectionTitle">人工待办</p>
             <p id="hitlAgentStatus" class="hitl-agent-live" hidden aria-live="polite"></p>
             <div id="hitlClarifyActions" class="hitl-clarify-actions" hidden></div>
+            <div id="hitlChoiceActions" class="hitl-choice-actions" hidden></div>
             <wa-card id="banner" class="gate-card" hidden with-header>
               <h3 slot="header" id="bannerText">等待人工处理</h3>
               <p class="gate-id" id="bannerGate"></p>
@@ -424,12 +414,9 @@
       <div class="app-view" data-route="role">
         <main class="workspace-main" aria-label="角色">
           <p class="section-title" id="roleHeading">角色</p>
+          <wa-select id="rolePick" label="选择角色" placeholder="选择角色" hidden></wa-select>
           <div id="roleOpen" hidden>
-            <wa-select id="rolePick" label="选择角色" placeholder="选择角色"></wa-select>
-            <div class="row-actions">
-              <wa-button id="btnOpenRole" variant="brand">打开</wa-button>
-            </div>
-            <p class="hint-block" id="roleHint">先选择要打开的角色。</p>
+            <p class="hint-block" id="roleHint">从列表中选择角色即可编辑。</p>
             <p class="hint-block" id="roleEmpty" hidden>还没有角色。先新建一个。</p>
             <div class="row-actions" id="roleEmptyAction" hidden>
               <wa-button id="btnRoleGoNew" appearance="outlined" variant="neutral">新建</wa-button>
@@ -810,9 +797,9 @@
           </article>
           <article class="help-copy" data-help-article="roles" hidden>
             <ul>
-              <li>左栏「角色」放在「流程」下面、「配置」上面。可以新建、打开、修改和删除。</li>
+              <li>左栏「角色」放在「流程」下面、「配置」上面。可以新建、修改和删除；已有角色从列表选择即可编辑。</li>
               <li>新建只写标题。标识按标题生成，中文标题会译成英文。打开之后标识只读。</li>
-              <li>打开后可以改标题、类别、职责、原则与价值观、输入、输出和能力。</li>
+              <li>打开后最上方仍是「选择角色」，可切换到其他角色；其下改标题、类别、职责、原则与价值观、输入、输出和能力。</li>
               <li>输入和输出从工厂已有的产物名里选择。人类关卡不在这个列表里。</li>
               <li>已被流程使用的角色不能删除。先从那些流程里去掉，再删角色。</li>
               <li>泳道和流程里显示的是文件头里的标题。</li>
@@ -1163,19 +1150,49 @@
       applyRoute("/", "#region-rail", {
         historyMode: "replace",
         smooth: !!(options && options.smooth),
+        skipScroll: !!(options && options.skipScroll),
       });
     }
 
-    function applyBoundRunName(data) {
-      const input = $("runName");
-      if (!input) return;
+    function syncRunBoardLayout() {
+      const board = document.querySelector(".run-board");
+      if (!board) return;
       const bound = !!$("thread").value.trim();
-      input.disabled = bound;
+      const compose = !bound;
+      board.classList.toggle("is-run-bound", bound);
+      board.classList.toggle("is-run-compose", compose);
+      const draftActions = document.querySelector(".region-setup-actions");
+      if (draftActions) draftActions.hidden = bound;
+    }
+
+    async function ensureProjectOnSelect(projectId) {
+      const pj = $("project");
+      const pid = String(projectId || "").trim();
+      if (!pj || !pid) return;
+      const hasOption = () =>
+        [...pj.querySelectorAll("wa-option")].some((option) => option.value === pid);
+      if (!hasOption()) await loadRunConfigOptions();
+      if (!hasOption()) return;
+      ignoreProjectChange = true;
+      pj.value = pid;
+      ignoreProjectChange = false;
+    }
+
+    function applyBoundRunName(data) {
+      const bound = !!$("thread").value.trim();
+      const input = $("runName");
+      const project = $("project");
+      if (input) input.disabled = bound;
+      if (project) project.disabled = bound;
       if (!bound) return;
       const name = data && data.values && data.values.run_name;
-      if (name) input.value = name;
+      if (name && input) input.value = name;
       const projectId = data && data.values && data.values.project_id;
-      if (projectId) $("project").value = projectId;
+      if (projectId && project) {
+        ignoreProjectChange = true;
+        project.value = projectId;
+        ignoreProjectChange = false;
+      }
     }
 
     function noteFeishu(data) {
@@ -1339,6 +1356,72 @@
       refreshRunRoleModels({}, false);
       renderInspect(null);
       loadIdleRail();
+      syncRunBoardLayout();
+    }
+
+    async function applyRunStartTemplate(data) {
+      showError($("startError"), "");
+      showRunSaved("");
+      stopPoll();
+      $("thread").value = "";
+      draftId = "";
+      draftName = "";
+      loadedDraftProject = String(data.project_id || "");
+      ignoreProjectChange = true;
+      $("project").value = loadedDraftProject;
+      ignoreProjectChange = false;
+      runNameTouched = true;
+      $("runName").value = data.run_name || "";
+      $("runName").disabled = false;
+      if ($("project")) $("project").disabled = false;
+      $("req").value = data.human_request || "";
+      runAttachments = (data.attachments || []).map((item) => ({
+        id: item.id,
+        name: item.name,
+        size: item.size,
+      }));
+      renderAttachments();
+      pendingNodeTools = data.node_tools || {};
+      pendingRoleModels = data.role_models || {};
+      roleModelStamp = "";
+      syncUrlDraft("");
+      syncUrlThread("");
+      syncThreadChrome("");
+      lastStatus = null;
+      lastRailCurrent = "";
+      renderInspect(null);
+      loadIdleRail();
+      syncStartButton("idle");
+      syncStopButton("idle");
+      setPhase("idle");
+      syncRunBoardLayout();
+      markRegion($("region-new"));
+      const nextHash = "#region-new";
+      if (location.hash !== nextHash) {
+        history.replaceState(null, "", location.pathname + location.search + nextHash);
+      }
+      void ensureProjectOnSelect(loadedDraftProject).then(() => {
+        void refreshRunRoleModels(pendingRoleModels, false);
+        void syncRunScenarioHint();
+      });
+      $("req").focus({ preventScroll: true });
+    }
+
+    async function copyRunItem(item) {
+      const id = item.kind === "draft" ? item.draft_id : item.thread_id;
+      try {
+        const r = await fetch("/api/runs/" + encodeURIComponent(id) + "/copy", { method: "POST" });
+        const data = await r.json();
+        if (!r.ok) {
+          showError($("startError"), data.detail || "复制失败。");
+          return;
+        }
+        void applyRunStartTemplate(data);
+        const from = item.run_name || id;
+        showRunSaved("已从「" + from + "」复制到新建表单，确认后启动。");
+      } catch (_) {
+        showError($("startError"), "复制没有返回。检查服务是否还在，然后重试。");
+      }
     }
 
     async function openDraft(id) {
@@ -1377,10 +1460,13 @@
         applyBoundRunName(null);
         syncStartButton("saved");
         syncStopButton("idle");
-        await syncRunScenarioHint();
-        await refreshRunRoleModels(pendingRoleModels, false);
-        await loadIdleRail();
-        await loadRunList();
+        syncRunBoardLayout();
+        void ensureProjectOnSelect(loadedDraftProject).then(() => {
+          void refreshRunRoleModels(pendingRoleModels, false);
+          void syncRunScenarioHint();
+        });
+        loadIdleRail();
+        void loadRunList();
       } catch (_) {
         showError($("startError"), "读不到这份草稿。检查服务是否还在，然后刷新。");
       }
@@ -1482,7 +1568,9 @@
             $("thread").value = item.thread_id;
             syncUrlThread(item.thread_id);
             lastRailCurrent = "";
-            void refresh().then(() => focusRunRailView({ smooth: true }));
+            applyBoundRunName(null);
+            syncRunBoardLayout();
+            void refresh({ quiet: true });
           });
           const del = document.createElement("button");
           del.type = "button";
@@ -1490,11 +1578,21 @@
           del.setAttribute("aria-label", "删除");
           del.title = "删除「" + label + "」";
           del.innerHTML = '<svg class="run-delete-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M6.1 1.8h3.8l.35 1.15H13.2v1.25H2.8V2.95h2.95L6.1 1.8zM4.15 5.2h7.7l-.62 8.15c-.04.45-.42.8-.87.8H5.64c-.45 0-.83-.35-.87-.8L4.15 5.2zM6.55 6.7v5.15h1.2V6.7H6.55zm2.7 0v5.15h1.2V6.7H9.25z"/></svg>';
+          const copy = document.createElement("button");
+          copy.type = "button";
+          copy.className = "run-copy";
+          copy.setAttribute("aria-label", "复制");
+          copy.title = "复制到新建 Run";
+          copy.textContent = "复制";
+          copy.addEventListener("click", (event) => {
+            event.stopPropagation();
+            void copyRunItem(item);
+          });
           del.addEventListener("click", (event) => {
             event.stopPropagation();
             armDelete(row, item);
           });
-          row.append(btn, del);
+          row.append(btn, copy, del);
           box.appendChild(row);
         }
       } catch (_) { /* 列表读不到时仍可按地址栏打开一轮 */ }
@@ -2070,7 +2168,7 @@
         return;
       }
       const vals = data.values || {};
-      const rows = [["状态", STATE_LABEL[cell.state] || cell.state, false]];
+      const rows = [];
       if (rail && cell.id === rail.current && data.awaiting_human && data.awaiting_human.summary) {
         rows.push(["摘要", data.awaiting_human.summary, false]);
       }
@@ -2106,31 +2204,20 @@
           artifactCards.appendChild(artifactCard(key, String(vals[key])));
         }
       }
-      const costLines = String(vals.cost_ledger || "").split("\n").filter((line) => {
-        if (!line.trim()) return false;
-        return !cell.role || line.includes("role=" + cell.role);
-      });
-      const used = Number(vals.dev_retry_count || 0);
-      const limit = data.limits && Number(data.limits.max_dev_retries);
-      const retryText = Number.isFinite(limit)
-        ? "已用 " + used + " / 上限 " + limit + (used >= limit ? "。已碰到开发重试上限。" : "。未碰到开发重试上限。")
-        : "已用 " + used + "。";
       const convPayload = conversations[cell.id];
       const convLive = data.phase === "running" && rail && cell.id === rail.current;
-      const session = convPayload
+      const convTurns = (convPayload && convPayload.turns) || [];
+      const showConversation = convLive || convTurns.length > 0;
+      const session = showConversation
         ? formatConversation(convPayload, {
-            live: convLive && (conversationTurnInFlight((convPayload.turns || []).slice(-1)[0]) || !(convPayload.turns || []).length),
+            live: convLive && (conversationTurnInFlight(convTurns.slice(-1)[0]) || !convTurns.length),
           })
-        : convLive
-          ? formatConversation(null, { live: true })
-          : "<p class=\"artifact-empty\">这一步还没有会话。</p>";
-      box.replaceChildren(
-        dl,
-        conversationSection(cell.id, session),
-        artifactSection,
-        inspectSection("调用次数", (costLines.length || 0) + " 次"),
-        inspectSection("开发重试", retryText)
-      );
+        : "";
+      const inspectParts = [];
+      if (rows.length) inspectParts.push(dl);
+      if (showConversation) inspectParts.push(conversationSection(cell.id, session));
+      inspectParts.push(artifactSection);
+      box.replaceChildren(...inspectParts);
       if (isActivityCell(cell)) box.appendChild(nodeToolsSection(cell, data));
       if (cell.role) loadCellConversation(data.thread_id, cell.id);
       if (data.thread_id) loadArtifactTexts(data.thread_id, artifactCards);
@@ -2210,12 +2297,10 @@
       const list = document.createElement("div");
       list.className = "tool-chosen-list";
       const byId = new Map((catalog || []).map((item) => [item.id, item]));
-      if (!selected.length) {
+      if (!selected.length && !(catalog && catalog.length) && !runToolCatalog.detail) {
         const empty = document.createElement("p");
         empty.className = "hint-block";
-        empty.textContent = (catalog && catalog.length) || runToolCatalog.detail
-          ? "这一步还没有指定 " + title + "。"
-          : "后端没有列出 " + title + "。";
+        empty.textContent = "后端没有列出 " + title + "。";
         block.appendChild(empty);
       }
       selected.forEach((id) => {
@@ -2225,36 +2310,133 @@
       block.appendChild(list);
       const remaining = (catalog || []).filter((item) => selected.indexOf(item.id) < 0);
       if (!locked && remaining.length) {
-        const add = document.createElement("div");
-        add.className = "tool-add";
-        const wrap = document.createElement("div");
-        wrap.hidden = true;
-        const pick = document.createElement("wa-select");
-        pick.label = "选择 " + title;
-        pick.placeholder = "选择 " + title;
-        remaining.forEach((item) => {
-          const option = document.createElement("wa-option");
-          option.value = item.id;
-          option.textContent = runToolLabel(item);
-          pick.appendChild(option);
-        });
-        pick.addEventListener("change", () => {
-          const id = (pick.value || "").trim();
-          if (!id) return;
-          const next = chosenNodeTools(cell, data);
-          next[key] = selected.concat([id]);
-          saveNodeTools(cell, data, next);
-        });
-        wrap.appendChild(pick);
-        const button = document.createElement("wa-button");
-        button.setAttribute("appearance", "outlined");
-        button.setAttribute("variant", "neutral");
-        button.textContent = "增加";
-        button.addEventListener("click", () => { wrap.hidden = false; });
-        add.append(wrap, button);
-        block.appendChild(add);
+        block.appendChild(key === "skills" ? skillPickMenu(cell, data, key, selected, remaining) : toolAddSelect(cell, data, key, title, selected, remaining));
       }
       return block;
+    }
+
+    function toolAddSelect(cell, data, key, title, selected, remaining) {
+      const add = document.createElement("div");
+      add.className = "tool-add";
+      const wrap = document.createElement("div");
+      wrap.hidden = true;
+      const pick = document.createElement("wa-select");
+      pick.label = "选择 " + title;
+      pick.placeholder = "选择 " + title;
+      remaining.forEach((item) => {
+        const option = document.createElement("wa-option");
+        option.value = item.id;
+        option.textContent = runToolLabel(item);
+        pick.appendChild(option);
+      });
+      pick.addEventListener("change", () => {
+        const id = (pick.value || "").trim();
+        if (!id) return;
+        const next = chosenNodeTools(cell, data);
+        next[key] = selected.concat([id]);
+        saveNodeTools(cell, data, next);
+      });
+      wrap.appendChild(pick);
+      const button = document.createElement("wa-button");
+      button.setAttribute("appearance", "outlined");
+      button.setAttribute("variant", "neutral");
+      button.textContent = "增加";
+      button.addEventListener("click", () => { wrap.hidden = false; });
+      add.append(wrap, button);
+      return add;
+    }
+
+    function skillPickMenu(cell, data, key, selected, remaining) {
+      const add = document.createElement("div");
+      add.className = "tool-add";
+      const shell = document.createElement("div");
+      shell.className = "skill-pick-shell";
+      const wrap = document.createElement("div");
+      wrap.className = "skill-pick-wrap";
+      wrap.hidden = true;
+      const list = document.createElement("ul");
+      list.className = "skill-pick-options";
+      list.setAttribute("role", "listbox");
+      const tip = document.createElement("div");
+      tip.className = "skill-pick-tip";
+      tip.hidden = true;
+      tip.setAttribute("role", "tooltip");
+      let hideTimer = 0;
+      let docClose = null;
+      function closeSkillPick() {
+        wrap.hidden = true;
+        tip.hidden = true;
+        button.setAttribute("aria-expanded", "false");
+        if (docClose) {
+          document.removeEventListener("pointerdown", docClose, true);
+          docClose = null;
+        }
+      }
+      function openSkillPick() {
+        wrap.hidden = false;
+        button.setAttribute("aria-expanded", "true");
+        if (!docClose) {
+          docClose = (ev) => {
+            if (!shell.contains(ev.target)) closeSkillPick();
+          };
+          document.addEventListener("pointerdown", docClose, true);
+        }
+      }
+      remaining.forEach((item) => {
+        const li = document.createElement("li");
+        li.setAttribute("role", "presentation");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "skill-pick-option";
+        btn.setAttribute("role", "option");
+        btn.textContent = runToolLabel(item);
+        btn.addEventListener("mouseenter", () => {
+          list.querySelectorAll(".skill-pick-option.is-active").forEach((el) => el.classList.remove("is-active"));
+          btn.classList.add("is-active");
+          const text = (item.description || "").trim();
+          if (!text) {
+            tip.hidden = true;
+            return;
+          }
+          tip.textContent = text;
+          tip.hidden = false;
+          const rowRect = btn.getBoundingClientRect();
+          const wrapRect = wrap.getBoundingClientRect();
+          tip.style.top = rowRect.bottom - wrapRect.top + 4 + "px";
+        });
+        btn.addEventListener("mouseleave", () => {
+          btn.classList.remove("is-active");
+          tip.hidden = true;
+        });
+        btn.addEventListener("click", () => {
+          const next = chosenNodeTools(cell, data);
+          next[key] = selected.concat([item.id]);
+          saveNodeTools(cell, data, next);
+          closeSkillPick();
+        });
+        li.appendChild(btn);
+        list.appendChild(li);
+      });
+      wrap.append(list, tip);
+      const button = document.createElement("wa-button");
+      button.setAttribute("appearance", "outlined");
+      button.setAttribute("variant", "neutral");
+      button.setAttribute("aria-expanded", "false");
+      button.setAttribute("aria-haspopup", "listbox");
+      button.textContent = "增加";
+      button.addEventListener("click", () => {
+        if (wrap.hidden) openSkillPick();
+        else closeSkillPick();
+      });
+      shell.addEventListener("mouseenter", () => {
+        window.clearTimeout(hideTimer);
+      });
+      shell.addEventListener("mouseleave", () => {
+        hideTimer = window.setTimeout(closeSkillPick, 140);
+      });
+      shell.append(button, wrap);
+      add.appendChild(shell);
+      return add;
     }
 
     function runToolLabel(item) {
@@ -2270,7 +2452,7 @@
       const title = document.createElement("span");
       title.textContent = runToolLabel(item);
       text.appendChild(title);
-      if (item.description) {
+      if (item.description && key !== "skills") {
         const note = document.createElement("p");
         note.className = "tool-note";
         note.textContent = item.description;
@@ -2456,7 +2638,8 @@
       const toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "artifact-toggle";
-      toggle.textContent = "展开全文";
+      card.classList.add("is-open");
+      toggle.textContent = "收起";
       toggle.addEventListener("click", () => {
         const open = card.classList.toggle("is-open");
         toggle.textContent = open ? "收起" : "展开全文";
@@ -2497,7 +2680,7 @@
       if (!turns.length) {
         return live
           ? "<p class=\"conv-live-status\"><span class=\"conv-live-dot\" aria-hidden=\"true\"></span>思考中…</p>"
-          : "<p class=\"artifact-empty\">这一步还没有会话。</p>";
+          : "";
       }
       return turns.map((turn, turnIndex) => {
         const tools = [];
@@ -2564,20 +2747,12 @@
         const payload = await r.json();
         rememberConversation(payload);
         const section = document.querySelector('.inspect-block[data-node="' + nodeId + '"] .conversation-body');
-        if (section) section.innerHTML = formatConversation(payload);
+        if (section) {
+          section.innerHTML = formatConversation(payload);
+        } else if ((payload.turns || []).length && lastStatus) {
+          renderInspect(lastStatus);
+        }
       } catch (_) { /* 会话读不到时保留上一帧 */ }
-    }
-
-    function inspectSection(title, body) {
-      const section = document.createElement("section");
-      section.className = "inspect-block";
-      const h = document.createElement("h3");
-      h.textContent = title;
-      const p = document.createElement("p");
-      p.className = "mono";
-      p.textContent = body;
-      section.append(h, p);
-      return section;
     }
 
     function shouldFollowRailPhase(phase) {
@@ -2644,6 +2819,120 @@
       const base = String(area.value || "").trim();
       area.value = base ? base + "\n\n" + chunk + "\n" : chunk + "\n";
       area.focus();
+    }
+
+    let choiceSurveyStep = 0;
+    let choiceSurveyAnswers = {};
+    let choiceSurveyGroups = [];
+
+    function choiceReplyLine(choice) {
+      const id = String((choice && choice.id) || "").trim();
+      const label = String((choice && choice.label) || "").trim();
+      if (!id) return label;
+      if (choice && choice.recommended) return "选择 " + id + "（推荐）：" + label;
+      return "选择 " + id + "：" + label;
+    }
+
+    function choiceGroupsFromStatus(data) {
+      const groups = (data && data.choice_groups) || [];
+      if (groups.length) return groups;
+      const flat = (data && data.choices) || [];
+      if (flat.length < 2) return [];
+      return [{ id: "q1", prompt: "", choices: flat }];
+    }
+
+    function renderChoiceSurvey(groups) {
+      const box = $("hitlChoiceActions");
+      if (!box) return;
+      box.replaceChildren();
+      choiceSurveyGroups = groups || [];
+      if (!choiceSurveyGroups.length) {
+        box.hidden = true;
+        choiceSurveyStep = 0;
+        choiceSurveyAnswers = {};
+        return;
+      }
+      if (choiceSurveyStep >= choiceSurveyGroups.length) choiceSurveyStep = 0;
+      box.hidden = false;
+      const head = document.createElement("p");
+      head.className = "section-title";
+      head.textContent =
+        "请择一（" + (choiceSurveyStep + 1) + "/" + choiceSurveyGroups.length + "）";
+      box.appendChild(head);
+      for (let index = 0; index < choiceSurveyStep; index += 1) {
+        const group = choiceSurveyGroups[index];
+        const answer = choiceSurveyAnswers[group.id];
+        if (!answer) continue;
+        const done = document.createElement("p");
+        done.className = "choice-survey-done";
+        const caption = String(group.prompt || "").trim() || "问题 " + (index + 1);
+        done.textContent = caption + " → " + choiceReplyLine(answer);
+        box.appendChild(done);
+      }
+      const group = choiceSurveyGroups[choiceSurveyStep];
+      const promptText = String(group.prompt || "").trim();
+      if (promptText) {
+        const prompt = document.createElement("p");
+        prompt.className = "choice-survey-prompt";
+        prompt.textContent = promptText;
+        box.appendChild(prompt);
+      }
+      const grid = document.createElement("div");
+      grid.className = "choice-grid hitl-choice-grid";
+      grid.setAttribute("role", "radiogroup");
+      const picked = choiceSurveyAnswers[group.id];
+      (group.choices || []).forEach((choice) => {
+        const cb = document.createElement("wa-checkbox");
+        const id = String(choice.id || "").trim();
+        const label = String(choice.label || "").trim();
+        const prefix = choice.recommended ? id + "（推荐）" : id;
+        cb.textContent = prefix + "：" + label;
+        cb.checked = !!(picked && picked.id === choice.id);
+        cb.addEventListener("change", () => {
+          if (!cb.checked) return;
+          grid.querySelectorAll("wa-checkbox").forEach((el) => {
+            if (el !== cb) el.checked = false;
+          });
+          choiceSurveyAnswers[group.id] = choice;
+          next.disabled = false;
+        });
+        grid.appendChild(cb);
+      });
+      box.appendChild(grid);
+      const nav = document.createElement("div");
+      nav.className = "row-actions choice-survey-nav";
+      if (choiceSurveyStep > 0) {
+        const back = document.createElement("wa-button");
+        back.appearance = "outlined";
+        back.variant = "neutral";
+        back.textContent = "上一题";
+        back.addEventListener("click", () => {
+          choiceSurveyStep -= 1;
+          renderChoiceSurvey(choiceSurveyGroups);
+        });
+        nav.appendChild(back);
+      }
+      const next = document.createElement("wa-button");
+      next.variant = "brand";
+      next.textContent = choiceSurveyStep < choiceSurveyGroups.length - 1 ? "下一题" : "填入附言";
+      next.disabled = !choiceSurveyAnswers[group.id];
+      next.addEventListener("click", () => {
+        if (!choiceSurveyAnswers[group.id]) return;
+        if (choiceSurveyStep < choiceSurveyGroups.length - 1) {
+          choiceSurveyStep += 1;
+          renderChoiceSurvey(choiceSurveyGroups);
+          return;
+        }
+        const lines = choiceSurveyGroups
+          .map((item) => choiceReplyLine(choiceSurveyAnswers[item.id]))
+          .filter(Boolean);
+        appendReplySnippet(lines.join("\n"));
+        choiceSurveyStep = 0;
+        choiceSurveyAnswers = {};
+        renderChoiceSurvey(choiceSurveyGroups);
+      });
+      nav.appendChild(next);
+      box.appendChild(nav);
     }
 
     function renderClarifyActions(questions) {
@@ -2752,6 +3041,25 @@
       }
     }
 
+    function syncHumanChoices(data) {
+      const ah = data && data.awaiting_human;
+      const groups = choiceGroupsFromStatus(data);
+      if (!groups.length) {
+        choiceSurveyStep = 0;
+        choiceSurveyAnswers = {};
+      } else if (JSON.stringify(groups) !== JSON.stringify(choiceSurveyGroups)) {
+        choiceSurveyStep = 0;
+        choiceSurveyAnswers = {};
+      }
+      renderChoiceSurvey(groups);
+      if (ah && ah.kind === "pm_clarification") {
+        renderClarifyActions(ah.questions || []);
+      } else if (!ah) {
+        renderClarifyActions([]);
+        renderChoiceSurvey([]);
+      }
+    }
+
     function roundIsOpen(phase) {
       return phase === "running" || phase === "awaiting_human" || phase === "paused" || startInFlight;
     }
@@ -2835,7 +3143,6 @@
     }
 
     function ingestStatus(data) {
-      $("out").textContent = JSON.stringify(data, null, 2);
       showError($("startError"), "");
       applyStatus(data);
       applyBoundRunName(data);
@@ -2853,6 +3160,7 @@
         $("bannerGate").textContent = current ? current.label : "";
         applyHitlFormMode(ah);
         renderReading(data.reading);
+        syncHumanChoices(data);
       } else {
         $("banner").hidden = true;
         $("gateIdleHint").hidden = data.phase === "awaiting_human";
@@ -2870,9 +3178,11 @@
         }
         applyHitlFormMode(null);
         renderReading([]);
+        syncHumanChoices(null);
       }
       armPoll(data.phase);
       loadRunList();
+      syncRunBoardLayout();
     }
 
     function armPoll(phase) {
@@ -2915,7 +3225,6 @@
         renderInspect(null);
         syncThreadChrome("");
         applyBoundRunName(null);
-        $("out").textContent = "{}";
         $("btnSubmit").disabled = true;
         $("banner").hidden = true;
         $("gateIdleHint").hidden = false;
@@ -2930,8 +3239,7 @@
       if (!quiet) setLoading($("btnRefresh"), true);
       try {
         const r = await fetch("/api/runs/" + encodeURIComponent(tid));
-        const { ok, status, data, raw } = await readFetchResponse(r);
-        $("out").textContent = raw || JSON.stringify(data, null, 2);
+        const { ok, status, data } = await readFetchResponse(r);
         if (!ok) {
           if (startInFlight && (status === 404 || status === 503)) {
             return;
@@ -2955,8 +3263,9 @@
         const models = (data.values && data.values.role_models) || {};
         pendingRoleModels = models;
         const ended = data.phase === "completed" || data.phase === "rejected" || data.phase === "stopped";
+        const bound = !!$("thread").value.trim();
         ingestStatus(data);
-        refreshRunRoleModels(models, ended);
+        refreshRunRoleModels(models, ended || bound);
       } catch (err) {
         showError($("startError"), "读不到这一轮的状态。检查服务是否还在，然后刷新。");
       } finally {
@@ -3015,8 +3324,7 @@
           body: JSON.stringify(body),
         });
         const parsed = await readFetchResponse(r);
-        const { ok, data, raw } = parsed;
-        $("out").textContent = raw || "(空响应)";
+        const { ok, data } = parsed;
         if (!ok) {
           $("thread").value = previousThread;
           syncUrlThread(previousThread);
@@ -3079,8 +3387,7 @@
         const r = await fetch("/api/runs/" + encodeURIComponent(tid) + "/stop", {
           method: "POST",
         });
-        const { ok, data, raw } = await readFetchResponse(r);
-        $("out").textContent = raw || JSON.stringify(data, null, 2);
+        const { ok, data } = await readFetchResponse(r);
         if (!ok) {
           if (lastStatus) lastStatus.stop_requested = false;
           showError($("startError"), apiErrorMessage(data, "停不了这一轮。刷新后再看阶段。"));
@@ -3110,8 +3417,7 @@
       btn.loading = true;
       try {
         const r = await fetch("/api/runs/" + encodeURIComponent(tid) + "/continue", { method: "POST" });
-        const { ok, data, raw } = await readFetchResponse(r);
-        $("out").textContent = raw || JSON.stringify(data, null, 2);
+        const { ok, data } = await readFetchResponse(r);
         if (!ok) {
           showError($("startError"), apiErrorMessage(data, "没能续跑。"));
           syncStopButton((lastStatus && lastStatus.phase) || "interrupted");
@@ -3141,8 +3447,7 @@
           "/api/runs/" + encodeURIComponent(tid) + (resume ? "/resume" : "/pause"),
           { method: "POST" }
         );
-        const { ok, data, raw } = await readFetchResponse(r);
-        $("out").textContent = raw || JSON.stringify(data, null, 2);
+        const { ok, data } = await readFetchResponse(r);
         if (!ok) {
           if (lastStatus) lastStatus.pause_requested = false;
           showError(
@@ -3184,8 +3489,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        const { ok, data, raw } = await readFetchResponse(r);
-        $("out").textContent = raw || JSON.stringify(data, null, 2);
+        const { ok, data } = await readFetchResponse(r);
         if (!ok) {
           showError($("hitlError"), apiErrorMessage(data, "提交失败，当前可能不在等待人工状态。"));
           return;
@@ -3387,6 +3691,8 @@
         const draft = params.get("draft") || "";
         if (tid) {
           $("thread").value = tid;
+          applyBoundRunName(null);
+          syncRunBoardLayout();
           if (params.get("thread") && !params.get("thread_id")) syncUrlThread(tid);
           refresh();
         } else if (draft) {
@@ -3396,6 +3702,7 @@
           void refreshRunRoleModels({}, false);
           loadRunList();
           syncStartButton("idle");
+          syncRunBoardLayout();
         }
       });
     })();
@@ -3672,7 +3979,7 @@
       if (!hash || route === "project" || route === "workflow" || route === "role") return;
       const target = document.getElementById(decodeURIComponent(hash.slice(1)));
       const region = markRegion(target);
-      if (region) scrollRegion(region, options);
+      if (region && !(options && options.skipScroll)) scrollRegion(region, options);
     }
 
     document.querySelector(".app-side-nav").addEventListener("click", (event) => {
@@ -3762,8 +4069,8 @@
       <wa-callout id="dirPickerError" variant="danger" hidden></wa-callout>
     </div>
   </div>
-  <script src="/static/config.js?v=20261110-runtime-rebase"></script>
+  <script src="/static/config.js?v=20261110-role-model-hint"></script>
   <script src="/static/workflow.js?v=20261110-delete"></script>
-  <script src="/static/role.js?v=20261109-role"></script>
+  <script src="/static/role.js?v=20261112-role-pick-top"></script>
 </body>
 </html>

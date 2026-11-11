@@ -48,8 +48,15 @@ def human_reading(
         _append(sections, "成本", vals.get("cost_ledger"))
     elif kind == "gate":
         gate_id = str(awaiting.get("gate_id") or "")
-        for title, key in _GATE_SECTIONS.get(gate_id, ()):
-            _append(sections, title, vals.get(key))
+        mapped = _GATE_SECTIONS.get(gate_id)
+        if mapped:
+            for title, key in mapped:
+                _append(sections, title, vals.get(key))
+        else:
+            _append(sections, "需求说明", vals.get("requirement_spec"))
+            _append(sections, "代码变更", vals.get("code_change"))
+            _append(sections, "测试报告", vals.get("test_report"))
+            _append(sections, "交付报告", vals.get("delivery_report"))
         if not sections:
             summary = str(awaiting.get("summary") or "").strip()
             if summary:

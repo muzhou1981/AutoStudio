@@ -79,9 +79,16 @@ def test_self_improve_is_builtin_and_executable():
     assert land["commits_on_branch"] is True
     assert land["outputs"] == ["land_record"]
     assert land["on_current_branch"] is True
+    hear = next(node for node in prepared["nodes"] if node["id"] == "hear")
+    assert hear["outputs"] == ["requirement_spec"]
+    change = next(node for node in prepared["nodes"] if node["id"] == "change_code")
+    assert change["outputs"] == ["code_change"]
     check = next(node for node in prepared["nodes"] if node["id"] == "self_check")
+    assert check["outputs"] == ["test_report"]
     assert check["returns_to"] == "change_code"
     assert check["max_loops"] == 3
+    handoff = next(node for node in prepared["nodes"] if node["id"] == "handoff")
+    assert handoff["outputs"] == ["delivery_report"]
     review = next(node for node in prepared["nodes"] if node["id"] == "review")
     assert review["reject_to"] == "change_code"
 

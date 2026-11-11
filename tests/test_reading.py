@@ -1,5 +1,6 @@
 """人工待办阅读材料。"""
 
+from geni_studio.hitl.choices import choices_from_reading
 from geni_studio.hitl.reading import human_reading
 
 
@@ -25,3 +26,14 @@ def test_clarification_lists_questions():
 
 def test_no_awaiting_means_no_reading():
     assert human_reading(None, {"requirement_spec": "x"}) == []
+
+
+def test_custom_gate_includes_requirement_spec():
+    sections = human_reading(
+        {"kind": "gate", "gate_id": "confirm_change", "summary": "请批准变更"},
+        {"requirement_spec": "A：方案一\nB：方案二\n"},
+    )
+    assert sections[0]["title"] == "需求说明"
+    assert "方案一" in sections[0]["body"]
+    choices = choices_from_reading(sections)
+    assert [c["id"] for c in choices] == ["A", "B"]

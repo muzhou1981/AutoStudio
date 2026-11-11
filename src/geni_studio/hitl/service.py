@@ -19,6 +19,7 @@ from geni_studio.backends.cost import (
     take_cost_lines,
 )
 from geni_studio.config.context import ConfigError, build_run_context_from_state
+from geni_studio.hitl.choices import choice_groups_from_reading, choices_from_reading
 from geni_studio.hitl.constants import GATE_NODES, gate_summary
 from geni_studio.hitl.hitl_audit import audit_patch
 from geni_studio.hitl.pm_clarification import merge_clarification_reply
@@ -527,6 +528,7 @@ class GraphRunService:
             values=dict(initial),
         )
         ah = st.awaiting_human
+        reading, choices, choice_groups = _reading_and_choices(ah, st.values)
         return {
             "thread_id": st.thread_id,
             "phase": st.phase,
@@ -537,17 +539,9 @@ class GraphRunService:
             "values": _public_values(st.values),
             "limits": {"max_dev_retries": _dev_retry_limit(st.values)},
             "rail": _rail_for(st),
-            "reading": human_reading(
-                {
-                    "kind": ah.kind,
-                    "gate_id": ah.gate_id,
-                    "questions": ah.questions,
-                    "summary": ah.summary,
-                }
-                if ah
-                else None,
-                st.values,
-            ),
+            "reading": reading,
+            "choices": choices,
+            "choice_groups": choice_groups,
         }
 
     @run_mutation
@@ -903,6 +897,55 @@ class GraphRunService:
         clear_pause_request(thread_id)
         return self._done(thread_id)
 
+    def copy_run_template(self, thread_id: str) -> dict[str, Any]:
+        """复制启动参数，用于新建一轮；不复制检查点进度与产物。"""
+        from geni_studio.hitl.drafts import load_draft, taken_draft_names
+        from geni_studio.hitl.run_name import assign_run_name, taken_names_for_project
+
+        if "-" not in thread_id and len(thread_id) == 32 and thread_id.isalnum():
+            try:
+                draft = load_draft(thread_id)
+            except HitlError:
+                draft = None
+            if draft is not None and draft.get("kind") == "draft":
+                pid = str(draft.get("project_id") or "")
+                taken = taken_names_for_project(latest_run_records(self._graph), pid)
+                taken |= taken_draft_names(pid)
+                base = str(draft.get("run_name") or "").strip()
+                suffix = "·复制" if base else ""
+                return {
+                    "source_thread_id": thread_id,
+                    "source_kind": "draft",
+                    "source_phase": "saved",
+                    "project_id": pid,
+                    "scenario_key": "",
+                    "human_request": str(draft.get("human_request") or ""),
+                    "run_name": assign_run_name(pid, f"{base}{suffix}", taken),
+                    "node_tools": dict(draft.get("node_tools") or {}),
+                    "role_models": dict(draft.get("role_models") or {}),
+                    "attachments": list(draft.get("attachments") or []),
+                }
+        st = self.status(thread_id)
+        values = st.values or {}
+        pid = str(values.get("project_id") or "")
+        taken = taken_names_for_project(latest_run_records(self._graph), pid)
+        taken |= taken_draft_names(pid)
+        base = str(values.get("run_name") or "").strip()
+        node_tools = values.get("node_tools")
+        role_models = values.get("role_models")
+        return {
+            "source_thread_id": thread_id,
+            "source_kind": "run",
+            "source_phase": st.phase,
+            "project_id": pid,
+            "scenario_key": str(values.get("scenario_key") or ""),
+            "human_request": str(values.get("human_request") or ""),
+            "run_name": assign_run_name(pid, f"{base}·复制" if base else "", taken),
+            "node_tools": dict(node_tools) if isinstance(node_tools, dict) else {},
+            "role_models": dict(role_models) if isinstance(role_models, dict) else {},
+            "attachments": [],
+        }
+
     def list_runs(self, *, project_id: str = "", phase: str = "") -> list[dict[str, Any]]:
         """按检查点列出已有轮次。点进某一轮仍用原来的状态接口。"""
         rows: list[dict[str, Any]] = []
@@ -1013,6 +1056,7 @@ class GraphRunService:
         if st.phase == "running":
             st = self._observe(thread_id)
         ah = st.awaiting_human
+        reading, choices, choice_groups = _reading_and_choices(ah, st.values)
         return {
             "thread_id": st.thread_id,
             "phase": st.phase,
@@ -1033,18 +1077,28 @@ class GraphRunService:
             "values": _public_values(st.values),
             "limits": {"max_dev_retries": _dev_retry_limit(st.values)},
             "rail": _rail_for(st),
-            "reading": human_reading(
-                {
-                    "kind": ah.kind,
-                    "gate_id": ah.gate_id,
-                    "questions": ah.questions,
-                    "summary": ah.summary,
-                }
-                if ah
-                else None,
-                st.values,
-            ),
+            "reading": reading,
+            "choices": choices,
+            "choice_groups": choice_groups,
         }
+
+
+def _reading_and_choices(
+    ah: Any, values: dict[str, Any]
+) -> tuple[list[dict[str, str]], list[dict[str, Any]], list[dict[str, Any]]]:
+    reading = human_reading(
+        {
+            "kind": ah.kind,
+            "gate_id": ah.gate_id,
+            "questions": ah.questions,
+            "summary": ah.summary,
+        }
+        if ah
+        else None,
+        values,
+    )
+    choices = choices_from_reading(reading)
+    return reading, choices, choice_groups_from_reading(reading)
 
 
 def _stop_requested(thread_id: str) -> bool:

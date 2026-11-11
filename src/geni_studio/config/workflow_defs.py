@@ -505,6 +505,9 @@ def validate_workflow(
                 item["inputs"] = _name_list(raw.get("inputs"))
             if "outputs" in raw:
                 item["outputs"] = _output_items(raw.get("outputs"))
+            primary = str(raw.get("primary_output") or "").strip()
+            if primary:
+                item["primary_output"] = primary
         if kind == "subgraph":
             subgraph_id = str(raw.get("subgraph_id") or "").strip()
             _require_subgraph(subgraph_id, expected, root, seen_graphs=set())

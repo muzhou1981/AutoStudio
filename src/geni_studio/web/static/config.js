@@ -1066,12 +1066,15 @@ async function loadBackendModels(backend) {
     const detail = (data && data.detail) || "";
     const source = ((data && data.source) || mode || "").toLowerCase();
     if (source === "stub" || mode === "stub") {
+      hint.hidden = false;
       hint.textContent =
         "当前后端为 stub，不调用外部模型。请在「配置」中选择 Cursor 或 Codex SDK 并写入 .env。";
     } else if (detail) {
+      hint.hidden = false;
       hint.textContent = detail;
     } else {
-      hint.textContent = "留空表示沿用配置里的默认模型。这一轮的选择不影响其它 Run。";
+      hint.textContent = "";
+      hint.hidden = true;
     }
   }
 }
