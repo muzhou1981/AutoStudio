@@ -5,6 +5,43 @@ from geni_studio.hitl.feishu_config import (
     resolve_lark_backend,
 )
 from geni_studio.hitl.feishu_notify import format_gate_message, hitl_page_url
+from geni_studio.hitl.lark_cli_client import _user_identity_from_auth
+
+
+def test_lark_cli_path_from_nvm_layout(tmp_path, monkeypatch):
+    from geni_studio.hitl import lark_cli_client
+
+    fake_home = tmp_path / "home"
+    bin_dir = fake_home / ".nvm" / "versions" / "node" / "v24.0.0" / "bin"
+    bin_dir.mkdir(parents=True)
+    exe = bin_dir / "lark-cli"
+    exe.write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
+    exe.chmod(0o755)
+    monkeypatch.setattr(lark_cli_client.Path, "home", staticmethod(lambda: fake_home))
+    monkeypatch.delenv("GENI_STUDIO_LARK_CLI_PATH", raising=False)
+    monkeypatch.delenv("LARK_CLI_PATH", raising=False)
+    monkeypatch.setattr(lark_cli_client.shutil, "which", lambda _name: None)
+    assert lark_cli_client.lark_cli_path() == str(exe.resolve())
+
+
+def test_lark_cli_path_explicit_env(tmp_path, monkeypatch):
+    from geni_studio.hitl import lark_cli_client
+
+    exe = tmp_path / "custom-lark-cli"
+    exe.write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
+    exe.chmod(0o755)
+    monkeypatch.setenv("GENI_STUDIO_LARK_CLI_PATH", str(exe))
+    monkeypatch.setattr(lark_cli_client.shutil, "which", lambda _name: None)
+    assert lark_cli_client.lark_cli_path() == str(exe.resolve())
+
+
+def test_user_identity_from_auth_json():
+    data = {
+        "identities": {
+            "user": {"openId": "ou_abc", "userName": "张三"},
+        }
+    }
+    assert _user_identity_from_auth(data) == ("ou_abc", "张三")
 
 
 def test_resolve_lark_backend_default_lark_cli(tmp_path, monkeypatch):
@@ -72,7 +109,9 @@ def test_session_binding_survives_a_new_read(tmp_path, monkeypatch):
     assert (tmp_path / "feishu_sessions.json").is_file()
 
 
-def test_load_feishu_hitl_from_example():
+def test_load_feishu_hitl_from_example(tmp_path, monkeypatch):
+    monkeypatch.setattr("geni_studio.hitl.feishu_config.factory_root", lambda: tmp_path)
+    monkeypatch.delenv("GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID", raising=False)
     cfg = load_feishu_hitl_config("_example")
     assert cfg is None
 

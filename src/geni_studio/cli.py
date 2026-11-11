@@ -15,6 +15,7 @@ _ALLOWED = {
     "OPENAI_API_KEY",
     "GENI_STUDIO_CURSOR_MODEL",
     "GENI_STUDIO_CODEX_MODEL",
+    "GENI_STUDIO_CODEX_REASONING_EFFORT",
     "GENI_STUDIO_DEFAULT_MODEL",
     "GENI_STUDIO_BACKEND",
     "GENI_STUDIO_TARGET_ROOT",
@@ -45,6 +46,19 @@ def read_env(path: Path) -> dict[str, str]:
 def write_env_key(path: Path, key: str, value: str) -> None:
     if key not in _ALLOWED:
         raise SystemExit(f"不允许写入配置项 {key}")
+    stripped = value.strip()
+    if key == "GENI_STUDIO_CODEX_REASONING_EFFORT":
+        from geni_studio.backends.codex_settings import normalize_reasoning_effort
+
+        try:
+            stripped = normalize_reasoning_effort(stripped)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+    if key == "GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID" and stripped and not stripped.startswith("ou_"):
+        raise SystemExit("GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID 须以 ou_ 开头，或留空")
+    if key == "GENI_STUDIO_FEISHU_NOTIFY_CHAT_ID" and stripped and not stripped.startswith("oc_"):
+        raise SystemExit("GENI_STUDIO_FEISHU_NOTIFY_CHAT_ID 须以 oc_ 开头，或留空")
+    value = stripped
     lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
     prefix = f"{key}="
     replaced = False
@@ -213,13 +227,38 @@ def build_parser() -> argparse.ArgumentParser:
     approve_p.add_argument("--evidence", required=True)
     apply_p = prop_sub.add_parser("apply")
     apply_p.add_argument("id")
+    gc_p = sub.add_parser("gc", help="回收已删除运行留下的工作树、运行目录与已合入分支")
+    gc_p.add_argument("--repo", type=Path, action="append", default=[], help="目标仓库，可重复；默认取工厂已知的全部仓库")
+    gc_p.add_argument("--dry-run", action="store_true", help="只列出将要回收的内容")
     return parser
+
+
+def cmd_gc(args: argparse.Namespace, root: Path) -> int:
+    from geni_studio.hitl.service import GraphRunService
+    from geni_studio.workflows.default import get_graph
+    from geni_studio.workspace.gc import GcReport, candidate_repos, collect_garbage
+
+    live = GraphRunService(get_graph()).live_thread_ids()
+    repos = [path.resolve() for path in args.repo] or candidate_repos(root)
+    total = GcReport()
+    for repo in repos:
+        total.merge(collect_garbage(repo, live, dry_run=args.dry_run))
+    prefix = "[dry-run] " if args.dry_run else ""
+    for line in total.lines():
+        print(prefix + line)
+    if not total.lines():
+        print("没有需要回收的内容。")
+    return 1 if total.errors else 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     root = args.root or factory_root()
+    if args.cmd in {"run", "status", "hitl", "gc"}:
+        from geni_studio.config.env_loader import apply_env_file
+
+        apply_env_file(root=root)
     if args.cmd == "config" and args.config_cmd == "show":
         return cmd_show(root)
     if args.cmd == "config" and args.config_cmd == "set":
@@ -234,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_status(args.thread_id)
     if args.cmd == "hitl":
         return cmd_hitl(args)
+    if args.cmd == "gc":
+        return cmd_gc(args, root)
     parser.error("未知命令")
     return 2
 

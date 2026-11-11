@@ -3,6 +3,11 @@ title: NPU 算子开发
 description: 先写算子合同。确认 CCA 时，批准进入 CCA 子图，不通过则前往确认 AOM。确认 AOM 时，批准进入 AOM 子图，不通过则前往共同评审。两条都批准时先做 CCA 再做 AOM，然后共同评审。要改，先复制一份。
 builtin: true
 subgraph: true
+profile:
+  features:
+    design_track: false
+  limits:
+    max_dev_retries: 3
 nodes:
 - id: start
   kind: start

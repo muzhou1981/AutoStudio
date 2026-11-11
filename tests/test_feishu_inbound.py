@@ -145,7 +145,7 @@ def test_start_surfaces_a_feishu_send_failure(monkeypatch):
     from geni_studio.hitl.feishu_notify import NotifyResult
 
     monkeypatch.setattr(
-        "geni_studio.web.app.notify_awaiting_human_via_lark_cli",
+        "geni_studio.hitl.feishu_notify.notify_awaiting_human_via_lark_cli",
         lambda *_args, **_kwargs: NotifyResult(False, "lark-cli 未就绪。"),
     )
     client = TestClient(app)
@@ -209,6 +209,59 @@ def test_gate_card_shows_abc_choice_buttons():
     assert "选择 A（推荐）：只删 placeholder" in blob
     assert "gate_decision" in blob and "approved" in blob
     assert "A（推荐）" in blob
+
+
+def test_gate_card_multi_choice_groups_lists_options_without_buttons():
+    groups = [
+        {
+            "id": "q1",
+            "prompt": "范围？",
+            "choices": [
+                {"id": "A", "label": "方案一", "recommended": True},
+                {"id": "B", "label": "方案二", "recommended": False},
+            ],
+        },
+        {
+            "id": "q2",
+            "prompt": "测试？",
+            "choices": [
+                {"id": "A", "label": "全量", "recommended": False},
+                {"id": "B", "label": "子集", "recommended": True},
+            ],
+        },
+    ]
+    card = build_gate_interactive_card(
+        thread_id="tid",
+        summary="请确认",
+        gate_id="confirm_change",
+        web_url="http://127.0.0.1:8765/?thread_id=tid",
+        choice_groups=groups,
+    )
+    blob = str(card)
+    assert "多道选择题" in blob
+    assert "范围？" in blob
+    assert "测试？" in blob
+    assert "请择一" not in blob
+
+
+def test_gate_card_single_choice_group_keeps_buttons():
+    card = build_gate_interactive_card(
+        thread_id="tid",
+        summary="请确认",
+        gate_id="confirm_change",
+        web_url="http://127.0.0.1:8765/?thread_id=tid",
+        choice_groups=[
+            {
+                "id": "q1",
+                "prompt": "范围？",
+                "choices": [
+                    {"id": "A", "label": "一", "recommended": True},
+                    {"id": "B", "label": "二", "recommended": False},
+                ],
+            }
+        ],
+    )
+    assert "请择一" in str(card)
 
 
 def test_clarification_card_choice_submits_reply():

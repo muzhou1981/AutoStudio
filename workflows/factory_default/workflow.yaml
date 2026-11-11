@@ -1,8 +1,17 @@
 workflow_id: factory_default
 title: 通用软件开发
-description: 工厂内置的通用软件开发流程。要改，先复制一份。
+description: 工厂内置的通用软件开发流程。各步骤是系统节点（handler 指向内置实现），路由与可选分支在本文件声明。要改，先复制一份。
 builtin: true
-engine: default
+rail: builtin
+profile:
+  features:
+    design_track: true
+  gates:
+    gate_requirement_confirm: true
+    gate_architecture_review: true
+    gate_final_delivery: true
+  limits:
+    max_dev_retries: 3
 nodes:
 - id: start
   kind: start
@@ -10,15 +19,26 @@ nodes:
   role: human
   returns_to: ''
 - id: project_manager_draft
-  kind: activity
+  kind: system
   name: 项目经理起草
   role: project_manager
   returns_to: ''
+  handler: project_manager_draft
+- id: pm_clarification_check
+  kind: system
+  name: 澄清检查
+  role: project_manager
+  returns_to: ''
+  handler: pm_clarification_check
+  routes:
+  - when: pending:pm_clarification
+    to: hitl_pause
 - id: tester_testability
-  kind: activity
+  kind: system
   name: 可测性
   role: tester
   returns_to: ''
+  handler: tester_testability
 - id: gate_requirement_confirm
   kind: gate
   name: 需求确认
@@ -26,35 +46,58 @@ nodes:
   returns_to: ''
   decision: approve
 - id: config_manager_plan
-  kind: activity
+  kind: system
   name: 配置计划
   role: config_manager
   returns_to: ''
+  handler: config_manager_plan
 - id: ux_designer
-  kind: activity
+  kind: system
   name: 体验
   role: ux_designer
   returns_to: ''
+  handler: ux_designer
+  when: feature:design_track
 - id: ui_designer
-  kind: activity
+  kind: system
   name: 界面
   role: ui_designer
   returns_to: ''
+  handler: ui_designer
+  when: feature:design_track
 - id: visual_designer
-  kind: activity
+  kind: system
   name: 视觉
   role: visual_designer
   returns_to: ''
+  handler: visual_designer
+  when: feature:design_track
+- id: finance_budget_rough
+  kind: system
+  name: 预算粗估
+  role: finance
+  returns_to: ''
+  handler: finance_budget_rough
+  when: feature:finance
 - id: project_manager_scope
-  kind: activity
+  kind: system
   name: 范围
   role: project_manager
   returns_to: ''
+  handler: project_manager_scope
 - id: architect
-  kind: activity
+  kind: system
   name: 架构
   role: architect
   returns_to: ''
+  handler: architect
+- id: finance_budget_final
+  kind: system
+  name: 预算正式版
+  role: finance
+  returns_to: ''
+  handler: finance_budget_final
+  when: feature:finance
 - id: gate_architecture_review
   kind: gate
   name: 架构评审
@@ -62,35 +105,77 @@ nodes:
   returns_to: ''
   decision: approve
 - id: developer
-  kind: activity
+  kind: system
   name: 开发
   role: developer
   returns_to: ''
+  handler: developer
 - id: change_control
-  kind: activity
+  kind: system
   name: 变更
   role: developer
   returns_to: ''
+  handler: change_control
+  routes:
+  - when: impact:scope
+    to: gate_requirement_confirm
+  - when: impact:architecture
+    to: gate_architecture_review
 - id: code_reviewer
-  kind: activity
+  kind: system
   name: 评审
   role: code_reviewer
   returns_to: ''
+  handler: code_reviewer
+  routes:
+  - when:
+    - failed:review_status
+    - retries_exhausted
+    to: escalate_dev_retry
+  - when: failed:review_status
+    to: developer
 - id: tester_execute
-  kind: activity
+  kind: system
   name: 测试
   role: tester
   returns_to: ''
+  handler: tester_execute
+  routes:
+  - when:
+    - failed:test_status
+    - retries_exhausted
+    to: escalate_dev_retry
+  - when: failed:test_status
+    to: developer
 - id: qa
-  kind: activity
+  kind: system
   name: 质量门禁
   role: qa
   returns_to: ''
+  handler: qa
+  routes:
+  - when:
+    - failed:qa_status
+    - retries_exhausted
+    to: escalate_dev_retry
+  - when: failed:qa_status
+    to: developer
+- id: finance_cost_snapshot
+  kind: system
+  name: 成本快照
+  role: finance
+  returns_to: ''
+  handler: finance_cost_snapshot
+  when: feature:finance
 - id: project_manager_delivery
-  kind: activity
+  kind: system
   name: 交付汇总
   role: project_manager
   returns_to: ''
+  handler: project_manager_delivery
+  routes:
+  - when: false:delivery_ready
+    to: escalate_dev_retry
 - id: gate_final_delivery
   kind: gate
   name: 最终交付
@@ -98,15 +183,32 @@ nodes:
   returns_to: ''
   decision: approve
 - id: config_manager_closeout
-  kind: activity
+  kind: system
   name: 收口
   role: config_manager
   returns_to: ''
+  handler: config_manager_closeout
 - id: process_owner_retro
-  kind: activity
+  kind: system
   name: 复盘
   role: process_owner
   returns_to: ''
+  handler: process_owner_retro
+  next: end
+- id: escalate_dev_retry
+  kind: system
+  name: 回退升级
+  role: human
+  returns_to: ''
+  handler: escalate_dev_retry
+  next: end
+- id: hitl_pause
+  kind: system
+  name: 等待澄清
+  role: human
+  returns_to: ''
+  handler: hitl_pause
+  next: end
 - id: end
   kind: end
   name: 结束

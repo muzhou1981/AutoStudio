@@ -79,6 +79,6 @@ def test_status_events_push_the_waiting_round() -> None:
     data = json.loads(payload)
     assert data["thread_id"] == thread_id
     assert data["phase"] == "awaiting_human"
-    text = client.get("/").text
+    text = client.get("/").text + client.get("/static/hitl.js").text
     assert "/events" in text
     assert "每 2 秒" not in text

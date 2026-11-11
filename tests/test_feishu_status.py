@@ -141,6 +141,28 @@ def test_status_query_reports_stopped(monkeypatch):
     assert lines[2] == "待办：无"
 
 
+def test_status_lines_for_interrupted_round(monkeypatch):
+    import pytest
+
+    from geni_studio.backends.runner import invoke_role
+    from geni_studio.hitl.feishu_status import status_lines_for_thread
+    from geni_studio.hitl.service import GraphRunService
+    from geni_studio.workflows.default import graph
+
+    svc = GraphRunService(graph)
+
+    def wrapped(**kwargs):
+        if kwargs.get("role_name") == "tester":
+            raise RuntimeError("节点失败")
+        return invoke_role(**kwargs)
+
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", wrapped)
+    with pytest.raises(RuntimeError):
+        svc.start(human_request="中断", scenario_key="npu_operator", thread_id="intr-lines")
+    lines = status_lines_for_thread(svc, "intr-lines", "http://127.0.0.1:8765/")
+    assert lines[0] == "阶段：中断"
+
+
 def test_status_lines_for_paused_round(monkeypatch):
     from geni_studio.backends.runner import invoke_role
     from geni_studio.hitl.control import current_thread_id, request_pause
@@ -162,6 +184,35 @@ def test_status_lines_for_paused_round(monkeypatch):
     assert lines[2] == "待办：无"
     assert "继续" not in "\n".join(lines)
     assert "停止" not in "\n".join(lines)
+
+
+def test_status_query_prefers_interrupted_over_completed(monkeypatch):
+    import pytest
+
+    from geni_studio.backends.runner import invoke_role
+    from geni_studio.hitl.feishu_status import pick_status_thread
+    from geni_studio.hitl.service import GraphRunService
+    from geni_studio.workflows.default import graph
+
+    svc = GraphRunService(graph)
+
+    def wrapped(**kwargs):
+        if kwargs.get("role_name") == "tester":
+            raise RuntimeError("节点失败")
+        return invoke_role(**kwargs)
+
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", wrapped)
+    with pytest.raises(RuntimeError):
+        svc.start(human_request="中断", scenario_key="npu_operator", thread_id="intr-pick")
+    assert svc.status("intr-pick").phase == "interrupted"
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", invoke_role)
+
+    done = svc.start(human_request="done", scenario_key="npu_operator")
+    svc.submit_hitl(done.thread_id, gate_decision="rejected", human_reply="停")
+    assert svc.status(done.thread_id).phase == "rejected"
+
+    picked = pick_status_thread(svc, [done.thread_id, "intr-pick"])
+    assert picked == "intr-pick"
 
 
 def test_plain_status_sentence_is_not_a_query(monkeypatch):

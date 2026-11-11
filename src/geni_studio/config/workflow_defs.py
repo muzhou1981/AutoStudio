@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from geni_studio.config.context import ConfigError, factory_root
+from geni_studio.config.context import ConfigError, ConfigNotFound, factory_root
 from geni_studio.config.identifiers import allocate_identifier
 from geni_studio.roles.loader import role_contract, role_title
 
@@ -107,7 +107,6 @@ def list_workflows(root: Path | None = None) -> list[dict[str, Any]]:
                 "workflow_id": workflow_id,
                 "title": str(data.get("title") or workflow_id),
                 "builtin": bool(data.get("builtin")),
-                "engine": str(data.get("engine") or ""),
                 "subgraph": bool(data.get("subgraph")),
             }
         )
@@ -119,18 +118,16 @@ def uses_current_branch(workflow_id: str, root: Path | None = None) -> bool:
     """自我改进直接改当前检出的分支，不另建工作树。"""
     if not workflow_id.strip() or not workflow_exists(workflow_id, root):
         return False
-    if uses_default_engine(workflow_id, root):
-        return False
     data = _read_yaml(_workflow_path(workflow_id, root, must_exist=True))
     return str(data.get("workspace") or "") == "current_branch"
 
 
-def uses_default_engine(workflow_id: str, root: Path | None = None) -> bool:
-    """内置的通用软件开发仍走 default.py，不按通用活动重编译。"""
+def has_system_nodes(workflow_id: str, root: Path | None = None) -> bool:
+    """系统节点的路由按节点标识书写，这类流程不能当作子图插入。"""
     if not workflow_exists(workflow_id, root):
         return False
     data = _read_yaml(_workflow_path(workflow_id, root, must_exist=True))
-    return str(data.get("engine") or "") == "default"
+    return any(isinstance(node, dict) and node.get("kind") == "system" for node in data.get("nodes") or [])
 
 
 def workflow_activity_roles(workflow_id: str, root: Path | None = None) -> list[dict[str, str]]:
@@ -302,8 +299,8 @@ def _require_subgraph(subgraph_id: str, owner: str, root: Path | None, seen_grap
         raise ConfigError("子图不能套住自己。")
     if not workflow_exists(subgraph_id, root):
         raise ConfigError(f"子图不存在：{subgraph_id}")
-    if uses_default_engine(subgraph_id, root):
-        raise ConfigError("通用软件开发不能当作子图插入。")
+    if has_system_nodes(subgraph_id, root):
+        raise ConfigError("含系统节点的流程（例如通用软件开发）不能当作子图插入。")
     data = _read_yaml(_workflow_path(subgraph_id, root, must_exist=True))
     nested = set(seen_graphs)
     nested.add(subgraph_id)
@@ -464,7 +461,7 @@ def validate_workflow(
         if not node_id or node_id in seen:
             raise ConfigError("节点标识不能空，也不能重复。")
         seen.add(node_id)
-        if kind not in {"start", "end", "activity", "gate", "parallel", "subgraph"}:
+        if kind not in {"start", "end", "activity", "gate", "parallel", "subgraph", "system"}:
             raise ConfigError(f"节点 {name or node_id} 的种类无法识别。")
         if kind == "start":
             name, role, returns_to, decision = "启动", "human", "", ""
@@ -478,6 +475,12 @@ def validate_workflow(
             if not name:
                 raise ConfigError("子图要写标题。")
             role, returns_to, decision = "", "", ""
+        elif kind == "system":
+            if not name:
+                raise ConfigError("系统节点要写名称。")
+            if returns_to:
+                raise ConfigError(f"系统节点「{name}」用 routes 声明去向，不能写回退。")
+            decision = ""
         elif kind == "gate" or role == "human":
             if not name:
                 raise ConfigError("决策点要写名称。")
@@ -508,6 +511,10 @@ def validate_workflow(
             primary = str(raw.get("primary_output") or "").strip()
             if primary:
                 item["primary_output"] = primary
+        if kind == "system":
+            item.update(_system_fields(raw, name))
+        if kind == "activity" and raw.get("when") not in (None, ""):
+            item["when"] = _condition(raw.get("when"), name)
         if kind == "subgraph":
             subgraph_id = str(raw.get("subgraph_id") or "").strip()
             _require_subgraph(subgraph_id, expected, root, seen_graphs=set())
@@ -539,6 +546,13 @@ def validate_workflow(
             raise ConfigError(f"「{item['name']}」的最大循环次数至少为 1。")
         item["max_loops"] = count
     for item in cleaned:
+        targets = [str(route["to"]) for route in item.get("routes") or []]
+        if item.get("next"):
+            targets.append(str(item["next"]))
+        for target in targets:
+            if target not in index or cleaned[index[target]]["kind"] == "start" or target == item["id"]:
+                raise ConfigError(f"「{item['name']}」的去向「{target}」不是已有节点。")
+    for item in cleaned:
         reject = str(item.get("reject_to") or "")
         if not reject:
             continue
@@ -554,15 +568,94 @@ def validate_workflow(
         result["builtin"] = True
     if payload.get("subgraph"):
         result["subgraph"] = True
-    engine = str(payload.get("engine") or "").strip()
-    if engine:
-        result["engine"] = engine
+    if str(payload.get("rail") or "") == "builtin":
+        result["rail"] = "builtin"
+    profile = _clean_profile(payload.get("profile"))
+    if profile:
+        result["profile"] = profile
     workspace = str(payload.get("workspace") or "").strip()
     if workspace == "current_branch":
         result["workspace"] = workspace
     elif workspace:
         raise ConfigError("工作区只能声明为当前分支。")
     return result
+
+
+def _condition(raw: Any, name: str) -> Any:
+    from geni_studio.workflows.system_nodes import condition_problem
+
+    cond = [str(item).strip() for item in raw] if isinstance(raw, list) else str(raw).strip()
+    problem = condition_problem(cond)
+    if problem:
+        raise ConfigError(f"「{name}」的条件不合法：{problem}")
+    return cond
+
+
+def _system_fields(raw: dict[str, Any], name: str) -> dict[str, Any]:
+    from geni_studio.workflows.system_nodes import HANDLERS
+
+    handler = str(raw.get("handler") or "").strip()
+    if handler not in HANDLERS:
+        raise ConfigError(f"系统节点「{name}」的实现「{handler}」不存在。")
+    out: dict[str, Any] = {"handler": handler}
+    if raw.get("when") not in (None, ""):
+        out["when"] = _condition(raw.get("when"), name)
+    routes = raw.get("routes")
+    if routes not in (None, []):
+        if not isinstance(routes, list):
+            raise ConfigError(f"系统节点「{name}」的 routes 须为列表。")
+        cleaned: list[dict[str, Any]] = []
+        for route in routes:
+            if not isinstance(route, dict) or not str(route.get("to") or "").strip() or not route.get("when"):
+                raise ConfigError(f"系统节点「{name}」的每条路由都要写 when 和 to。")
+            cleaned.append({"when": _condition(route["when"], name), "to": str(route["to"]).strip()})
+        out["routes"] = cleaned
+    nxt = str(raw.get("next") or "").strip()
+    if nxt:
+        out["next"] = nxt
+    return out
+
+
+def _clean_profile(raw: Any) -> dict[str, Any]:
+    """流程的运行档案：features、gates 为开关，limits 为整数，skip_nodes 为节点列表，verification 原样保留。"""
+    if raw in (None, {}):
+        return {}
+    if not isinstance(raw, dict):
+        raise ConfigError("流程的 profile 须为 mapping。")
+    unknown = sorted(set(raw) - {"features", "limits", "gates", "skip_nodes", "verification"})
+    if unknown:
+        raise ConfigError(f"流程的 profile 含无法识别的项：{'、'.join(unknown)}。")
+    out: dict[str, Any] = {}
+    for key in ("features", "gates"):
+        section = raw.get(key)
+        if section is None:
+            continue
+        if not isinstance(section, dict) or not all(isinstance(v, bool) for v in section.values()):
+            raise ConfigError(f"profile.{key} 的每一项都要是 true 或 false。")
+        out[key] = {str(k): v for k, v in section.items()}
+    limits = raw.get("limits")
+    if limits is not None:
+        if not isinstance(limits, dict) or not all(
+            isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in limits.values()
+        ):
+            raise ConfigError("profile.limits 的每一项都要是非负整数。")
+        out["limits"] = {str(k): v for k, v in limits.items()}
+    if "skip_nodes" in raw:
+        out["skip_nodes"] = _name_list(raw.get("skip_nodes"))
+    verification = raw.get("verification")
+    if verification is not None:
+        if not isinstance(verification, dict):
+            raise ConfigError("profile.verification 须为 mapping。")
+        out["verification"] = verification
+    return out
+
+
+def workflow_profile(workflow_id: str, root: Path | None = None) -> dict[str, Any]:
+    """读取流程声明的运行档案；文件不合法时返回空档案，由启动或编译时报告错误。"""
+    try:
+        return dict(_clean_profile(_read_yaml(_workflow_path(workflow_id, root, must_exist=True)).get("profile")))
+    except ConfigError:
+        return {}
 
 
 def _check_id(workflow_id: str) -> None:
@@ -574,7 +667,7 @@ def _workflow_path(workflow_id: str, root: Path | None, *, must_exist: bool) -> 
     _check_id(workflow_id)
     path = (root or factory_root()) / "workflows" / workflow_id / "workflow.yaml"
     if must_exist and not path.is_file():
-        raise ConfigError(f"流程不存在：{workflow_id}")
+        raise ConfigNotFound(f"流程不存在：{workflow_id}")
     return path
 
 

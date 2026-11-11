@@ -115,6 +115,23 @@ def load_feishu_hitl_config(
     return _feishu_hitl_from_env(root)
 
 
+def feishu_approvers(project_id: str, *, root: Path | None = None) -> list[str]:
+    """项目 `hitl.feishu.approvers`（open_id 列表）。为空表示不限制。"""
+    pid = (project_id or "").strip()
+    if not pid:
+        return []
+    try:
+        project_cfg, _ = load_project_config(root or factory_root(), pid)
+    except ConfigError:
+        return []
+    hitl = project_cfg.get("hitl") if isinstance(project_cfg, dict) else None
+    feishu = hitl.get("feishu") if isinstance(hitl, dict) else None
+    raw = feishu.get("approvers") if isinstance(feishu, dict) else None
+    if isinstance(raw, str):
+        raw = [raw]
+    return [str(item).strip() for item in raw or [] if str(item).strip()]
+
+
 def feishu_target(cfg: FeishuHitlConfig) -> tuple[str, str]:
     """返回 (receive_id_type, receive_id)。"""
     if cfg.notify_chat_id:

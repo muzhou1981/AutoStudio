@@ -13,7 +13,7 @@ from geni_studio.hitl.rail import label_for
 from geni_studio.hitl.service import GraphRunService, HitlError
 
 _STATUS_QUERIES = frozenset({"状态", "到哪了", "到哪", "进度", "status"})
-_OPEN_PHASES = frozenset({"running", "awaiting_human", "paused"})
+_OPEN_PHASES = frozenset({"running", "awaiting_human", "paused", "interrupted"})
 _PHASE_LABEL = {
     "idle": "未启动",
     "running": "运行中",

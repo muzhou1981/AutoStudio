@@ -54,8 +54,10 @@ def test_factory_default_is_listed_and_locked():
     found = [item for item in list_workflows() if item["workflow_id"] == "factory_default"]
     assert found and found[0]["builtin"] is True
     assert found[0]["title"] == "通用软件开发"
-    assert found[0]["engine"] == "default"
+    assert "engine" not in found[0]
     loaded = get_workflow("factory_default")["workflow"]
+    assert "engine" not in loaded
+    assert {node["kind"] for node in loaded["nodes"][1:-1]} == {"system", "gate"}
     assert loaded["nodes"][0]["kind"] == "start"
     assert loaded["nodes"][-1]["kind"] == "end"
     with pytest.raises(ConfigError, match="先复制"):
@@ -68,7 +70,6 @@ def test_self_improve_is_builtin_and_executable():
     found = [item for item in list_workflows() if item["workflow_id"] == "self_improve"]
     assert found and found[0]["builtin"] is True
     assert found[0]["title"] == "自我改进"
-    assert found[0]["engine"] == ""
     loaded = get_workflow("self_improve")["workflow"]
     prepared = resolve_executable(loaded)
     names = [node["name"] for node in prepared["nodes"]]
@@ -179,9 +180,7 @@ def test_project_page_requires_a_workflow_and_role_model_selects():
     assert 'waOption("", "不指定")' not in script
     assert "还没有流程。先创建一份。" in page
     assert 'id="region-models"' not in page
-    assert 'id="runRoleModels"' in page
-    assert page.index('id="runRoleModels"') < page.index('id="req"')
-    assert page.index('id="runRoleModels"') < page.index('id="region-extra"')
+    assert 'id="runRoleModels"' not in page
     assert 'id="fieldDirProfile"' in page
     assert ">所选流程</h2>" in page
     assert 'id="btnCopyFlow"' in page

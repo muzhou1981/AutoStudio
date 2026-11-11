@@ -85,6 +85,32 @@ function chipFor(item) {
 const HIDDEN_SETTINGS = new Set(["GENI_STUDIO_TARGET_ROOT"]);
 let runtimeSettingsCache = null;
 
+function isFeishuOpenId(value) {
+  const v = (value || "").trim();
+  return !v || /^ou_[\w-]+$/i.test(v);
+}
+
+function isFeishuChatId(value) {
+  const v = (value || "").trim();
+  return !v || /^oc_[\w-]+$/i.test(v);
+}
+
+const AGENT_BACKEND_VALUES = new Set(["cursor", "stub", "codex"]);
+
+function isAgentBackendToken(value) {
+  return AGENT_BACKEND_VALUES.has((value || "").trim().toLowerCase());
+}
+
+function setWaControlValue(el, val) {
+  if (!el) return;
+  el.value = val;
+  if (el.updateComplete && typeof el.updateComplete.then === "function") {
+    void el.updateComplete.then(() => {
+      if ((el.value || "").trim() !== (val || "").trim()) el.value = val;
+    });
+  }
+}
+
 function apiKeyEnvName(backend) {
   if (backend === "cursor") return "CURSOR_API_KEY";
   if (backend === "codex") return "OPENAI_API_KEY";
@@ -97,7 +123,7 @@ function secretMask(length) {
 }
 
 const GROUP_ORDER = {
-  Agent: ["GENI_STUDIO_BACKEND", "GENI_STUDIO_DEFAULT_MODEL", "GENI_STUDIO_CURSOR_MODEL", "GENI_STUDIO_CODEX_MODEL", "CURSOR_API_KEY", "OPENAI_API_KEY", "LANGSMITH_API_KEY", "LANGSMITH_TRACING"],
+  Agent: ["GENI_STUDIO_BACKEND", "GENI_STUDIO_DEFAULT_MODEL", "GENI_STUDIO_CURSOR_MODEL", "GENI_STUDIO_CODEX_MODEL", "GENI_STUDIO_CODEX_REASONING_EFFORT", "CURSOR_API_KEY", "OPENAI_API_KEY", "LANGSMITH_API_KEY", "LANGSMITH_TRACING"],
   飞书: [
     "GENI_STUDIO_LARK_BACKEND",
     "GENI_STUDIO_PUBLIC_BASE_URL",
@@ -116,6 +142,7 @@ const SETTING_GROUPS = {
   GENI_STUDIO_BACKEND: ["Agent", "后端"],
   GENI_STUDIO_DEFAULT_MODEL: ["Agent", "默认模型"],
   GENI_STUDIO_CODEX_MODEL: ["Agent", "Codex 模型"],
+  GENI_STUDIO_CODEX_REASONING_EFFORT: ["Agent", "Codex 推理强度"],
   GENI_STUDIO_CURSOR_MODEL: ["Agent", "Cursor 模型"],
   LANGSMITH_API_KEY: ["Agent", "LangSmith API Key"],
   LANGSMITH_TRACING: ["Agent", "LangSmith 追踪"],
@@ -134,9 +161,14 @@ function settingDetail(item) {
   if (!hint || hint === "已设置") return "";
   if (item.name === "GENI_STUDIO_DEFAULT_MODEL" && hint === "后端默认") return "";
   if (item.name === "GENI_STUDIO_CURSOR_MODEL" && hint.startsWith("Auto")) return "Auto";
+  if (item.name === "GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID") {
+    if (item.suggested && item.value_hint) return `建议 ${item.value_hint}`;
+    if (item.configured && item.value_hint) return item.value_hint;
+    return "";
+  }
   if (item.name === "GENI_STUDIO_BACKEND" && hint.startsWith("未设置")) {
-    const matched = hint.match(/当前生效\s+([^）)\s]+)/);
-    return matched ? "当前生效 " + matched[1] : "";
+    const matched = hint.match(/当前生效\s+(.+)/);
+    return matched ? matched[1].trim() : "";
   }
   if (item.name === "LANGSMITH_TRACING") {
     if (hint === "true") return "开启";
@@ -205,7 +237,12 @@ function larkNotes(data) {
     ["通知群写在项目的 ", { code: "hitl.feishu.notify_chat_id" }, "。"],
   ];
   if (cli.installed && cli.config_ok && cli.bot_ready) {
-    return [["发消息使用 lark-cli 的 bot 身份。"], ...standing];
+    const extra =
+      cli.user_open_id && !((data.keys || []).find((k) => k.name === "GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID") || {})
+        .configured
+        ? [["未配置通知人时，会自动填入当前 lark-cli 登录用户的 open_id。"]]
+        : [];
+    return [["发消息使用 lark-cli 的 bot 身份。"], ...extra, ...standing];
   }
   return [[cli.hint || "先完成 lark-cli 的配置。"], ...standing];
 }
@@ -270,7 +307,6 @@ async function loadLists() {
   }
   const stillThere = selected && window.__projects.some((p) => p.project_id === selected);
   pp.value = stillThere ? selected : "";
-  fillScenarioOptions($("fieldDirScenario"), window.__scenarios, $("fieldDirScenario").value);
 }
 
 async function resolveEffectiveBackend() {
@@ -396,6 +432,13 @@ async function saveRuntime() {
   btn.disabled = true;
   btn.loading = true;
   const backend = $("backendPick").value;
+  const reasoningError = reasoningSelectionError();
+  if (reasoningError) {
+    showError(err, reasoningError);
+    btn.disabled = false;
+    btn.loading = false;
+    return;
+  }
   const previous = resolveBackendPick(runtimeSettingsCache || {});
   const legacy = (runtimeSettingsCache?.keys || []).find((k) => k.name === "GENI_STUDIO_DEFAULT_MODEL");
   const modelPairs = [];
@@ -405,14 +448,31 @@ async function saveRuntime() {
   if (["cursor", "codex"].includes(backend)) {
     modelPairs.push([`GENI_STUDIO_${backend.toUpperCase()}_MODEL`, (($("modelPick") || $("modelInput"))?.value || "").trim()]);
   }
+  if (backend === "codex" && $("reasoningPick")) {
+    modelPairs.push(["GENI_STUDIO_CODEX_REASONING_EFFORT", $("reasoningPick").value || "default"]);
+  }
+  const notifyChat = ($("feishuChat")?.value || "").trim();
+  const notifyOpen = ($("feishuOpen")?.value || "").trim();
+  if (!isFeishuChatId(notifyChat)) {
+    showError(err, "默认通知群须以 oc_ 开头，或留空。");
+    btn.disabled = false;
+    btn.loading = false;
+    return;
+  }
+  if (!isFeishuOpenId(notifyOpen)) {
+    showError(err, "默认通知人须为飞书 open_id（以 ou_ 开头），不要填写 Agent 后端名称。");
+    btn.disabled = false;
+    btn.loading = false;
+    return;
+  }
   const pairs = [
     ...modelPairs,
     ["GENI_STUDIO_BACKEND", backend],
     ["GENI_STUDIO_DEFAULT_MODEL", ""],
     ["GENI_STUDIO_LARK_BACKEND", $("larkBackend").value],
-    ["GENI_STUDIO_PUBLIC_BASE_URL", $("publicBase").value.trim()],
-    ["GENI_STUDIO_FEISHU_NOTIFY_CHAT_ID", $("feishuChat").value.trim()],
-    ["GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID", $("feishuOpen").value.trim()],
+    ["GENI_STUDIO_PUBLIC_BASE_URL", ($("publicBase")?.value || "").trim()],
+    ["GENI_STUDIO_FEISHU_NOTIFY_CHAT_ID", notifyChat],
+    ["GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID", notifyOpen],
   ];
   try {
     for (const [name, value] of pairs) {
@@ -424,11 +484,12 @@ async function saveRuntime() {
       const data = await r.json();
       if (!r.ok) {
         showError(err, data.detail || "保存失败");
-        btn.disabled = false;
-        btn.loading = false;
         return;
       }
     }
+    btn.disabled = false;
+    btn.loading = false;
+    showSaved($("runtimeSaved"), "已写入 .env，正在检测连通性…");
     const probe = await fetch("/api/config/settings/probe", { method: "POST" });
     const pdata = await probe.json();
     await loadSettings();
@@ -437,7 +498,7 @@ async function saveRuntime() {
       return;
     }
     if (pdata.ok) showSaved($("runtimeSaved"), pdata.summary || "已连通。");
-    else showError(err, pdata.summary || "连不上。");
+    else showError(err, pdata.summary || "连不上。飞书等已写入项仍有效。");
   } catch (e) {
     showError(err, "写入或连通测试失败，部分配置可能已保存。请检查后重试。");
   } finally {
@@ -631,12 +692,147 @@ function resolveBackendPick(data) {
   return "stub";
 }
 
+function reasoningFromSettings(data) {
+  const row = (data?.keys || []).find((k) => k.name === "GENI_STUDIO_CODEX_REASONING_EFFORT");
+  const value = row?.configured ? (row.value_hint || "").trim().toLowerCase() : "";
+  return ["", "default", "auto"].includes(value) ? "" : value;
+}
+
+let reasoningCatalog = { backend: "", models: [], status: "idle", detail: "" };
+
+function selectedReasoningModel() {
+  if (reasoningCatalog.backend !== "codex" || reasoningCatalog.status !== "ready") return null;
+  const model = ($("modelPick") || $("modelInput"))?.value || "";
+  return model ? reasoningCatalog.models.find((item) => item.id === model) || null : null;
+}
+
+function reasoningSelectionError() {
+  if ($("backendPick")?.value !== "codex") return "";
+  const value = $("reasoningPick")?.value || "default";
+  const model = selectedReasoningModel();
+  if (model && Array.isArray(model.reasoning_efforts) && value !== "default"
+      && !model.reasoning_efforts.some((item) => item.id === value)) {
+    return `所选模型不支持推理强度 ${value}，请选择支持的级别或沿用 Codex 默认。`;
+  }
+  return "";
+}
+
+function refreshReasoningPick(selected) {
+  const el = $("reasoningPick");
+  if (!el) return;
+  const value = selected !== undefined ? selected : el.value || "default";
+  const model = selectedReasoningModel();
+  const options = model?.reasoning_efforts || [];
+  el.replaceChildren(waOption("default", "沿用 Codex 默认"));
+  for (const item of options) {
+    const label = item.id === model.default_reasoning_effort ? `${item.id}（模型建议）` : item.id;
+    const option = waOption(item.id, label);
+    if (item.description) option.title = item.description;
+    el.appendChild(option);
+  }
+  if (value !== "default" && !options.some((item) => item.id === value)) {
+    // 保留已有值，避免切换模型或请求失败时隐式覆盖设置。
+    el.appendChild(waOption(value, `${value}（当前设置，未确认支持）`));
+  }
+  el.value = value;
+  if (reasoningCatalog.status === "loading") el.hint = "正在读取模型的推理级别…";
+  else if (reasoningCatalog.status === "error") el.hint = "读不到推理级别；当前设置已保留，请刷新配置页重试。";
+  else if (!($("modelPick") || $("modelInput"))?.value) el.hint = "先明确选择模型以读取支持的推理级别；默认模式沿用 Codex 配置。";
+  else if (!model || !Array.isArray(model.reasoning_efforts)) el.hint = "模型未返回推理能力；当前设置已保留。";
+  else el.hint = reasoningSelectionError() || (options.length
+    ? "选项来自 SDK。模型建议不替代 Codex 本机默认；新运行生效，角色配置可覆盖。"
+    : "该模型未提供可选推理级别，可沿用 Codex 默认。");
+}
+
+function fillReasoning(data, backend) {
+  if ($("codexReasoningField")) $("codexReasoningField").hidden = backend !== "codex";
+  refreshReasoningPick(reasoningFromSettings(data) || "default");
+}
+
+function _modelHintFromSettings(data, backend) {
+  if (backend === "stub") return "";
+  const rows = data?.keys || [];
+  const key = backend === "codex" ? "GENI_STUDIO_CODEX_MODEL" : "GENI_STUDIO_CURSOR_MODEL";
+  const scoped = rows.find((k) => k.name === key);
+  if (!scoped?.configured) return "";
+  const hint = (scoped.value_hint || "").trim();
+  if (!hint || hint === "Codex 默认" || hint.startsWith("Auto")) return "";
+  return hint;
+}
+
+function runtimeSavedSnapshot(data) {
+  if (!data) return null;
+  const find = (name) => (data.keys || []).find((k) => k.name === name);
+  const backend = resolveBackendPick(data);
+  const openRow = find("GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID");
+  let open = "";
+  if (openRow?.configured && !openRow?.suggested) {
+    open = (openRow.value_hint || "").trim();
+  }
+  return {
+    backend,
+    model: _modelHintFromSettings(data, backend),
+    reasoning: backend === "codex" ? reasoningFromSettings(data) : "",
+    lark: data.lark_backend === "env_bot" ? "env_bot" : "lark_cli",
+    pub: (find("GENI_STUDIO_PUBLIC_BASE_URL")?.value_hint || "").trim(),
+    chat: (find("GENI_STUDIO_FEISHU_NOTIFY_CHAT_ID")?.value_hint || "").trim(),
+    open,
+  };
+}
+
+function runtimeFormSnapshot() {
+  const backend = ($("backendPick") && $("backendPick").value) || "stub";
+  return {
+    backend,
+    model: (($("modelPick") || $("modelInput"))?.value || "").trim(),
+    reasoning: backend === "codex" && $("reasoningPick")?.value !== "default" ? ($("reasoningPick")?.value || "") : "",
+    lark: ($("larkBackend") && $("larkBackend").value) || "lark_cli",
+    pub: ($("publicBase")?.value || "").trim(),
+    chat: ($("feishuChat")?.value || "").trim(),
+    open: ($("feishuOpen")?.value || "").trim(),
+  };
+}
+
+function runtimeFormMatchesEnv() {
+  const saved = runtimeSavedSnapshot(runtimeSettingsCache);
+  if (!saved) return false;
+  return JSON.stringify(saved) === JSON.stringify(runtimeFormSnapshot());
+}
+
+function syncRuntimeSaveButton() {
+  const btn = $("btnSaveRuntime");
+  const note = $("runtimeSaved");
+  if (!btn) return;
+  const synced = runtimeFormMatchesEnv();
+  btn.disabled = synced;
+  if (synced && note) {
+    const probeMsg = (note.textContent || "").trim();
+    if (!probeMsg || probeMsg.includes("已与 .env 一致")) {
+      showSaved(note, "已与 .env 一致；修改任一项后可再写入。");
+    }
+  } else if (note && (note.textContent || "").includes("已与 .env 一致")) {
+    showSaved(note, "");
+  }
+}
+
+function wireRuntimeDirtyTracking() {
+  for (const id of ["backendPick", "modelPick", "reasoningPick", "larkBackend", "publicBase", "feishuChat", "feishuOpen"]) {
+    const el = $(id);
+    if (!el || el.dataset.runtimeDirtyWired === "1") continue;
+    el.dataset.runtimeDirtyWired = "1";
+    const bump = () => syncRuntimeSaveButton();
+    el.addEventListener("input", bump);
+    el.addEventListener("change", bump);
+  }
+}
+
 function fillRuntime(data) {
   runtimeSettingsCache = data;
   const find = (name) => (data.keys || []).find((k) => k.name === name);
   const backend = resolveBackendPick(data);
   if ($("backendPick")) $("backendPick").value = backend;
   const pickBackend = ($("backendPick") && $("backendPick").value) || backend;
+  fillReasoning(data, pickBackend);
   applyApiKeyField(pickBackend, find(apiKeyEnvName(pickBackend)));
   if ($("larkBackend")) {
     $("larkBackend").value = data.lark_backend === "env_bot" ? "env_bot" : "lark_cli";
@@ -646,7 +842,43 @@ function fillRuntime(data) {
   const chat = find("GENI_STUDIO_FEISHU_NOTIFY_CHAT_ID");
   if (chat && $("feishuChat")) $("feishuChat").value = chat.value_hint || "";
   const open = find("GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID");
-  if (open && $("feishuOpen")) $("feishuOpen").value = open.value_hint || "";
+  const cli = data.lark_cli || {};
+  const feishuOpenEl = $("feishuOpen");
+  if (open && feishuOpenEl) {
+    let rawHint = (open.value_hint || "").trim();
+    if (isAgentBackendToken(rawHint)) {
+      rawHint = "";
+    }
+    let savedOpen = Boolean(open.configured && rawHint);
+    const suggestedOpen =
+      !savedOpen &&
+      open.suggested &&
+      rawHint &&
+      isFeishuOpenId(rawHint);
+    const cliOpen = (cli.user_open_id || "").trim();
+    if (savedOpen && !isFeishuOpenId(rawHint)) {
+      savedOpen = false;
+      setWaControlValue(feishuOpenEl, "");
+      feishuOpenEl.hint = `当前 .env 中「${open.value_hint}」不是 open_id；应填 ou_… 或留空后由 lark-cli 自动填入`;
+    } else if (savedOpen) {
+      setWaControlValue(feishuOpenEl, rawHint);
+      feishuOpenEl.hint = "项目未填 open_id 时使用";
+    } else if (suggestedOpen || (cliOpen && isFeishuOpenId(cliOpen))) {
+      const ou = suggestedOpen ? rawHint : cliOpen;
+      setWaControlValue(feishuOpenEl, ou);
+      const who = cli.user_name ? `（${cli.user_name}）` : "";
+      feishuOpenEl.hint = suggestedOpen
+        ? `已从 lark-cli 预填${who}；点「写入 .env」后才会保存`
+        : `已从 lark-cli 读取当前登录用户${who}；点「写入 .env」后才会保存`;
+    } else {
+      const stale = (feishuOpenEl.value || "").trim();
+      if (isAgentBackendToken(stale) || (stale && !isFeishuOpenId(stale))) {
+        setWaControlValue(feishuOpenEl, "");
+      }
+      feishuOpenEl.hint = "项目未填 open_id 时使用；需先在本机 lark-cli auth login";
+    }
+  }
+  syncRuntimeSaveButton();
 }
 
 function wireApiKeyButtons() {
@@ -699,16 +931,29 @@ async function refreshDefaultModelPick(backend, selected) {
   const el = $("modelPick") || $("modelInput");
   if (!el) return;
   const value = selected !== undefined ? selected : el.value || "";
+  reasoningCatalog = { backend, models: [], status: "loading", detail: "" };
+  if (backend === "codex") refreshReasoningPick();
   let data = { models: [], detail: "" };
-  try {
+  const fetchModels = async () => {
     const q = new URLSearchParams();
     if (backend) q.set("backend", backend);
     const r = await fetch("/api/config/models?" + q.toString());
-    if (r.ok) data = await r.json();
-    else data.detail = "读不到模型列表。";
+    if (r.ok) return r.json();
+    return { models: [], detail: "读不到模型列表。" };
+  };
+  try {
+    data = await fetchModels();
+    const needsRetry =
+      backend === "cursor" &&
+      (!data.models || !data.models.length) &&
+      (data.detail || "").includes("读不到");
+    if (needsRetry) data = await fetchModels();
   } catch (_err) {
     data.detail = "读不到模型列表。";
   }
+  if (version !== modelRequestVersion || ($("backendPick") && $("backendPick").value !== backend)) return;
+  await customElements.whenDefined("wa-select");
+  await customElements.whenDefined("wa-option");
   if (version !== modelRequestVersion || ($("backendPick") && $("backendPick").value !== backend)) return;
   const defaultLabel =
     backend === "cursor" ? "Auto（后端默认）" : backend === "codex" ? "Codex 默认" : "后端默认";
@@ -730,6 +975,16 @@ async function refreshDefaultModelPick(backend, selected) {
   else if (backend === "stub") el.hint = "stub 不调用外部模型。";
   else el.hint = "";
   window.__backendModels = data.models || [];
+  reasoningCatalog = { backend, models: data.models || [], status: data.detail ? "error" : "ready", detail: data.detail || "" };
+  if (backend === "codex") refreshReasoningPick();
+  syncRuntimeSaveButton();
+}
+
+for (const id of ["modelPick", "reasoningPick"]) {
+  if ($(id)) $(id).addEventListener("change", () => {
+    if ($("backendPick")?.value === "codex") refreshReasoningPick();
+    syncRuntimeSaveButton();
+  });
 }
 
 async function syncBackendFields() {
@@ -750,6 +1005,7 @@ async function syncBackendFields() {
   const find = (name) => (data?.keys || []).find((k) => k.name === name);
   if ($("backendPick").value !== backend) return;
   applyApiKeyField(backend, envName ? find(envName) : null);
+  fillReasoning(data, backend);
   const selected = defaultModelFromSettings(data, backend);
   await refreshDefaultModelPick(backend, selected);
 }
@@ -1061,22 +1317,7 @@ async function loadBackendModels(backend) {
   const response = await fetch("/api/config/models?" + q.toString());
   const data = await response.json();
   window.__backendModels = (data && data.models) || [];
-  const hint = $("roleModelHint");
-  if (hint) {
-    const detail = (data && data.detail) || "";
-    const source = ((data && data.source) || mode || "").toLowerCase();
-    if (source === "stub" || mode === "stub") {
-      hint.hidden = false;
-      hint.textContent =
-        "当前后端为 stub，不调用外部模型。请在「配置」中选择 Cursor 或 Codex SDK 并写入 .env。";
-    } else if (detail) {
-      hint.hidden = false;
-      hint.textContent = detail;
-    } else {
-      hint.textContent = "";
-      hint.hidden = true;
-    }
-  }
+  window.__backendModelsDetail = (data && data.detail) || "";
 }
 
 function updateProjectFlowSummary() {
@@ -1476,6 +1717,7 @@ window.refreshConfigRuntime = loadSettings;
     await loadScenarioYaml(first.value);
   }
   await loadSettings();
+  wireRuntimeDirtyTracking();
   document.querySelectorAll(".project-mode").forEach((el) => {
     el.addEventListener("click", (event) => {
       event.preventDefault();

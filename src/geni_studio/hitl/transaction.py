@@ -8,6 +8,13 @@ from functools import wraps
 
 _locks: weakref.WeakValueDictionary[str, threading.RLock] = weakref.WeakValueDictionary()
 _guard = threading.Lock()
+_mutating: dict[str, int] = {}
+
+
+def is_mutating(thread_id: str) -> bool:
+    """是否有请求或执行器正在变更这一轮。"""
+    with _guard:
+        return _mutating.get(thread_id, 0) > 0
 
 
 def run_mutation(fn):
@@ -19,9 +26,17 @@ def run_mutation(fn):
             lock = _locks.setdefault(thread_id, threading.RLock())
         if not lock.acquire(blocking=False):
             raise RunBusy("这一轮正在处理另一个请求，请刷新状态后再操作")
+        with _guard:
+            _mutating[thread_id] = _mutating.get(thread_id, 0) + 1
         try:
             return fn(self, thread_id, *args, **kwargs)
         finally:
+            with _guard:
+                left = _mutating.get(thread_id, 1) - 1
+                if left > 0:
+                    _mutating[thread_id] = left
+                else:
+                    _mutating.pop(thread_id, None)
             lock.release()
     return wrapped
 

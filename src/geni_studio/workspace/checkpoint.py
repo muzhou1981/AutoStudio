@@ -26,10 +26,16 @@ def sqlite_checkpointer(path: Path) -> BaseCheckpointSaver:
     return SqliteSaver(conn)
 
 
-def default_checkpointer() -> BaseCheckpointSaver:
-    mode = os.environ.get("GENI_STUDIO_CHECKPOINT", "sqlite").strip().lower()
-    if mode == "memory":
-        return MemorySaver()
+def checkpoint_file() -> Path | None:
+    """默认检查点库的位置；内存检查点返回 None。"""
+    if os.environ.get("GENI_STUDIO_CHECKPOINT", "sqlite").strip().lower() == "memory":
+        return None
     raw = os.environ.get("GENI_STUDIO_CHECKPOINT_PATH", "").strip()
-    path = Path(raw) if raw else factory_root() / "runs" / "checkpoints.sqlite"
+    return Path(raw) if raw else factory_root() / "runs" / "checkpoints.sqlite"
+
+
+def default_checkpointer() -> BaseCheckpointSaver:
+    path = checkpoint_file()
+    if path is None:
+        return MemorySaver()
     return sqlite_checkpointer(path)

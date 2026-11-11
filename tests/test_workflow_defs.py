@@ -30,7 +30,7 @@ def test_create_lists_and_rejects_bad_graph(tmp_path: Path, monkeypatch: pytest.
     created = create_workflow("demo", "演示", root=tmp_path)
     assert [node["name"] for node in created["workflow"]["nodes"]] == ["启动", "结束"]
     assert list_workflows(tmp_path) == [
-        {"workflow_id": "demo", "title": "演示", "builtin": False, "engine": "", "subgraph": False},
+        {"workflow_id": "demo", "title": "演示", "builtin": False, "subgraph": False},
     ]
     with pytest.raises(ConfigError, match="已有同名流程"):
         create_workflow("demo", root=tmp_path)

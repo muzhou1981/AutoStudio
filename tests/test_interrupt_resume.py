@@ -77,10 +77,13 @@ def test_running_without_worker_is_interrupted_and_pause_resume_stays(
         svc._config("interrupt-gap"),
         {"run_paused": False, "paused_at": ""},
     )
-    assert svc.status("interrupt-gap").phase == "running"
+    assert svc.status("interrupt-gap").phase == "interrupted"
     observed = svc.status_dict("interrupt-gap")
     assert observed["phase"] == "interrupted"
     assert observed["rail"]["current"] == "tester_testability"
+    assert not svc.status("interrupt-gap").values.get("run_interrupted")
+    svc.sweep()
+    assert svc.status("interrupt-gap").values.get("run_interrupted") is True
 
     monkeypatch.setattr("geni_studio.backends.runner.invoke_role", invoke_role)
     continued = svc.continue_interrupted("interrupt-gap")

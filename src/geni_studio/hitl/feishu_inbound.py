@@ -59,6 +59,16 @@ def _action_parts(event: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]
     return _parse_action_value(raw), form
 
 
+def card_operator_open_id(event: dict[str, Any]) -> str:
+    """卡片回调中点击者的 open_id。"""
+    for source in (event, event.get("event") if isinstance(event.get("event"), dict) else {}):
+        operator = source.get("operator") if isinstance(source.get("operator"), dict) else {}
+        found = str(operator.get("open_id") or source.get("open_id") or "").strip()
+        if found:
+            return found
+    return ""
+
+
 def parse_card_action_trigger(event: dict[str, Any]) -> dict[str, str]:
     """从 card.action.trigger 事件或扁平 webhook 体解析 HITL 参数。"""
     data, form = _action_parts(event)

@@ -3,9 +3,10 @@ title: 用工厂改进 GeniStudio 自身
 description: |
   自我改进可将工作区设为工厂仓库，直接修改目标仓库当前检出的分支，不另建工作树。
   人类确认入库后，由程序员在该分支提交。配置管理员不执行这次提交。
+# 兼容层：新项目请直接选择流程 self_improve，运行档案见该流程的 profile。
+migrate_to: self_improve
 workflow:
   graph_id: default
-  profile_id: self_improve_v1
   skip_nodes:
     - ux_designer
     - ui_designer

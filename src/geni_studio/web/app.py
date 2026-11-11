@@ -7,50 +7,80 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from geni_studio.config.context import ConfigError, build_run_context
 from geni_studio.config.env_loader import bootstrap_env
-from geni_studio.workspace.layout import WorkspaceError
-
-bootstrap_env()
-from geni_studio.hitl.feishu_notify import notify_awaiting_human_via_lark_cli
 from geni_studio.hitl.rail import build_rail
 from geni_studio.hitl.service import GraphRunService, HitlError, StopPending
+from geni_studio.web.auth import (
+    COOKIE,
+    check_listen_address,
+    presented_token,
+    require_token,
+    token_matches,
+    web_operator,
+    web_token,
+)
 from geni_studio.web.config_routes import router as config_router
+from geni_studio.web.errors import http_error, install_handlers
 from geni_studio.web.feishu_routes import bind_run_service
 from geni_studio.web.feishu_routes import router as feishu_router
 from geni_studio.web.role_routes import router as role_router
 from geni_studio.web.workflow_routes import router as workflow_router
-from geni_studio.workflows.default import graph
+from geni_studio.workspace.layout import WorkspaceError
+
+_service: GraphRunService | None = None
+
+
+def run_service() -> GraphRunService:
+    global _service
+    if _service is None:
+        from geni_studio.workflows.default import get_graph
+
+        _service = GraphRunService(get_graph())
+        bind_run_service(_service)
+    return _service
 
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     from geni_studio.hitl.feishu_bridge import start_background
+    from geni_studio.runtime.executor import executor_mode
 
+    bootstrap_env()
+    service = run_service()
+    executor = service.executor() if executor_mode() == "thread" else None
+    if executor is not None:
+        executor.start()
     start_background()
-    yield
+    try:
+        yield
+    finally:
+        if executor is not None:
+            executor.stop()
 
 
 app = FastAPI(title="GeniStudio", version="0.1.0", lifespan=_lifespan)
+install_handlers(app)
+app.middleware("http")(require_token)
 app.include_router(config_router)
 app.include_router(workflow_router)
 app.include_router(role_router)
 app.include_router(feishu_router)
 _static_dir = Path(__file__).with_name("static")
 app.mount("/static", StaticFiles(directory=_static_dir), name="static")
-_run_service = GraphRunService(graph)
-bind_run_service(_run_service)
 
 
-def _with_feishu(payload: dict, thread_id: str, project_id: str) -> dict:
-    result = notify_awaiting_human_via_lark_cli(_run_service, thread_id, project_id)
-    if result.sent or result.detail:
+def _with_feishu(payload: dict, thread_id: str) -> dict:
+    """附上执行器推进后发出的飞书通知结果（通知只由执行器发送一次）。"""
+    notice = run_service().feishu_notice(thread_id)
+    if notice:
         payload = dict(payload)
-        payload["feishu_notice"] = {"sent": result.sent, "detail": result.detail}
+        payload["feishu_notice"] = notice
     return payload
 
 
@@ -74,6 +104,7 @@ class StartRunBody(BaseModel):
     node_tools: dict[str, NodeToolChoice] = Field(default_factory=dict)
     attachments: list[AttachmentRef] = Field(default_factory=list)
     role_models: dict[str, str] = Field(default_factory=dict)
+    role_reasoning_efforts: dict[str, str] = Field(default_factory=dict)
 
 
 class DeleteRunBody(BaseModel):
@@ -83,7 +114,6 @@ class DeleteRunBody(BaseModel):
 class HitlSubmitBody(BaseModel):
     gate_decision: Literal["approved", "rejected"] | None = None
     human_reply: str = ""
-    channel: str = "web"
     escalation_choice: Literal["continue", "pause", "abort"] | None = None
 
 
@@ -97,9 +127,20 @@ def _static_html(name: str) -> str:
 @app.get("/role", response_class=HTMLResponse)
 @app.get("/config", response_class=HTMLResponse)
 @app.get("/help", response_class=HTMLResponse)
-def console_ui() -> str:
+def console_ui(request: Request, token: str = ""):
     """人工处理、项目、流程与运行配置在同一文档里切换，避免一级菜单整页刷新。"""
-    return _static_html("hitl.html")
+    if web_token():
+        if token and token_matches(token):
+            response = RedirectResponse(request.url.path, status_code=303)
+            response.set_cookie(COOKIE, token, httponly=True, samesite="strict")
+            return response
+        if not token_matches(presented_token(request)):
+            return HTMLResponse(
+                "<!doctype html><meta charset=utf-8><title>GeniStudio</title>"
+                "<p>需要访问令牌：请在地址后加上 <code>?token=访问令牌</code> 打开一次。</p>",
+                status_code=401,
+            )
+    return HTMLResponse(_static_html("hitl.html"))
 
 
 @app.get("/api/rail")
@@ -171,6 +212,15 @@ class SaveRunDraftBody(BaseModel):
     node_tools: dict[str, NodeToolChoice] = Field(default_factory=dict)
     attachments: list[AttachmentRef] = Field(default_factory=list)
     role_models: dict[str, str] = Field(default_factory=dict)
+    role_reasoning_efforts: dict[str, str] = Field(default_factory=dict)
+
+
+@app.get("/api/runs/role-defaults")
+def api_run_role_defaults(project_id: str = "", thread_id: str = "") -> dict:
+    try:
+        return run_service().role_defaults(project_id=project_id, thread_id=thread_id)
+    except (ConfigError, HitlError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/runs")
@@ -178,7 +228,7 @@ def api_list_runs(project_id: str = "", phase: str = "") -> dict:
     from geni_studio.hitl.drafts import list_drafts
 
     want = phase.strip()
-    runs = [] if want == "saved" else _run_service.list_runs(project_id=project_id, phase=phase)
+    runs = [] if want == "saved" else run_service().list_runs(project_id=project_id, phase=phase)
     if not want or want == "saved":
         runs = list_drafts(project_id=project_id) + runs
     return {"runs": runs}
@@ -187,12 +237,9 @@ def api_list_runs(project_id: str = "", phase: str = "") -> dict:
 @app.put("/api/runs/drafts")
 def api_save_run_draft(body: SaveRunDraftBody) -> dict:
     from geni_studio.hitl.drafts import save_draft
-    from geni_studio.hitl.run_name import taken_names_for_project
-    from geni_studio.hitl.service import latest_run_records
-
     try:
         tools = _clean_node_tools(body.node_tools)
-        taken = taken_names_for_project(latest_run_records(graph), body.project_id.strip())
+        taken = run_service().taken_run_names(body.project_id.strip())
         from geni_studio.hitl.attachments import clean_attachment_ids
 
         saved = save_draft(
@@ -204,6 +251,7 @@ def api_save_run_draft(body: SaveRunDraftBody) -> dict:
             taken_names=taken,
             attachments=clean_attachment_ids(body.attachments),
             role_models=_clean_role_models(body.role_models),
+            role_reasoning_efforts=body.role_reasoning_efforts,
         )
     except HitlError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -225,10 +273,9 @@ def api_get_run_draft(draft_id: str) -> dict:
 @app.post("/api/runs/{thread_id}/copy")
 def api_copy_run(thread_id: str) -> dict:
     try:
-        return _run_service.copy_run_template(thread_id.strip())
+        return run_service().copy_run_template(thread_id.strip())
     except HitlError as e:
-        missing = "未知" in str(e) or "无法识别" in str(e)
-        raise HTTPException(status_code=404 if missing else 400, detail=str(e)) from e
+        raise http_error(e) from e
 
 
 @app.post("/api/runs/drafts/{draft_id}/delete")
@@ -238,9 +285,7 @@ def api_delete_run_draft(draft_id: str, body: DeleteRunBody) -> dict:
     try:
         delete_draft(draft_id, confirm_name=body.confirm_name)
     except HitlError as e:
-        missing = "未知" in str(e) or "无法识别" in str(e)
-        code = 409 if "不一致" in str(e) else (404 if missing else 400)
-        raise HTTPException(status_code=code, detail=str(e)) from e
+        raise http_error(e) from e
     return {"deleted": True, "draft_id": draft_id}
 
 
@@ -261,13 +306,12 @@ async def api_upload_attachment(request: Request) -> dict:
 @app.get("/api/runs/next-name")
 def api_next_run_name(project_id: str = "") -> dict:
     """新建 Run 时的默认名称：项目标识加递增序号。"""
-    from geni_studio.hitl.run_name import next_run_name, taken_names_for_project
-    from geni_studio.hitl.service import latest_run_records
+    from geni_studio.hitl.run_name import next_run_name
 
     pid = project_id.strip()
     if not pid:
         raise HTTPException(status_code=400, detail="请先选择项目。")
-    taken = taken_names_for_project(latest_run_records(graph), pid)
+    taken = run_service().taken_run_names(pid)
     return {"project_id": pid, "run_name": next_run_name(pid, taken)}
 
 
@@ -302,7 +346,6 @@ def _clean_node_tools(raw: dict[str, NodeToolChoice]) -> dict[str, dict[str, lis
 
 @app.post("/api/runs")
 def api_start_run(body: StartRunBody) -> dict:
-    import os
 
     from geni_studio.hitl.attachments import clean_attachment_ids
 
@@ -318,35 +361,32 @@ def api_start_run(body: StartRunBody) -> dict:
             "node_tools": tools,
             "attachment_ids": attachment_ids,
             "role_models": _clean_role_models(body.role_models),
+            "role_reasoning_efforts": body.role_reasoning_efforts,
         }
-        sync = os.environ.get("GENI_STUDIO_SYNC_START", "").strip().lower() in ("1", "true", "yes")
-        if sync:
-            st = _run_service.start(**kwargs)
-            tid = st.thread_id
-        else:
-            tid, initial = _run_service.enqueue_start(**kwargs)
-            try:
-                payload = _run_service.status_dict(tid)
-            except HitlError:
-                payload = _run_service.provisional_status_dict(tid, initial)
-            return _with_feishu(payload, tid, body.project_id)
+        tid, _initial = run_service().enqueue_start(**kwargs)
+        fail = run_service().start_failure_message(tid)
+        if fail:
+            raise HitlError(fail)
+        payload = run_service().view(tid)
     except (ConfigError, HitlError, WorkspaceError, ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return _with_feishu(_run_service.status_dict(tid), tid, body.project_id)
+    return _with_feishu(payload, tid)
 
 
 class RoleModelsBody(BaseModel):
     role_models: dict[str, str] = Field(default_factory=dict)
+    role_reasoning_efforts: dict[str, str] | None = None
 
 
 @app.put("/api/runs/{thread_id}/role-models")
 def api_set_role_models(thread_id: str, body: RoleModelsBody) -> dict:
     try:
-        st = _run_service.set_role_models(thread_id, _clean_role_models(body.role_models))
+        st = run_service().set_role_models(
+            thread_id, _clean_role_models(body.role_models), body.role_reasoning_efforts,
+        )
     except (HitlError, ValueError, TypeError) as e:
-        missing = "未知" in str(e)
-        raise HTTPException(status_code=404 if missing else 400, detail=str(e)) from e
-    return _run_service.status_dict(st.thread_id)
+        raise http_error(e) from e
+    return run_service().status_dict(st.thread_id)
 
 
 @app.put("/api/runs/{thread_id}/nodes/{node_id}/tools")
@@ -356,52 +396,64 @@ def api_set_node_tools(thread_id: str, node_id: str, body: NodeToolChoice) -> di
     try:
         skills = clean_tool_ids(body.skills, "Skill")
         mcp = clean_tool_ids(body.mcp, "MCP")
-        st = _run_service.set_node_tools(thread_id, node_id, skills=skills, mcp=mcp)
+        st = run_service().set_node_tools(thread_id, node_id, skills=skills, mcp=mcp)
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except HitlError as e:
-        missing = "未知" in str(e)
-        raise HTTPException(status_code=404 if missing else 400, detail=str(e)) from e
-    return _run_service.status_dict(st.thread_id)
+        raise http_error(e) from e
+    return run_service().status_dict(st.thread_id)
 
 
 @app.post("/api/runs/{thread_id}/delete")
 def api_delete_run(thread_id: str, body: DeleteRunBody) -> dict:
     try:
-        _run_service.delete_run(thread_id, confirm_name=body.confirm_name)
+        cleanup = run_service().delete_run(thread_id, confirm_name=body.confirm_name)
     except HitlError as e:
-        missing = "未知" in str(e)
-        raise HTTPException(status_code=404 if missing else 409, detail=str(e)) from e
-    return {"deleted": True, "thread_id": thread_id}
+        raise http_error(e, 409) from e
+    return {"deleted": True, "thread_id": thread_id, "cleanup": cleanup}
 
 
 @app.get("/api/runs/{thread_id}/events")
-def api_run_events(thread_id: str, once: int = 0):
-    """运行中或等待人工时推送状态。其他阶段推送当前一帧后结束。"""
+async def api_run_events(thread_id: str, once: int = 0):
+    """运行中或等待人工时推送状态。状态有变化时推送；其他阶段推送当前一帧后结束。"""
+    import asyncio
     import json
-    import time
 
-    def generate():
+    from geni_studio.runtime.events import version
+
+    def frame() -> tuple[dict | None, str]:
+        try:
+            data = run_service().view(thread_id)
+        except HitlError:
+            return None, ""
+        return data, _conversation_event(thread_id, data)
+
+    async def generate():
         previous = ""
         previous_conversation = ""
+        seen = -1
+        idle = 0.0
         while True:
-            try:
-                data = _run_service.status_dict(thread_id)
-            except HitlError:
-                yield "event: end\ndata: {}\n\n"
-                return
-            payload = json.dumps(data, ensure_ascii=False, default=str)
-            if payload != previous:
-                yield f"event: status\ndata: {payload}\n\n"
-                previous = payload
-            conv = _conversation_event(thread_id, data)
-            if conv and conv != previous_conversation:
-                yield f"event: conversation\ndata: {conv}\n\n"
-                previous_conversation = conv
-            if once or data.get("phase") not in ("running", "awaiting_human"):
-                yield "event: end\ndata: {}\n\n"
-                return
-            time.sleep(0.25)
+            current = version(thread_id)
+            if current != seen or idle >= _SSE_FALLBACK_SECONDS:
+                seen = current
+                idle = 0.0
+                data, conv = await run_in_threadpool(frame)
+                if data is None:
+                    yield "event: end\ndata: {}\n\n"
+                    return
+                payload = json.dumps(data, ensure_ascii=False, default=str)
+                if payload != previous:
+                    yield f"event: status\ndata: {payload}\n\n"
+                    previous = payload
+                if conv and conv != previous_conversation:
+                    yield f"event: conversation\ndata: {conv}\n\n"
+                    previous_conversation = conv
+                if once or data.get("phase") not in ("running", "awaiting_human"):
+                    yield "event: end\ndata: {}\n\n"
+                    return
+            await asyncio.sleep(_SSE_TICK_SECONDS)
+            idle += _SSE_TICK_SECONDS
 
     return StreamingResponse(
         generate(),
@@ -410,21 +462,26 @@ def api_run_events(thread_id: str, once: int = 0):
     )
 
 
+_SSE_TICK_SECONDS = 0.25
+_SSE_FALLBACK_SECONDS = 2.0
+
+
 @app.get("/api/runs/{thread_id}/artifacts/{key}")
 def api_run_artifact(thread_id: str, key: str) -> dict:
     from geni_studio.hitl.conversation import read_artifact_text
     from geni_studio.workspace.persist import ARTIFACT_KEYS
 
-    if key not in ARTIFACT_KEYS:
-        raise HTTPException(status_code=404, detail="没有这份产物。")
     try:
-        st = _run_service.status(thread_id)
+        st = run_service().status(thread_id)
     except HitlError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    extra = st.values.get("extra_artifacts") or {}
+    if key not in ARTIFACT_KEYS and key not in extra:
+        raise HTTPException(status_code=404, detail="没有这份产物。")
     workspace = str(st.values.get("workspace_path") or "")
     text = read_artifact_text(thread_id, key, workspace_path=workspace)
     if not text:
-        raw = st.values.get(key)
+        raw = st.values.get(key) if key in ARTIFACT_KEYS else extra.get(key)
         text = raw if isinstance(raw, str) else ""
     return {"key": key, "text": text}
 
@@ -432,44 +489,38 @@ def api_run_artifact(thread_id: str, key: str) -> dict:
 @app.get("/api/runs/{thread_id}/conversations/{node_id}")
 def api_run_conversation(thread_id: str, node_id: str) -> dict:
     try:
-        data = _run_service.status_dict(thread_id)
+        values = run_service().status(thread_id).values
     except HitlError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    from geni_studio.hitl.conversation import conversation_view
-    from geni_studio.hitl.rail import NODE_ROLE
+    from geni_studio.hitl.conversation import conversation_view, node_role
 
-    role = NODE_ROLE.get(node_id, "")
-    workspace = str((data.get("values") or {}).get("workspace_path") or "")
-    view = conversation_view(thread_id, role, workspace_path=workspace) if role else {"role": "", "turns": []}
-    view["node"] = node_id
-    return view
+    workspace = str(values.get("workspace_path") or "")
+    return conversation_view(thread_id, node_role(values, node_id), node=node_id, workspace_path=workspace)
 
 
 def _conversation_event(thread_id: str, data: dict) -> str:
     import json
 
-    from geni_studio.hitl.conversation import conversation_view
-    from geni_studio.hitl.rail import NODE_ROLE
+    from geni_studio.hitl.conversation import conversation_view, node_role
 
     node = str((data.get("rail") or {}).get("current") or "")
-    role = NODE_ROLE.get(node, "")
-    if not role:
+    if not node:
         return ""
-    workspace = str((data.get("values") or {}).get("workspace_path") or "")
-    view = conversation_view(thread_id, role, workspace_path=workspace)
+    values = data.get("values") or {}
+    workspace = str(values.get("workspace_path") or "")
+    view = conversation_view(thread_id, node_role(values, node), node=node, workspace_path=workspace)
     if not view["turns"]:
         return ""
-    view["node"] = node
     return json.dumps(view, ensure_ascii=False, default=str)
 
 
 @app.get("/api/runs/{thread_id}")
 def api_run_status(thread_id: str) -> dict:
-    fail = _run_service.start_failure_message(thread_id)
+    fail = run_service().start_failure_message(thread_id)
     if fail:
         raise HTTPException(status_code=400, detail=fail)
     try:
-        return _run_service.status_dict(thread_id)
+        return run_service().view(thread_id)
     except HitlError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
@@ -477,45 +528,34 @@ def api_run_status(thread_id: str) -> dict:
 @app.post("/api/runs/{thread_id}/pause")
 def api_pause_run(thread_id: str) -> dict:
     try:
-        st = _run_service.pause(thread_id)
+        st = run_service().pause(thread_id)
     except HitlError as e:
-        code = 404 if "未知" in str(e) else 409
-        raise HTTPException(status_code=code, detail=str(e)) from e
-    return _run_service.status_dict(st.thread_id)
+        raise http_error(e, 409) from e
+    return run_service().status_dict(st.thread_id)
 
 
 @app.post("/api/runs/{thread_id}/continue")
 def api_continue_run(thread_id: str) -> dict:
     try:
-        st = _run_service.continue_interrupted(thread_id)
+        st = run_service().request_continue(thread_id)
     except HitlError as e:
-        code = 404 if "未知" in str(e) else 409
-        raise HTTPException(status_code=code, detail=str(e)) from e
-    return _with_feishu(
-        _run_service.status_dict(st.thread_id),
-        st.thread_id,
-        str(st.values.get("project_id") or ""),
-    )
+        raise http_error(e, 409) from e
+    return _with_feishu(run_service().status_dict(st.thread_id), st.thread_id)
 
 
 @app.post("/api/runs/{thread_id}/resume")
 def api_resume_run(thread_id: str) -> dict:
     try:
-        st = _run_service.resume(thread_id)
+        st = run_service().request_resume(thread_id)
     except HitlError as e:
-        code = 404 if "未知" in str(e) else 409
-        raise HTTPException(status_code=code, detail=str(e)) from e
-    return _with_feishu(
-        _run_service.status_dict(st.thread_id),
-        st.thread_id,
-        str(st.values.get("project_id") or ""),
-    )
+        raise http_error(e, 409) from e
+    return _with_feishu(run_service().status_dict(st.thread_id), st.thread_id)
 
 
 @app.post("/api/runs/{thread_id}/stop")
 def api_stop_run(thread_id: str) -> dict:
     try:
-        st = _run_service.stop(thread_id)
+        st = run_service().stop(thread_id, channel="web", actor=web_operator())
     except StopPending:
         return {
             "thread_id": thread_id,
@@ -534,23 +574,23 @@ def api_stop_run(thread_id: str) -> dict:
         }
     except HitlError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
-    return _run_service.status_dict(st.thread_id)
+    return run_service().status_dict(st.thread_id)
 
 
 @app.post("/api/runs/{thread_id}/hitl")
 def api_submit_hitl(thread_id: str, body: HitlSubmitBody) -> dict:
     try:
-        st = _run_service.submit_hitl(
+        run_service().request_hitl(
             thread_id,
             gate_decision=body.gate_decision,
             human_reply=body.human_reply,
-            channel=body.channel,
+            channel="web",
             escalation_choice=body.escalation_choice,
+            actor=web_operator(),
         )
     except HitlError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
-    project_id = str(st.values.get("project_id") or "")
-    return _with_feishu(_run_service.status_dict(thread_id), thread_id, project_id)
+    return _with_feishu(run_service().status_dict(thread_id), thread_id)
 
 
 def main() -> None:
@@ -559,9 +599,12 @@ def main() -> None:
     import uvicorn
 
     os.environ.setdefault("GENI_STUDIO_FEISHU_BRIDGE", "1")
+    bootstrap_env()
+    host = os.environ.get("GENI_STUDIO_WEB_HOST", "").strip() or "127.0.0.1"
+    check_listen_address(host)
     uvicorn.run(
         "geni_studio.web.app:app",
-        host="127.0.0.1",
+        host=host,
         port=8765,
         reload=False,
     )

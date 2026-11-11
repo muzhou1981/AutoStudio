@@ -15,9 +15,11 @@ def append_hitl_audit(
     summary: str = "",
     gate_decision: str | None = None,
     human_reply: str = "",
+    actor: str = "",
 ) -> str:
     ts = datetime.now(UTC).isoformat()
-    parts = [f"[hitl {ts}]", f"channel={channel}", f"kind={kind}", f"thread={thread_id}"]
+    who = "".join(ch for ch in (actor or channel) if not ch.isspace())
+    parts = [f"[hitl {ts}]", f"channel={channel}", f"actor={who}", f"kind={kind}", f"thread={thread_id}"]
     if gate_decision:
         parts.append(f"gate_decision={gate_decision}")
     if summary:
@@ -39,6 +41,7 @@ def audit_patch(
     summary: str = "",
     gate_decision: str | None = None,
     human_reply: str = "",
+    actor: str = "",
 ) -> dict[str, str]:
     prev = str(values.get("hitl_audit_log") or values.get("run_record") or "")
     log = append_hitl_audit(
@@ -49,5 +52,6 @@ def audit_patch(
         summary=summary,
         gate_decision=gate_decision,
         human_reply=human_reply,
+        actor=actor,
     )
     return {"hitl_audit_log": log, "run_record": log}

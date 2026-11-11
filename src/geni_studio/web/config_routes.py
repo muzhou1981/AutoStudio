@@ -23,6 +23,7 @@ from geni_studio.config.registry import (
     settings_status,
     template_file_error,
 )
+from geni_studio.web.errors import http_error
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
@@ -169,9 +170,7 @@ def api_delete_project(project_id: str) -> dict:
     try:
         delete_project(project_id)
     except ConfigError as e:
-        message = str(e)
-        code = 404 if message.startswith("未知 project_id") else 400
-        raise HTTPException(status_code=code, detail=message) from e
+        raise http_error(e) from e
     return {"project_id": project_id, "deleted": True}
 
 
@@ -192,7 +191,8 @@ def api_create_project(body: CreateProjectBody) -> dict:
         yaml_text = (
             f"project_id: {project_id}\n"
             f"title: {title or project_id}\n"
-            f"scenario_key: npu_operator\n"
+            "workflow:\n"
+            "  profile_id: factory_default\n"
         )
     try:
         save_project_yaml(project_id, yaml_text, create=True)

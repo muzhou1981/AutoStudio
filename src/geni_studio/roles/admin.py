@@ -7,7 +7,8 @@ from typing import Any
 
 import yaml
 
-from geni_studio.config.context import ConfigError, factory_root
+from geni_studio.config.context import ConfigError, ConfigNotFound, factory_root
+from geni_studio.roles.capabilities import ROLE_CAPABILITIES as _CAPABILITIES
 from geni_studio.roles.loader import role_front_matter, role_md_path, role_title
 
 ARTIFACTS: tuple[tuple[str, str], ...] = (
@@ -39,7 +40,6 @@ ARTIFACTS: tuple[tuple[str, str], ...] = (
     ("process_proposals", "改进提案"),
 )
 _ARTIFACT_IDS = {item[0] for item in ARTIFACTS}
-_CAPABILITIES = ("read_files", "write_files", "run_commands")
 _CATEGORIES = {"management": "管理角色", "execution": "执行角色"}
 
 
@@ -75,7 +75,7 @@ def get_role(role_id: str, root: Path | None = None) -> dict[str, Any]:
     root = root or factory_root()
     path = role_md_path(role_id, root)
     if not path.is_file():
-        raise ConfigError(f"角色不存在：{role_id}")
+        raise ConfigNotFound(f"角色不存在：{role_id}")
     text = path.read_text(encoding="utf-8")
     data = role_front_matter(text)
     category = str(data.get("category") or "execution").strip()
@@ -132,7 +132,7 @@ def save_role(role_id: str, payload: dict[str, Any], root: Path | None = None) -
     root = root or factory_root()
     path = role_md_path(role_id, root)
     if not path.is_file():
-        raise ConfigError(f"角色不存在：{role_id}")
+        raise ConfigNotFound(f"角色不存在：{role_id}")
     cleaned = _validate(role_id, payload)
     path.write_text(_dump(cleaned), encoding="utf-8")
     return get_role(role_id, root)
@@ -142,7 +142,7 @@ def delete_role(role_id: str, root: Path | None = None) -> None:
     root = root or factory_root()
     path = role_md_path(role_id, root)
     if not path.is_file():
-        raise ConfigError(f"角色不存在：{role_id}")
+        raise ConfigNotFound(f"角色不存在：{role_id}")
     used = workflows_using_role(role_id, root)
     if used:
         raise ConfigError(f"这个角色还在流程里：{'、'.join(used)}。先从这些流程里去掉。")

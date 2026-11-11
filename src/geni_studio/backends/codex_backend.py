@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 import os
 import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from geni_studio.backends.session import (
+    current_node_id,
+    load_session,
+    save_session,
+    session_digest,
+    session_lock,
+    session_path,
+)
 
 if TYPE_CHECKING:
     from geni_studio.backends.base import AgentBackend
@@ -60,9 +67,14 @@ class _ActiveTurn:
 
 
 class CodexBackend:
-    capabilities: frozenset[str] = frozenset({"text", "file_read", "file_write", "shell"})
+    capabilities: frozenset[str] = frozenset({"read_files", "write_files", "run_commands"})
 
-    def __init__(self, *, sandbox: str = "", timeout_seconds: float = 1800) -> None:
+    def __init__(
+        self, *, sandbox: str = "", timeout_seconds: float = 1800,
+        reasoning_effort: str | None = None,
+    ) -> None:
+        from geni_studio.backends.codex_settings import normalize_reasoning_effort
+
         if sandbox not in {"", "read-only", "workspace-write"}:
             raise ValueError("Codex sandbox 只支持 read-only 或 workspace-write")
         timeout = float(timeout_seconds)
@@ -70,8 +82,22 @@ class CodexBackend:
             raise ValueError("Codex timeout_seconds 必须是有限正数")
         self._sandbox = sandbox
         self._timeout = timeout
+        self._reasoning_effort = (
+            None if reasoning_effort is None else normalize_reasoning_effort(reasoning_effort)
+        )
         # 未绑定 Run 的直接调用也能在同一对象内续接，但不跨对象共享。
         self._threads: dict[str, str] = {}
+
+    def sandbox_for(self, role_name: str) -> str:
+        """沙箱级别由 role.md 声明的能力决定：需要写文件或执行命令时可写工作区。"""
+        from geni_studio.backends.runner import required_capabilities
+        from geni_studio.roles.capabilities import WORKSPACE_MUTATING
+
+        needs_write = bool(required_capabilities(role_name) & WORKSPACE_MUTATING)
+        sandbox = self._sandbox or ("workspace-write" if needs_write else "read-only")
+        if needs_write and sandbox == "read-only":
+            raise ValueError(f"{role_name} 需要写工作区，不能使用 read-only")
+        return sandbox
 
     def complete(
         self,
@@ -82,10 +108,11 @@ class CodexBackend:
         model: str | None = None,
     ) -> str:
         from openai_codex import ApprovalMode, Sandbox
+        from openai_codex.generated.v2_all import ReasoningEffort
 
         from geni_studio.backends.base import factory_default_model
+        from geni_studio.backends.codex_settings import factory_reasoning_effort
         from geni_studio.backends.cost import note_cost
-        from geni_studio.backends.runner import required_capabilities
         from geni_studio.hitl.control import (
             RunStopped,
             current_thread_id,
@@ -102,15 +129,16 @@ class CodexBackend:
         cwd = str(Path(cwd).resolve())
         if is_stop_requested():
             raise RunStopped("本轮已停止")
-        needs_write = role_name in {"developer", "tester"} or "file_write" in required_capabilities(role_name)
-        sandbox = self._sandbox or ("workspace-write" if needs_write else "read-only")
-        if needs_write and sandbox == "read-only":
-            raise ValueError(f"{role_name} 需要写工作区，不能使用 read-only")
+        sandbox = self.sandbox_for(role_name)
         chosen = _codex_model(model if model is not None else factory_default_model("codex"))
+        effort = factory_reasoning_effort() if self._reasoning_effort is None else self._reasoning_effort
         run_id = current_thread_id()
-        identity = [run_id, _node_id(), role_name, cwd, chosen, sandbox, system_prompt.strip()]
-        digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
-        session_path = _session_path(run_id, cwd, digest) if run_id else None
+        identity = [run_id, current_node_id(), role_name, cwd, chosen, sandbox, system_prompt.strip()]
+        if effort:
+            # 显式强度不同的调用不共用线程；未配置时兼容已有会话键。
+            identity.append(effort)
+        digest = session_digest(identity)
+        session_file = session_path("codex-sessions", run_id, cwd, digest) if run_id else None
         options = {
             "cwd": cwd,
             "sandbox": Sandbox(sandbox),
@@ -121,24 +149,25 @@ class CodexBackend:
             options["model"] = chosen
         turn_path = None
         try:
-            with _session_lock(session_path), _open_codex(timeout=self._timeout) as client:
+            with session_lock(session_file), _open_codex(timeout=self._timeout) as client:
                 saved = self._threads.get(digest)
-                if session_path is not None and session_path.exists():
-                    saved = json.loads(session_path.read_text(encoding="utf-8"))["thread_id"]
+                if session_file is not None and session_file.exists():
+                    saved = load_session(session_file)["thread_id"]
                 if saved:
                     # 恢复失败必须报错，不静默丢弃历史重开线程。
                     thread = client.thread_resume(saved, **options)
                 else:
                     thread = client.thread_start(**options)
                 self._threads[digest] = thread.id
-                if session_path is not None:
-                    _save_session(session_path, thread.id)
+                if session_file is not None:
+                    save_session(session_file, {"thread_id": thread.id})
                 if run_id:
                     turn_path = begin_turn(
                         run_id, role_name, agent_id=thread.id, model=chosen or "default",
                         prompt=user_prompt.strip(), workspace_path=cwd,
                     )
-                handle = thread.turn(user_prompt.strip())
+                turn_options = {"effort": ReasoningEffort(effort)} if effort else {}
+                handle = thread.turn(user_prompt.strip(), **turn_options)
                 active = _ActiveTurn(handle, client)
                 register_active_run(run_id, active)
                 try:
@@ -163,43 +192,6 @@ class CodexBackend:
             if is_stop_requested():
                 raise RunStopped("本轮已停止") from exc
             raise
-
-
-def _node_id() -> str:
-    from langgraph.config import get_config
-
-    try:
-        return str((get_config().get("metadata") or {}).get("langgraph_node") or "")
-    except RuntimeError:
-        return ""
-
-
-def _session_path(run_id: str, cwd: str, digest: str) -> Path:
-    from geni_studio.hitl.conversation import conversation_dir
-
-    return conversation_dir(run_id, cwd).parent / "codex-sessions" / f"{digest}.json"
-
-
-@contextmanager
-def _session_lock(path: Path | None):
-    import fcntl
-
-    if path is None:
-        yield
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.with_suffix(".lock").open("a") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-
-
-def _save_session(path: Path, thread_id: str) -> None:
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps({"thread_id": thread_id}), encoding="utf-8")
-    temporary.replace(path)
 
 
 def _consume_turn(handle: Any, turn_path: Path | None) -> tuple[str, Any]:
@@ -286,9 +278,18 @@ def _cost_line(role_name: str, model: str, usage: Any) -> str:
     return f"{prefix} input_tokens={received} output_tokens={sent}"
 
 
-def _model_rows(listed: Any) -> list[dict[str, str]]:
+def _model_rows(listed: Any) -> list[dict[str, Any]]:
     # SDK 的 id 是目录条目 ID，model 才是请求模型名。
     return [
-        {"id": item.model, "label": item.display_name or item.model}
+        {
+            "id": item.model,
+            "label": item.display_name or item.model,
+            "is_default": item.is_default,
+            "default_reasoning_effort": item.default_reasoning_effort.value,
+            "reasoning_efforts": [
+                {"id": option.reasoning_effort.value, "description": option.description}
+                for option in item.supported_reasoning_efforts
+            ],
+        }
         for item in listed.data if item.model
     ]

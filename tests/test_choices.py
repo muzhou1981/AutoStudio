@@ -1,6 +1,7 @@
 """人工待办选项解析。"""
 
 from geni_studio.hitl.choices import (
+    answers_from_reply,
     choice_groups_from_reading,
     choice_reply_line,
     choices_from_reading,
@@ -57,3 +58,25 @@ def test_choices_from_reading_dedupes_by_id():
     merged = choices_from_reading(sections)
     assert [item["id"] for item in merged] == ["A", "B", "C"]
     assert merged[0]["label"] == "一"
+
+
+def test_bold_markdown_options_take_the_lead_in_question_as_prompt():
+    body = (
+        "先确认最关键的一点：\n\n**未选择项目时应如何处理？**\n\n"
+        "- **A（推荐）**：清空并隐藏  \n- **B**：保留占位\n\n请选 A / B。"
+    )
+    groups = extract_choice_groups(body)
+    assert len(groups) == 1
+    assert groups[0]["prompt"] == "未选择项目时应如何处理？"
+    assert [(c["id"], c["label"], c["recommended"]) for c in groups[0]["choices"]] == [
+        ("A", "清空并隐藏", True),
+        ("B", "保留占位", False),
+    ]
+
+
+def test_answers_from_reply_reads_letters_in_question_order():
+    groups = extract_choice_groups("问题一：范围？\nA：方案一\nB：方案二\n\n问题二：测试？\nA：全量\nB：子集\n")
+    assert answers_from_reply(groups, "选择 A：方案一\n选择 B：子集") == {"q1": "A", "q2": "B"}
+    assert answers_from_reply(groups[:1], "同意B") == {"q1": "B"}
+    assert answers_from_reply(groups[:1], "B") == {"q1": "B"}
+    assert answers_from_reply(groups[:1], "LGTM") == {}

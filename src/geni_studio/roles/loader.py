@@ -18,10 +18,13 @@ def load_role_system_prompt(role_name: str, root: Path | None = None) -> str:
     from geni_studio.backends.runtime import current_config
 
     frozen = current_config()
-    if root is None and frozen is not None and "_roles" in frozen:
+    if root is None and frozen is not None and ("_roles_ref" in frozen or "_roles" in frozen):
+        from geni_studio.runtime.snapshots import SnapshotMissing, get
+
         try:
-            return frozen["_roles"][role_name]
-        except KeyError as exc:
+            roles = get(frozen["_roles_ref"]) if "_roles_ref" in frozen else frozen["_roles"]
+            return roles[role_name]
+        except (KeyError, SnapshotMissing) as exc:
             raise FileNotFoundError(f"Run 快照中缺少角色定义: {role_name}") from exc
     path = role_md_path(role_name, root)
     if not path.is_file():

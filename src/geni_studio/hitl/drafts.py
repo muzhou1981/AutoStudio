@@ -1,4 +1,4 @@
-"""尚未启动的 Run 草稿。只记下项目、名称、交付目标和节点工具，不进入图。"""
+"""尚未启动的 Run 草稿，保存目标、节点工具与角色模型/推理设置，不进入图。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from geni_studio.config.context import factory_root
 from geni_studio.hitl.run_name import assign_run_name, clean_run_name
-from geni_studio.hitl.service import HitlError
+from geni_studio.hitl.service import HitlError, RunConflict, RunNotFound
 
 _DRAFT_ID = re.compile(r"^[0-9a-f]{32}$")
 _MAX_REQUEST = 20_000
@@ -23,20 +23,20 @@ def drafts_dir() -> Path:
 
 def _path(draft_id: str) -> Path:
     if not _DRAFT_ID.fullmatch(draft_id):
-        raise HitlError("这份草稿无法识别。")
+        raise RunNotFound("这份 Run 配置无法识别。")
     return drafts_dir() / f"{draft_id}.json"
 
 
 def _read(draft_id: str) -> dict:
     path = _path(draft_id)
     if not path.is_file():
-        raise HitlError(f"未知草稿 {draft_id}")
+        raise RunNotFound(f"未知 Run 配置 {draft_id}")
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise HitlError(f"未知草稿 {draft_id}") from exc
+        raise RunNotFound(f"未知 Run 配置 {draft_id}") from exc
     if not isinstance(data, dict):
-        raise HitlError(f"未知草稿 {draft_id}")
+        raise RunNotFound(f"未知 Run 配置 {draft_id}")
     return data
 
 
@@ -104,7 +104,11 @@ def save_draft(
     taken_names: set[str] | None = None,
     attachments: list[str] | None = None,
     role_models: dict[str, str] | None = None,
+    role_reasoning_efforts: dict[str, str] | None = None,
 ) -> dict:
+    from geni_studio.backends.reasoning import clean_role_reasoning_efforts
+
+    efforts = clean_role_reasoning_efforts(role_reasoning_efforts)
     pid = project_id.strip()
     if not pid:
         raise HitlError("先选择项目。")
@@ -135,6 +139,7 @@ def save_draft(
         "node_tools": node_tools or {},
         "attachments": files,
         "role_models": role_models or {},
+        "role_reasoning_efforts": efforts,
     }
     _path(existing_id).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
@@ -148,5 +153,5 @@ def delete_draft(draft_id: str, *, confirm_name: str) -> None:
     data = load_draft(draft_id)
     expected = str(data.get("run_name") or draft_id).strip() or draft_id
     if confirm_name.strip() != expected:
-        raise HitlError("名称不一致，没有删除。")
+        raise RunConflict("名称不一致，没有删除。")
     _path(draft_id).unlink()

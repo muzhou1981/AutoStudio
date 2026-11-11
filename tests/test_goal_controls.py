@@ -53,8 +53,12 @@ def test_gate_timeout_records_without_leaving_the_gate(svc: GraphRunService, mon
     assert "超时未批复" in data["values"]["gate_timeout_note"]
     assert data["awaiting_human"]["gate_id"] == "gate_requirement_confirm"
     assert data["next_nodes"] == ["gate_requirement_confirm"]
+    assert "[timeout]" not in str(svc.status(st.thread_id).values.get("hitl_audit_log") or "")
+    svc.sweep()
+    svc.sweep()
     again = svc.status_dict(st.thread_id)
     assert again["values"]["hitl_audit_log"].count("[timeout]") == 1
+    assert again["awaiting_human"]["gate_id"] == "gate_requirement_confirm"
 
 
 def test_scorecard_uses_rework_acceptance_and_cost():

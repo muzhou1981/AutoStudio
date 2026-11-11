@@ -39,9 +39,10 @@ def fake_client(monkeypatch, tmp_path):
 
     monkeypatch.delenv("GENI_STUDIO_CODEX_MODEL", raising=False)
     monkeypatch.delenv("GENI_STUDIO_DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("GENI_STUDIO_CODEX_REASONING_EFFORT", raising=False)
     monkeypatch.setattr("geni_studio.hitl.conversation.factory_root", lambda: tmp_path)
 
-    calls = SimpleNamespace(starts=[], resumes=[], prompts=[], closed=0, interrupted=False,
+    calls = SimpleNamespace(starts=[], resumes=[], prompts=[], turn_options=[], closed=0, interrupted=False,
                             status="completed", phase="final_answer", account=True, hook=None)
 
     class Handle:
@@ -58,8 +59,12 @@ def fake_client(monkeypatch, tmp_path):
     class Thread:
         id = "thread1"
 
-        def turn(self, prompt):
+        def turn(self, prompt, **kwargs):
+            import inspect
+
+            inspect.signature(sdk.Thread.turn).bind(self, prompt, **kwargs)
             calls.prompts.append(prompt)
+            calls.turn_options.append(kwargs)
             return Handle()
 
     class Client:
@@ -75,7 +80,10 @@ def fake_client(monkeypatch, tmp_path):
             return ModelListResponse.model_validate({"data": [{
                 "id": "catalog-row", "model": "gpt-test", "displayName": "GPT Test",
                 "description": "test", "hidden": False, "isDefault": True,
-                "supportedReasoningEfforts": [], "defaultReasoningEffort": "low",
+                "supportedReasoningEfforts": [
+                    {"reasoningEffort": "low", "description": "Fast"},
+                    {"reasoningEffort": "high", "description": "Thorough"},
+                ], "defaultReasoningEffort": "low",
             }]})
 
         def account(self):
@@ -109,6 +117,81 @@ def test_role_instructions_and_thread_resumption(fake_client):
     assert fake_client.starts[0]["approval_mode"] is sdk.ApprovalMode.deny_all
     assert "model" not in fake_client.starts[0]
     assert fake_client.closed == 2
+    assert fake_client.turn_options == [{}, {}]
+
+
+@pytest.mark.parametrize("effort", ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
+def test_reasoning_effort_reaches_sdk_on_start_and_resume(fake_client, monkeypatch, effort):
+    from openai_codex.generated.v2_all import ReasoningEffort
+
+    monkeypatch.setenv("GENI_STUDIO_CODEX_REASONING_EFFORT", effort)
+    backend = CodexBackend()
+    for _ in range(2):
+        backend.complete(role_name="compliance", system_prompt="s", user_prompt="u")
+    assert fake_client.turn_options == [{"effort": ReasoningEffort(effort)}] * 2
+    assert len(fake_client.starts) == len(fake_client.resumes) == 1
+
+
+def test_reasoning_change_uses_separate_session(fake_client, monkeypatch):
+    backend = CodexBackend()
+    for effort in ("low", "high", "low"):
+        monkeypatch.setenv("GENI_STUDIO_CODEX_REASONING_EFFORT", effort)
+        backend.complete(role_name="compliance", system_prompt="s", user_prompt="u")
+    assert len(fake_client.starts) == 2
+    assert len(fake_client.resumes) == 1
+
+
+@pytest.mark.parametrize("role_effort,expected", [("high", "high"), ("default", None), (None, "low")])
+def test_role_reasoning_overrides_factory_with_inherited_backend(fake_client, monkeypatch, role_effort, expected):
+    from geni_studio.backends.runner import backend_for_role
+
+    monkeypatch.setenv("GENI_STUDIO_BACKEND", "codex")
+    monkeypatch.setenv("GENI_STUDIO_CODEX_REASONING_EFFORT", "low")
+    monkeypatch.setattr("geni_studio.backends.runner._role_config", lambda *a: {"reasoning_effort": role_effort})
+    backend_for_role("compliance").complete(role_name="compliance", system_prompt="s", user_prompt="u")
+    assert fake_client.turn_options[-1].get("effort") == expected
+
+
+def test_reasoning_uses_frozen_config_and_legacy_default(fake_client, monkeypatch):
+    from geni_studio.backends.runtime import use_config
+
+    monkeypatch.setenv("GENI_STUDIO_CODEX_REASONING_EFFORT", "high")
+    for frozen, expected in [({"_codex_reasoning_effort": "low"}, "low"), ({}, None)]:
+        with use_config(frozen):
+            CodexBackend().complete(role_name="compliance", system_prompt="s", user_prompt="u")
+        assert fake_client.turn_options[-1].get("effort") == expected
+
+
+@pytest.mark.parametrize("selected,expected", [("high", "high"), ("default", None), ("", "low")])
+def test_run_effort_overrides_role_and_resets_context(fake_client, monkeypatch, selected, expected):
+    from geni_studio.backends.reasoning import use_role_reasoning_efforts
+    from geni_studio.backends.runner import backend_for_role
+
+    monkeypatch.setenv("GENI_STUDIO_BACKEND", "codex")
+    monkeypatch.setenv("GENI_STUDIO_CODEX_REASONING_EFFORT", "medium")
+    monkeypatch.setattr("geni_studio.backends.runner._role_config", lambda *a: {"reasoning_effort": "low"})
+    with use_role_reasoning_efforts({"compliance": selected}):
+        for _ in range(2):
+            backend_for_role("compliance").complete(role_name="compliance", system_prompt="s", user_prompt="u")
+            assert fake_client.turn_options[-1].get("effort") == expected
+        backend_for_role("architect").complete(role_name="architect", system_prompt="s", user_prompt="u")
+        assert fake_client.turn_options[-1].get("effort") == "low"
+    backend_for_role("compliance").complete(role_name="compliance", system_prompt="s", user_prompt="u")
+    assert fake_client.turn_options[-1].get("effort") == "low"
+
+
+def test_reasoning_values_match_pinned_sdk_and_reject_invalid(fake_client, monkeypatch):
+    from openai_codex.generated.v2_all import ReasoningEffort
+
+    from geni_studio.backends.codex_settings import REASONING_EFFORTS
+
+    assert set(REASONING_EFFORTS) == {x.value for x in ReasoningEffort}
+    with pytest.raises(ValueError, match="reasoning_effort"):
+        CodexBackend(reasoning_effort="typo")
+    monkeypatch.setenv("GENI_STUDIO_CODEX_REASONING_EFFORT", "typo")
+    with pytest.raises(ValueError, match="reasoning_effort"):
+        CodexBackend().complete(role_name="compliance", system_prompt="s", user_prompt="u")
+    assert not fake_client.starts
 
 
 def test_explicit_model_and_real_sdk_usage(fake_client):
@@ -143,7 +226,14 @@ def test_codex_model_identifier_is_model_not_catalog_id(fake_client, monkeypatch
     from geni_studio.backends.base import get_default_backend
 
     assert isinstance(get_default_backend(), CodexBackend)
-    assert list_codex_models()["models"] == [{"id": "gpt-test", "label": "GPT Test"}]
+    assert list_codex_models()["models"] == [{
+        "id": "gpt-test", "label": "GPT Test", "is_default": True,
+        "default_reasoning_effort": "low",
+        "reasoning_efforts": [
+            {"id": "low", "description": "Fast"},
+            {"id": "high", "description": "Thorough"},
+        ],
+    }]
 
 
 def test_actual_role_invocation_resumes_across_backend_instances(fake_client, monkeypatch):

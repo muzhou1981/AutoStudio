@@ -38,6 +38,7 @@ def build_gate_interactive_card(
     reject_label: str = "",
     excerpt: str = "",
     choices: list[dict[str, Any]] | None = None,
+    choice_groups: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     title = "软件工厂 · 项目经理"
     shown = node_label.strip() or _node_label(gate_id)
@@ -58,7 +59,15 @@ def build_gate_interactive_card(
             "text_align": "left",
         },
     ]
-    elements.extend(_gate_choice_elements(thread_id=thread_id, choices=choices or []))
+    elements.extend(
+        _hitl_choice_elements(
+            thread_id=thread_id,
+            choices=choices or [],
+            choice_groups=choice_groups or [],
+            hitl_action="gate",
+            gate_decision="approved",
+        )
+    )
     elements.extend(
         [
                 {
@@ -145,6 +154,7 @@ def build_pm_clarification_interactive_card(
     questions: list[str],
     web_url: str,
     choices: list[dict[str, Any]] | None = None,
+    choice_groups: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     title = "软件工厂 · 需求澄清"
     node_label = "项目经理起草"
@@ -156,7 +166,15 @@ def build_pm_clarification_interactive_card(
     elements: list[dict[str, Any]] = [
         {"tag": "markdown", "content": body_md, "text_align": "left"},
     ]
-    elements.extend(_clarification_choice_elements(thread_id=thread_id, choices=choices or []))
+    elements.extend(
+        _hitl_choice_elements(
+            thread_id=thread_id,
+            choices=choices or [],
+            choice_groups=choice_groups or [],
+            hitl_action="pm_clarification",
+            gate_decision=None,
+        )
+    )
     elements.extend(
         [
                 {
@@ -369,6 +387,35 @@ def _choice_column_set(
             }
         )
     return {"tag": "column_set", "flex_mode": "stretch", "columns": columns}
+
+
+def _multi_choice_groups_markdown(choice_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if len(choice_groups) <= 1:
+        return []
+    lines = ["**多道选择题**：飞书内请打开 Web 逐题点选；或在下批复附言中写明各题选择。"]
+    for index, group in enumerate(choice_groups, start=1):
+        prompt = str(group.get("prompt") or "").strip() or f"问题 {index}"
+        lines.append(f"\n**{prompt}**")
+        for choice in group.get("choices") or []:
+            lines.append(f"- {choice_reply_line(choice)}")
+    return [{"tag": "markdown", "content": "\n".join(lines), "text_align": "left"}]
+
+
+def _hitl_choice_elements(
+    *,
+    thread_id: str,
+    choices: list[dict[str, Any]],
+    choice_groups: list[dict[str, Any]],
+    hitl_action: str,
+    gate_decision: str | None,
+) -> list[dict[str, Any]]:
+    if len(choice_groups) > 1:
+        return _multi_choice_groups_markdown(choice_groups)
+    if len(choice_groups) == 1:
+        choices = list(choice_groups[0].get("choices") or [])
+    if hitl_action == "gate":
+        return _gate_choice_elements(thread_id=thread_id, choices=choices)
+    return _clarification_choice_elements(thread_id=thread_id, choices=choices)
 
 
 def _gate_choice_elements(

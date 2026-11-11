@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from copy import deepcopy
 from typing import Any
 
@@ -12,20 +11,20 @@ from langgraph.graph import END, START, StateGraph
 from geni_studio.config.context import ConfigError
 from geni_studio.config.workflow_defs import get_workflow
 from geni_studio.roles.loader import role_contract
+from geni_studio.workflows import artifacts
 from geni_studio.workflows.default import (
     FactoryState,
     _with_stop_guard,
     max_dev_retries_for_state,
 )
 
-_STATUS_FAIL = re.compile(r"(?m)^STATUS:\s*fail\s*$")
+_OPTIONAL_OUTPUTS = frozenset({"change_request"})
 DECISIONS = {"approve": "批准或驳回"}
 _ESCALATE = "workflow_escalate"
 
 
 def resolve_executable(workflow: dict[str, Any], *, root: Any = None) -> dict[str, Any]:
     """补上活动的产物契约，并拒绝缺少决定类型的决策点。"""
-    allowed = set(FactoryState.__annotations__)
     errors: list[str] = []
     nodes: list[dict[str, Any]] = []
     on_branch = str(workflow.get("workspace") or "") == "current_branch"
@@ -36,9 +35,7 @@ def resolve_executable(workflow: dict[str, Any], *, root: Any = None) -> dict[st
         if kind == "activity":
             inputs, outputs, problems = _activity_contract(node, root)
             errors.extend(problems)
-            unknown = [item for item in [*inputs, *outputs] if item not in allowed]
-            if unknown:
-                errors.append(f"活动「{name}」使用了图状态里没有的产物：{'、'.join(unknown)}。")
+            errors.extend(_name_problems(name, [*inputs, *outputs]))
             if not outputs and "outputs" not in node:
                 errors.append(f"活动「{name}」缺少产出产物。")
             node["inputs"] = inputs
@@ -54,7 +51,7 @@ def resolve_executable(workflow: dict[str, Any], *, root: Any = None) -> dict[st
             errors.append("节点标识 workflow_escalate 已留给回退升级。")
         nodes.append(node)
     runnable = [
-        node for node in nodes if node.get("kind") in {"activity", "gate", "parallel", "subgraph"}
+        node for node in nodes if node.get("kind") in {"activity", "gate", "parallel", "subgraph", "system"}
     ]
     if not runnable:
         errors.append("流程里没有可执行的活动或决策点。")
@@ -79,7 +76,9 @@ def compile_for_project(
     prepared = resolve_executable(loaded["workflow"], root=root)
     flat = _prepare_flat(prepared, root)
     compiled = compile_workflow(flat, checkpointer=checkpointer)
-    return compiled, {**run_state(flat), "workflow_definition": deepcopy(flat)}
+    from geni_studio.runtime.snapshots import put
+
+    return compiled, {**run_state(flat), "workflow_definition_ref": put(flat)}
 
 
 def compile_workflow(workflow: dict[str, Any], *, checkpointer: BaseCheckpointSaver) -> Any:
@@ -91,14 +90,16 @@ def compile_workflow(workflow: dict[str, Any], *, checkpointer: BaseCheckpointSa
     for step in _iter_steps(executable):
         if step["kind"] == "activity":
             fn = _activity(step)
+        elif step["kind"] == "system":
+            fn = _system(step)
         else:
             fn = _gate(step)
-        builder.add_node(step["id"], _with_stop_guard(fn))
+        builder.add_node(step["id"], _with_stop_guard(_recorded(str(step["id"]), _when(step, fn))))
     for node in executable:
         if node["kind"] != "parallel":
             continue
         builder.add_node(node["fork_id"], _with_stop_guard(_fork(node)))
-        builder.add_node(node["join_id"], _with_stop_guard(_join(node)))
+        builder.add_node(node["join_id"], _with_stop_guard(_recorded(str(node["join_id"]), _join(node))))
     builder.add_node(_ESCALATE, _with_stop_guard(_escalate))
     builder.add_edge(START, _entry(executable[0]))
     for index, node in enumerate(executable):
@@ -112,7 +113,9 @@ def compile_workflow(workflow: dict[str, Any], *, checkpointer: BaseCheckpointSa
                 builder.add_edge(node["fork_id"], branch["steps"][0]["id"])
                 _link_steps(builder, branch["steps"], marker, nodes, by_id, executable)
             builder.add_edge(done, node["join_id"])
-            builder.add_edge(node["join_id"], nxt)
+            builder.add_conditional_edges(
+                node["join_id"], _join_route(nxt), {_edge_key(nxt): nxt, "__end__": END}
+            )
         else:
             _link_one(builder, node, nxt, nodes, by_id, executable)
     builder.add_edge(_ESCALATE, END)
@@ -132,20 +135,111 @@ def _validate_parallel(nodes):
 
 def _fork(node):
     def fn(state):
-        if state.get("workspace_path"):
-            from geni_studio.backends.runner import required_capabilities
-
-            for step in _iter_steps([node]):
-                if required_capabilities(step["role"]) & {"file_write", "shell"}:
-                    raise ConfigError("并行写工作区尚未隔离，请把写入或执行命令的活动改为顺序执行")
         prefix = f"{node['id']}:"
-        return {"branch_artifacts": {
+        update: dict[str, Any] = {"branch_artifacts": {
             key: "" for key in (state.get("branch_artifacts") or {}) if key.startswith(prefix)
         }}
+        workspace = str(state.get("workspace_path") or "")
+        if not workspace:
+            return update
+        from geni_studio.backends.runner import required_capabilities
+        from geni_studio.roles.capabilities import WORKSPACE_MUTATING
+
+        writers = [
+            branch
+            for branch in node["branches"]
+            if any(required_capabilities(step["role"]) & WORKSPACE_MUTATING for step in _iter_steps(branch["steps"]))
+        ]
+        if not writers:
+            return update
+        from pathlib import Path
+
+        from geni_studio.workspace.branches import add_branch_worktree, snapshot
+        from geni_studio.workspace.layout import workspace_lock_root
+
+        repo = workspace_lock_root(workspace)
+        if repo is None:
+            raise ConfigError("并行支路要写入或执行命令，但本轮工作区不是工厂管理的 git 工作区。")
+        base = snapshot(Path(workspace))
+        owner = _thread_id() or Path(workspace).name
+        spaces = {f"{node['id']}:__base__": base}
+        for branch in writers:
+            path = add_branch_worktree(repo, owner, f"{node['id']}__{branch['id']}", base)
+            spaces[f"{node['id']}:{branch['id']}"] = str(path)
+        update["branch_workspaces"] = spaces
+        return update
     return fn
 
 
+def _system(node: dict[str, Any]):
+    from geni_studio.workflows.system_nodes import handler
+
+    name = str(node["handler"])
+
+    def fn(state: FactoryState) -> dict[str, Any]:
+        return handler(name)(state)
+
+    fn.__name__ = name
+    return fn
+
+
+def _when(node: dict[str, Any], fn):
+    cond = node.get("when")
+    if not cond:
+        return fn
+    from geni_studio.workflows.system_nodes import evaluate
+
+    def guarded(state: FactoryState) -> dict[str, Any]:
+        if not evaluate(cond, dict(state)):
+            return {}
+        return fn(state)
+
+    guarded.__name__ = getattr(fn, "__name__", "node")
+    return guarded
+
+
+def _recorded(node_id: str, fn):
+    def wrapped(state: FactoryState) -> dict[str, Any]:
+        update = fn(state)
+        if not update:
+            return update
+        meta = artifacts.record(state, update, node_id, _thread_id())
+        return {**update, **meta} if meta else update
+
+    wrapped.__name__ = getattr(fn, "__name__", "node")
+    return wrapped
+
+
+def _thread_id() -> str:
+    try:
+        from langgraph.config import get_config
+
+        return str(get_config()["configurable"].get("thread_id") or "")
+    except (RuntimeError, KeyError):
+        return ""
+
+
+def _routed(node: dict[str, Any], default: Any) -> tuple[Any, dict[str, Any]]:
+    from geni_studio.workflows.system_nodes import evaluate
+
+    routes = [(route["when"], str(route["to"])) for route in node.get("routes") or []]
+    default_key = _edge_key(default)
+
+    def route(state: FactoryState) -> str:
+        for cond, target in routes:
+            if evaluate(cond, dict(state)):
+                return target
+        return default_key
+
+    paths: dict[str, Any] = {default_key: default}
+    for _, target in routes:
+        paths[target] = target
+    return route, paths
+
+
 def run_state(workflow: dict[str, Any]) -> dict[str, Any]:
+    if str(workflow.get("rail") or "") == "builtin":
+        return {"workflow_id": workflow["workflow_id"]}
     visible: list[dict[str, Any]] = []
     for node in workflow["nodes"]:
         if node.get("kind") == "parallel":
@@ -241,6 +335,25 @@ def _activity_contract(node: dict[str, Any], root: Any) -> tuple[list[str], list
 
 
 def _activity(node: dict[str, Any]):
+    run = _activity_run(node)
+
+    def fn(state: FactoryState) -> dict[str, Any]:
+        space = ""
+        if node.get("parallel_id"):
+            key = f"{node['parallel_id']}:{node['branch_id']}"
+            space = str((state.get("branch_workspaces") or {}).get(key) or "")
+        if not space:
+            return run(state)
+        from geni_studio.workspace.context import use_worktree
+
+        with use_worktree(space):
+            return run({**state, "workspace_path": space})
+
+    fn.__name__ = f"activity_{node['id']}"
+    return fn
+
+
+def _activity_run(node: dict[str, Any]):
     inputs = list(node.get("inputs") or [])
     outputs = list(node.get("outputs") or [])
 
@@ -276,16 +389,25 @@ def _activity(node: dict[str, Any]):
         attached = prompt_section(state.get("attachments"))
         if attached:
             sections.append(attached)
+        feedback = str(state.get("return_feedback") or "")
+        if feedback:
+            sections.append(f"## 需要修复的问题\n上一轮未通过，原因如下，请逐条修复：\n{feedback}")
         for key in inputs:
-            value = state.get(key) or ""
+            value = artifacts.read(state, key) or ""
             if node.get("parallel_id"):
                 local = f"{node['parallel_id']}:{node['branch_id']}:{key}"
                 value = (state.get("branch_artifacts") or {}).get(local, value)
-            sections.append(f"{key}：\n{value}")
+            sections.append(artifacts.reference(state, key, key, role=str(node["role"]), value=value) or f"{key}：\n")
         for spec in node.get("output_specs") or []:
             sections.append(_template_section(spec))
         if node.get("returns_to"):
-            sections.append("若这一活动未能通过，最后一行只写 STATUS: fail。通过则不要写这一行。")
+            from geni_studio.verification.verdict import VERDICT_INSTRUCTION
+
+            sections.append(VERDICT_INSTRUCTION)
+        if "change_request" in outputs:
+            from geni_studio.verification.verdict import CHANGE_REQUEST_INSTRUCTION
+
+            sections.append(CHANGE_REQUEST_INSTRUCTION)
         tools = _tool_section(_chosen_tools(state, str(node["id"])))
         if tools:
             sections.append(tools)
@@ -294,17 +416,30 @@ def _activity(node: dict[str, Any]):
             user_prompt="\n\n".join(sections),
             stub_note=str(node["name"]),
         )
+        verdict = None
+        if node.get("returns_to") or (node["role"] == "tester" and "test_report" in outputs):
+            from geni_studio.backends.runner import role_is_simulated
+            from geni_studio.verification.verdict import judge
+
+            verdict = judge(body, simulated=role_is_simulated(str(node["role"])))
         if node["role"] == "tester" and "test_report" in outputs:
             from geni_studio.verification.command import verified_report
+            from geni_studio.verification.verdict import Verdict
 
-            body, status = verified_report(state, body)
-            if status != "pass":
-                if not node.get("returns_to"):
-                    raise RuntimeError("测试未通过且活动未配置回退去向")
-                body = body.rstrip() + "\nSTATUS: fail"
-        return _activity_update(node, state, outputs, body)
+            assert verdict is not None
+            body, status = verified_report(
+                state, body, verdict.status, claim_binding=verdict.source in {"block", "legacy", "invalid"}
+            )
+            error = (verdict.error or "验证命令未通过或缺少机器验证证据。") if status == "fail" else ""
+            verdict = Verdict(status, ac=verdict.ac, summary=verdict.summary, source=verdict.source, error=error)  # type: ignore[arg-type]
+            if status != "pass" and not node.get("returns_to"):
+                raise RuntimeError("测试未通过且活动未配置回退去向")
+        if verdict is not None:
+            from geni_studio.verification.verdict import with_verdict
 
-    fn.__name__ = f"activity_{node['id']}"
+            body = with_verdict(body, verdict)
+        return _activity_update(node, state, outputs, body, failed=verdict is not None and not verdict.passed)
+
     return fn
 
 
@@ -313,20 +448,29 @@ def _activity_update(
     state: FactoryState,
     outputs: list[str],
     body: str,
+    *,
+    failed: bool = False,
 ) -> dict[str, Any]:
+    from geni_studio.verification.verdict import split_outputs
+
     parallel = bool(node.get("parallel_id"))
+    values = split_outputs(body, outputs, optional=_OPTIONAL_OUTPUTS)
     if parallel:
         bucket = {
-            f"{node['parallel_id']}:{node['branch_id']}:{key}": body
-            for key in outputs
+            f"{node['parallel_id']}:{node['branch_id']}:{key}": value
+            for key, value in values.items()
         }
         update: dict[str, Any] = {"branch_artifacts": bucket}
     else:
-        update = {key: body for key in outputs}
+        update = {}
+        for key, value in values.items():
+            artifacts.put(update, key, value)
+        if state.get("return_feedback") and not failed:
+            update["return_feedback"] = ""
     counts = dict(state.get("return_counts") or {})
     target = ""
     origin = ""
-    if node.get("returns_to") and _STATUS_FAIL.search(body):
+    if node.get("returns_to") and failed:
         counts[node["id"]] = int(counts.get(node["id"]) or 0) + 1
         limit = node.get("max_loops")
         if not isinstance(limit, int) or limit < 1:
@@ -336,6 +480,8 @@ def _activity_update(
             origin = node["id"]
         else:
             target = str(node.get("graph_return") or node["returns_to"])
+            if not parallel:
+                update["return_feedback"] = f"「{node.get('label') or node['name']}」未通过：\n{body}"
     if parallel:
         update["return_counts"] = {node["id"]: counts[node["id"]]} if target else {}
         if target:
@@ -388,7 +534,7 @@ def _template_section(spec: dict[str, str]) -> str:
     from pathlib import Path
 
     try:
-        text = Path(template).read_text(encoding="utf-8")[:12000]
+        text = Path(template).read_text(encoding="utf-8")
     except OSError:
         text = ""
     if not text:
@@ -489,12 +635,13 @@ def _prepare_flat(workflow: dict[str, Any], root: Any) -> dict[str, Any]:
             if mapped:
                 node[key] = mapped
     _bind_contracts(nodes, root)
+    _check_artifact_flow(nodes)
     from pathlib import Path
 
     for node in _iter_steps(nodes):
         for spec in node.get("output_specs") or []:
             if spec.get("source") != "link":
-                spec["content"] = Path(spec["template"]).read_text(encoding="utf-8")[:12000]
+                spec["content"] = Path(spec["template"]).read_text(encoding="utf-8")
     flat = dict(workflow)
     flat["nodes"] = nodes
     return flat
@@ -519,10 +666,10 @@ def _flatten_node(
         subgraph_id = str(node.get("subgraph_id") or "")
         if subgraph_id in stack:
             raise ConfigError("子图不能套住自己。")
-        from geni_studio.config.workflow_defs import uses_default_engine
+        from geni_studio.config.workflow_defs import has_system_nodes
 
-        if uses_default_engine(subgraph_id, root):
-            raise ConfigError("通用软件开发不能当作子图插入。")
+        if has_system_nodes(subgraph_id, root):
+            raise ConfigError("含系统节点的流程（例如通用软件开发）不能当作子图插入。")
         loaded = get_workflow(subgraph_id, root=root)
         inner_prefix = f"{prefix}{node['id']}__"
         inner: list[dict[str, Any]] = []
@@ -579,8 +726,32 @@ def _flatten_node(
     return [copied]
 
 
+def _name_problems(activity: str, names: list[str]) -> list[str]:
+    bad = [item for item in names if artifacts.is_custom(item) and not artifacts.valid_name(item)]
+    if not bad:
+        return []
+    return [f"活动「{activity}」的产物名不合法：{'、'.join(bad)}。自定义产物名只能用小写字母、数字和下划线，并以字母开头。"]
+
+
+def _check_artifact_flow(nodes: list[dict[str, Any]]) -> None:
+    """自定义产物须由流程中的某个活动产出，才能被其他活动读取。"""
+    produced: set[str] = set()
+    for node in _iter_steps(nodes):
+        if node.get("kind") == "activity":
+            produced.update(str(item) for item in node.get("outputs") or [])
+    errors: list[str] = []
+    for node in _iter_steps(nodes):
+        if node.get("kind") != "activity":
+            continue
+        missing = artifacts.unknown_names([str(item) for item in node.get("inputs") or []], produced)
+        if missing:
+            name = str(node.get("name") or node.get("id") or "")
+            errors.append(f"活动「{name}」读取的产物没有活动产出：{'、'.join(missing)}。")
+    if errors:
+        raise ConfigError("\n".join(errors))
+
+
 def _bind_contracts(nodes: list[dict[str, Any]], root: Any) -> None:
-    allowed = set(FactoryState.__annotations__)
     errors: list[str] = []
     for node in _iter_steps(nodes):
         if node.get("kind") != "activity":
@@ -592,10 +763,8 @@ def _bind_contracts(nodes: list[dict[str, Any]], root: Any) -> None:
             continue
         inputs, outputs, problems = _activity_contract(node, root)
         errors.extend(problems)
-        unknown = [item for item in [*inputs, *outputs] if item not in allowed]
         name = str(node.get("name") or node.get("id") or "")
-        if unknown:
-            errors.append(f"活动「{name}」使用了图状态里没有的产物：{'、'.join(unknown)}。")
+        errors.extend(_name_problems(name, [*inputs, *outputs]))
         if not outputs and "outputs" not in node:
             errors.append(f"活动「{name}」缺少产出产物。")
         node["inputs"] = inputs
@@ -638,6 +807,16 @@ def _link_steps(builder, steps, tail, nodes, by_id, executable) -> None:
 
 
 def _link_one(builder, node, nxt, nodes, by_id, executable) -> None:
+    if node["kind"] == "system":
+        explicit = str(node.get("next") or "")
+        if explicit:
+            nxt = _node_or_end(explicit, by_id, executable)
+        if node.get("routes"):
+            route, paths = _routed(node, nxt)
+            builder.add_conditional_edges(node["id"], route, paths)
+        else:
+            builder.add_edge(node["id"], nxt)
+        return
     returns = str(node.get("returns_to") or "")
     if returns:
         node["graph_return"] = _graph_target(returns, nodes, executable)
@@ -669,6 +848,63 @@ def _link_one(builder, node, nxt, nodes, by_id, executable) -> None:
         builder.add_edge(node["id"], nxt)
 
 
+def _join_route(nxt: Any):
+    key = _edge_key(nxt)
+
+    def route(state: FactoryState) -> str:
+        if state.get("hitl_pending_kind") == "escalation":
+            return "__end__"
+        return key
+
+    return route
+
+
+def _merge_branches(node: dict[str, Any], state: FactoryState, order: list[str], names: dict[str, str]) -> dict[str, Any]:
+    """把各支路快照工作树的改动依次三方合并回本轮工作区；冲突时升级给人。"""
+    spaces = state.get("branch_workspaces") or {}
+    base = str(spaces.get(f"{node['id']}:__base__") or "")
+    if not base:
+        return {}
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    from geni_studio.workspace.branches import merge_back, remove_branch_worktree
+    from geni_studio.workspace.layout import workspace_lock_root
+
+    workspace = Path(str(state.get("workspace_path") or ""))
+    repo = workspace_lock_root(str(workspace))
+    conflicts: list[str] = []
+    for branch_id in order:
+        path = str(spaces.get(f"{node['id']}:{branch_id}") or "")
+        if not path:
+            continue
+        found = merge_back(workspace, Path(path), base)
+        if found:
+            conflicts.append(f"「{names[branch_id]}」：{'、'.join(found)}")
+        if repo is not None:
+            remove_branch_worktree(repo, Path(path))
+    update: dict[str, Any] = {
+        "branch_workspaces": {key: "" for key in spaces if key.startswith(f"{node['id']}:")}
+    }
+    if conflicts:
+        summary = (
+            f"并行「{node['name']}」汇合时有改动冲突，已在本轮工作区写入冲突标记："
+            + "；".join(conflicts)
+            + "。请处理冲突后选择继续，或暂停、终止。"
+        )
+        update.update(
+            {
+                "hitl_pending_kind": "escalation",
+                "hitl_summary": summary,
+                "hitl_questions": [],
+                "hitl_pending_since": datetime.now(UTC).isoformat(),
+                "escalated_from": str(node["join_id"]),
+                "return_feedback": summary,
+            }
+        )
+    return update
+
+
 def _noop(state: FactoryState) -> dict[str, Any]:
     return {}
 
@@ -690,9 +926,10 @@ def _join(node: dict[str, Any]):
         update: dict[str, Any] = {}
         for artifact, pairs in grouped.items():
             if len(pairs) == 1:
-                update[artifact] = pairs[0][1]
+                artifacts.put(update, artifact, pairs[0][1])
             else:
-                update[artifact] = "\n\n".join(f"## {title}\n{text}" for title, text in pairs)
+                artifacts.put(update, artifact, "\n\n".join(f"## {title}\n{text}" for title, text in pairs))
+        update.update(_merge_branches(node, state, order, names))
         return update
 
     fn.__name__ = f"join_{node['id']}"

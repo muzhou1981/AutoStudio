@@ -28,10 +28,10 @@ def test_list_scenarios_and_projects():
     assert any(p.project_id == "_example" for p in projects)
 
 
-def test_effective_config_example_project():
+def test_effective_config_example_project(example_retry_limit):
     eff = effective_config_summary(project_id="_example")
     assert eff["scenario_key"] == "npu_operator"
-    assert eff["max_dev_retries"] == 5
+    assert eff["max_dev_retries"] == example_retry_limit
 
 
 def test_config_api_lists():
@@ -143,6 +143,79 @@ def test_config_api_settings():
     r = client.get("/api/config/settings")
     assert r.status_code == 200
     assert "keys" in r.json()
+
+
+def test_reasoning_setting_roundtrip_and_validation(tmp_path, monkeypatch):
+    key = "GENI_STUDIO_CODEX_REASONING_EFFORT"
+    monkeypatch.setenv(key, "")
+    for module in ("config.registry", "cli", "config.env_loader"):
+        monkeypatch.setattr(f"geni_studio.{module}.factory_root", lambda: tmp_path)
+    client = TestClient(app)
+    response = client.post("/api/config/settings", json={"key": key, "value": " HIGH "})
+    assert response.status_code == 200
+    row = next(x for x in response.json()["keys"] if x["name"] == key)
+    assert row["configured"] is True
+    assert row["value_hint"] == "high"
+    assert (tmp_path / ".env").read_text() == f"{key}=high\n"
+    rejected = client.post("/api/config/settings", json={"key": key, "value": "typo"})
+    assert rejected.status_code == 400
+    assert (tmp_path / ".env").read_text() == f"{key}=high\n"
+    reset = client.post("/api/config/settings", json={"key": key, "value": "default"})
+    assert reset.status_code == 200
+    assert (tmp_path / ".env").read_text() == f"{key}=\n"
+    row = next(x for x in reset.json()["keys"] if x["name"] == key)
+    assert row["configured"] is False
+
+
+def test_settings_suggests_open_id_when_env_empty(monkeypatch, tmp_path):
+    from geni_studio.hitl.lark_cli_client import LarkCliAuthSummary
+
+    monkeypatch.setattr("geni_studio.config.registry.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.cli.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.env_loader.factory_root", lambda: tmp_path)
+    (tmp_path / ".env").write_text(
+        "GENI_STUDIO_LARK_BACKEND=lark_cli\nGENI_STUDIO_FEISHU_NOTIFY_OPEN_ID=\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "geni_studio.hitl.lark_cli_client.auth_summary",
+        lambda: LarkCliAuthSummary(
+            True,
+            True,
+            True,
+            "ok",
+            user_open_id="ou_suggested",
+            user_name="",
+        ),
+    )
+    client = TestClient(app)
+    row = next(
+        k for k in client.get("/api/config/settings").json()["keys"]
+        if k["name"] == "GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID"
+    )
+    assert row["configured"] is False
+    assert row["value_hint"] == "ou_suggested"
+    assert row.get("suggested") is True
+
+
+def test_settings_includes_lark_cli_user_open_id(monkeypatch):
+    from geni_studio.hitl.lark_cli_client import LarkCliAuthSummary
+
+    monkeypatch.setattr(
+        "geni_studio.hitl.lark_cli_client.auth_summary",
+        lambda: LarkCliAuthSummary(
+            True,
+            True,
+            True,
+            "ok",
+            user_open_id="ou_from_cli",
+            user_name="联调用户",
+        ),
+    )
+    client = TestClient(app)
+    lark = client.get("/api/config/settings").json()["lark_cli"]
+    assert lark["user_open_id"] == "ou_from_cli"
+    assert lark["user_name"] == "联调用户"
 
 
 def test_settings_secret_reports_length_not_value(tmp_path, monkeypatch):
@@ -421,6 +494,19 @@ def test_config_api_put_example():
     assert r1.status_code == 200
 
 
+def test_settings_rejects_non_open_id_for_feishu_notify(tmp_path, monkeypatch):
+    monkeypatch.setattr("geni_studio.config.registry.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.cli.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.env_loader.factory_root", lambda: tmp_path)
+    client = TestClient(app)
+    r = client.post(
+        "/api/config/settings",
+        json={"key": "GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID", "value": "cursor"},
+    )
+    assert r.status_code == 400
+    assert "ou_" in r.json()["detail"]
+
+
 def test_web_sets_backend_and_masks_api_key(tmp_path, monkeypatch):
     monkeypatch.setattr("geni_studio.config.registry.factory_root", lambda: tmp_path)
     monkeypatch.setattr("geni_studio.cli.factory_root", lambda: tmp_path)
@@ -464,6 +550,18 @@ def _ready_lark(monkeypatch: pytest.MonkeyPatch) -> None:
         "geni_studio.hitl.lark_cli_client.auth_summary",
         lambda: LarkCliAuthSummary(True, True, True, "ok"),
     )
+
+
+def test_probe_cursor_skips_when_verify_disabled(monkeypatch):
+    monkeypatch.setenv("GENI_STUDIO_CURSOR_VERIFY", "0")
+    monkeypatch.setenv("GENI_STUDIO_BACKEND", "cursor")
+    monkeypatch.setenv("CURSOR_API_KEY", "test-key")
+    from geni_studio.config.connectivity import probe_saved_settings
+
+    body = probe_saved_settings()
+    agent = next(item for item in body["checks"] if item["name"] == "Agent")
+    assert agent["status"] == "ok"
+    assert "跳过" in agent["detail"]
 
 
 def test_probe_reports_connected_for_stub(monkeypatch, tmp_path):

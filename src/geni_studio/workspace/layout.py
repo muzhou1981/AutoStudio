@@ -86,6 +86,9 @@ def prepare_run_layout(
         branch = _branch_name(target_root)
         (run_dir / "base_branch.txt").write_text(branch + "\n", encoding="utf-8")
         (run_dir / "worktree.txt").write_text(os.fspath(target_root) + "\n", encoding="utf-8")
+        from geni_studio.workspace.push_guard import install
+
+        install(target_root, holder=thread_id)
         return RunLayout(
             target_root=target_root,
             dot_dir=dot,
@@ -104,8 +107,22 @@ def prepare_run_layout(
         )
         if proc.returncode != 0:
             raise WorkspaceError((proc.stderr or proc.stdout or "git worktree add 失败").strip())
+    from geni_studio.workspace.push_guard import install
+
+    install(worktree)
     (run_dir / "worktree.txt").write_text(os.fspath(worktree) + "\n", encoding="utf-8")
     return RunLayout(target_root=target_root, dot_dir=dot, worktree=worktree, run_dir=run_dir)
+
+
+def workspace_lock(workspace_path: str) -> tuple[Path, Path] | None:
+    """本轮可写目录的锁：独立工作树各锁各的，当前分支模式锁仓库根。返回（目标仓库, 锁文件）。"""
+    repo = workspace_lock_root(workspace_path)
+    if repo is None:
+        return None
+    path = Path(workspace_path)
+    if path.resolve() == repo.resolve():
+        return repo, repo / ".geni_studio" / "write.lock"
+    return repo, repo / ".geni_studio" / "locks" / f"{path.name}.lock"
 
 
 def workspace_lock_root(workspace_path: str) -> Path | None:

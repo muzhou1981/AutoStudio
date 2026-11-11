@@ -2,6 +2,7 @@
 
 import copy
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
@@ -21,12 +22,10 @@ def activity(name, inputs=(), outputs=("code_change",), **extra):
 
 @pytest.mark.parametrize("fails", [False, True])
 def test_background_start_preserves_snapshot_and_reports_failure(monkeypatch, fails):
-    from geni_studio.hitl import control
-
+    monkeypatch.setenv("GENI_STUDIO_EXECUTOR", "thread")
     service = GraphRunService(compile_graph(checkpointer=MemorySaver()))
-    entered, release, done = threading.Event(), threading.Event(), threading.Event()
+    entered, release = threading.Event(), threading.Event()
     invoke = service._invoke
-    clear_starting = control.clear_starting
 
     def delayed_invoke(thread_id, payload):
         entered.set()
@@ -36,35 +35,41 @@ def test_background_start_preserves_snapshot_and_reports_failure(monkeypatch, fa
             raise ValueError("background start failed")
         invoke(thread_id, payload)
 
-    def finished(thread_id):
-        clear_starting(thread_id)
-        done.set()
-
     monkeypatch.setattr(service, "_invoke", delayed_invoke)
-    monkeypatch.setattr(control, "clear_starting", finished)
     monkeypatch.setenv("GENI_STUDIO_CODEX_MODEL", "model-at-start")
-    tid, initial = service.enqueue_start(human_request="后台启动回归")
+    monkeypatch.setenv("GENI_STUDIO_CODEX_REASONING_EFFORT", "high")
+    executor = service.executor()
+    executor.start()
     try:
+        tid, _initial = service.enqueue_start(
+            human_request="后台启动回归", role_reasoning_efforts={"project_manager": "high"},
+        )
         assert entered.wait(5)
-        assert control.is_starting(tid)
-        provisional = service.provisional_status_dict(tid, initial)
+        job = service.runtime_store().active_job(tid)
+        assert job is not None and job.state == "running"
+        provisional = service.view(tid)
         assert provisional["phase"] == "running"
         assert "config_snapshot_effective" not in provisional["values"]
         monkeypatch.setenv("GENI_STUDIO_CODEX_MODEL", "model-after-start")
+        monkeypatch.setenv("GENI_STUDIO_CODEX_REASONING_EFFORT", "low")
+        release.set()
+        for _ in range(100):
+            if service.runtime_store().active_job(tid) is None:
+                break
+            time.sleep(0.05)
+        assert service.runtime_store().active_job(tid) is None
     finally:
         release.set()
-        assert done.wait(10)
-    assert not control.is_starting(tid)
-    try:
-        if fails:
-            assert service.start_failure_message(tid) == "background start failed"
-        else:
-            status = service.status(tid)
-            assert status.phase == "awaiting_human"
-            assert status.values["config_snapshot_effective"]["_models"]["codex"] == "model-at-start"
-            assert service.start_failure_message(tid) is None
-    finally:
-        service._clear_start_failure(tid)
+        executor.stop()
+    if fails:
+        assert service.start_failure_message(tid) == "background start failed"
+    else:
+        status = service.status(tid)
+        assert status.phase == "awaiting_human"
+        assert status.values["config_snapshot_effective"]["_models"]["codex"] == "model-at-start"
+        assert status.values["config_snapshot_effective"]["_codex_reasoning_effort"] == "high"
+        assert status.values["role_reasoning_efforts"] == {"project_manager": "high"}
+        assert service.start_failure_message(tid) is None
 
 
 def parallel():
@@ -217,6 +222,7 @@ def test_machine_evidence_controls_test_outcome(monkeypatch):
 
     monkeypatch.setattr("geni_studio.verification.command.run_test_command", lambda state: SimpleNamespace(returncode=0, transcript="exit=0"))
     assert verified_report({}, "report", "fail")[1] == "pass"
+    assert verified_report({}, "report", "fail", claim_binding=True)[1] == "fail"
     monkeypatch.setattr("geni_studio.verification.command.run_test_command", lambda state: SimpleNamespace(returncode=1, transcript="exit=1"))
     assert verified_report({}, "STATUS: pass")[1] == "fail"
     monkeypatch.setattr("geni_studio.verification.command.run_test_command", lambda state: None)
@@ -280,15 +286,40 @@ def test_equal_cost_lines_from_separate_calls_are_preserved():
     assert service.status(status.thread_id).values["cost_ledger"].count("same-call-usage") == 2
 
 
-def test_config_runtime_frontend():
-    import shutil
+def _modern_node() -> str | None:
+    import os
     import subprocess
     from pathlib import Path
 
-    node = shutil.which("node")
+    candidates = [Path(d) / "node" for d in os.environ.get("PATH", "").split(os.pathsep)]
+    candidates += sorted((Path.home() / ".nvm/versions/node").glob("*/bin/node"), reverse=True)
+    for node in candidates:
+        if not node.is_file():
+            continue
+        version = subprocess.run([str(node), "--version"], check=False, capture_output=True, text=True).stdout.strip()
+        if version.startswith("v") and int(version[1:].split(".")[0]) >= 18:
+            return str(node)
+    return None
+
+
+def test_config_runtime_frontend():
+    import subprocess
+    from pathlib import Path
+
+    node = _modern_node()
     if node is None:
-        pytest.skip("Node.js unavailable")
+        pytest.skip("Node.js >= 18 unavailable")
     subprocess.run([node, str(Path(__file__).with_name("config_runtime_regression.cjs"))], check=True, timeout=10)
+
+
+def test_conversation_frontend_shows_summaries_only():
+    import subprocess
+    from pathlib import Path
+
+    node = _modern_node()
+    if node is None:
+        pytest.skip("Node.js >= 18 unavailable")
+    subprocess.run([node, str(Path(__file__).with_name("conversation_regression.cjs"))], check=True, timeout=10)
 
 
 def test_api_key_probe_does_not_change_local_sdk_login(monkeypatch):

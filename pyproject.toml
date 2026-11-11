@@ -26,6 +26,7 @@ dev = ["langgraph-cli[inmem]", "pytest>=8.0", "ruff>=0.5", "httpx>=0.27"]
 geni-studio = "geni_studio.cli:main"
 geni-studio-web = "geni_studio.web.app:main"
 geni-studio-feishu-bridge = "geni_studio.hitl.feishu_bridge:main"
+geni-studio-worker = "geni_studio.runtime.executor:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/geni_studio"]

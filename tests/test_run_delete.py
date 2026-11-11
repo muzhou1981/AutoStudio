@@ -60,6 +60,6 @@ def test_api_delete_round_trip() -> None:
     assert deleted.status_code == 200
     assert deleted.json()["deleted"] is True
     assert client.get(f"/api/runs/{thread_id}").status_code == 404
-    page = client.get("/").text
+    page = client.get("/").text + client.get("/static/hitl.js").text
     assert "确认删除" in page
     assert "这一轮记录不能恢复" in page

@@ -643,7 +643,7 @@
     button.type = "button";
     const kindClass = box.node.kind === "gate"
       ? "gate"
-      : box.node.kind === "activity"
+      : box.node.kind === "activity" || box.node.kind === "system"
         ? "activity"
         : box.node.kind === "parallel"
           ? "parallel"
@@ -764,9 +764,11 @@
         ? "并行"
         : node.kind === "subgraph"
           ? "子图"
-          : fixed
-            ? node.name
-            : "活动";
+          : node.kind === "system"
+            ? "系统节点"
+            : fixed
+              ? node.name
+              : "活动";
     $("flowNodeHeading").textContent = heading;
     $("flowNodeName").value = node.name;
     $("flowNodeName").label = node.kind === "gate"
@@ -786,7 +788,7 @@
     $("flowNodeDecision").disabled = locked;
     $("flowNodeReject").disabled = locked;
     $("flowNodeRole").hidden = fixed || structural;
-    $("flowNodeReturn").hidden = fixed || structural;
+    $("flowNodeReturn").hidden = fixed || structural || node.kind === "system";
     const showLoops = !fixed && !structural && Boolean(node.returns_to);
     $("flowNodeLoops").hidden = !showLoops;
     if (showLoops) $("flowNodeLoops").value = node.max_loops ? String(node.max_loops) : "";

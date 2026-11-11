@@ -22,6 +22,7 @@ from geni_studio.config.workflow_defs import (
     save_workflow_yaml,
     workflow_activity_roles,
 )
+from geni_studio.web.errors import http_error
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
@@ -58,8 +59,7 @@ class SaveSubgraphBody(BaseModel):
 
 
 def _http(exc: ConfigError) -> HTTPException:
-    missing = str(exc).startswith("流程不存在")
-    return HTTPException(status_code=404 if missing else 400, detail=str(exc))
+    return http_error(exc)
 
 
 @router.get("")

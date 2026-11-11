@@ -84,10 +84,17 @@ uv pip install -e '.[codex,dev]'
 export GENI_STUDIO_BACKEND=codex
 export GENI_STUDIO_WORKSPACE=1
 # export GENI_STUDIO_CODEX_MODEL=<模型名>  # 可选，留空使用 SDK 默认模型
+# export GENI_STUDIO_CODEX_REASONING_EFFORT=high  # 可选，模型须支持该级别
 .venv/bin/geni-studio-web
 ```
 
 使用启动服务的同一系统用户登录 Codex，即可复用本机登录状态，无需另填 API Key；也可在配置页保存 `OPENAI_API_KEY`。环境中有该 Key 时优先使用 Key 登录。打开 `http://127.0.0.1:8765/`，为项目选择流程和目标 Git 工作区，在运行页启动任务。Codex 必须有有效工作区，不能把关闭工作区的模拟运行当作真实开发。
+
+配置页选择 Codex 后，可设置「Codex 推理强度」并写入 `.env`，从新运行生效。留空或选择默认时沿用 Codex 配置，不固定为 medium；项目 YAML 的 `backends.<角色>.reasoning_effort` 可覆盖工厂设置，填写 `default` 表示该角色直接沿用 Codex 默认。
+
+运行页点选活动节点后，右栏可分别选择该角色本轮的模型与推理强度，Cursor 与 Codex 后端均适用；推理级别来自所选模型在 SDK 目录中声明的能力，Cursor 的 Auto 模型不能指定推理强度。选择具体模型或继承已明确的默认模型后，会显示该模型支持的级别；「沿用项目 / 工厂设置」继承原配置，「沿用 Codex 默认」则跳过项目和工厂的推理设置。本轮选择随「保存 Run 配置」、复制及 Run 续跑保留。
+
+模型列表与各模型支持的推理级别均从 Codex SDK 动态读取。明确选择模型后，推理选项随之更新；「模型建议」是 SDK 模型目录给出的建议，不代表本机配置当前生效值。列表加载失败时保留已有设置，刷新配置页可重试。
 
 需要工厂自动判定测试是否通过时，在项目 YAML 中配置验证命令，例如：
 
@@ -100,11 +107,10 @@ verification:
 
 ### 飞书 HITL（lark-cli）
 
-出站/入站见 [`tools/lark_cli/README.md`](tools/lark_cli/README.md) 与 ADR 0004。本地桥接：
+出站/入站见 [`tools/lark_cli/README.md`](tools/lark_cli/README.md) 与 ADR 0004，以及 [`docs/install.md`](docs/install.md)「接上飞书」。`geni-studio-web` 在本机有 `lark-cli` 时会默认拉起事件桥（`GENI_STUDIO_FEISHU_BRIDGE=1`），将卡片回调与 IM 文本转发到 `/api/webhooks/feishu`。若需关掉内嵌桥接，设 `GENI_STUDIO_FEISHU_BRIDGE=0` 后单独运行：
 
 ```bash
-geni-studio-web   # 终端 1
-geni-studio-feishu-bridge   # 终端 2：卡片 + IM 文本 → Webhook
+geni-studio-feishu-bridge --webhook http://127.0.0.1:8765/api/webhooks/feishu
 ```
 
 项目 `project.yaml` 中配置 `hitl.feishu.notify_open_id` 或 `notify_chat_id`（示例见 `projects/_example/project.yaml`）。

@@ -2,9 +2,10 @@ scenario_key: general_software
 title: 通用软件开发
 description: 覆盖应用、服务、库与命令行。默认走体验、界面和视觉；库或命令行可在项目里关闭设计轨。
 
+# 兼容层：新项目请直接选择流程 factory_default，运行档案见该流程的 profile。
+migrate_to: factory_default
 workflow:
   graph_id: default
-  profile_id: general_software_v1
   skip_nodes: []
   features:
     design_track: true

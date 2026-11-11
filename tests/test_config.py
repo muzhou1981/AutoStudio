@@ -88,10 +88,10 @@ def test_middleware_skips_design_nodes():
     assert {"ux_designer", "ui_designer", "visual_designer"} <= ctx.skip_nodes
 
 
-def test_project_inherits_scenario_from_project_yaml():
+def test_project_inherits_scenario_from_project_yaml(example_retry_limit):
     ctx = build_run_context(project_id="_example")
     assert ctx.scenario_key == "npu_operator"
-    assert ctx.max_dev_retries == 5
+    assert ctx.max_dev_retries == example_retry_limit
 
 
 def test_unknown_scenario_rejected():

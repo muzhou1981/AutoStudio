@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 _CLI_ENV = {
@@ -21,7 +22,28 @@ class LarkCliError(RuntimeError):
 
 
 def lark_cli_path() -> str | None:
-    return shutil.which("lark-cli")
+    """解析 lark-cli 可执行文件路径（Web 进程 PATH 常不含 nvm，须做补充查找）。"""
+    explicit = (
+        os.environ.get("GENI_STUDIO_LARK_CLI_PATH", "").strip()
+        or os.environ.get("LARK_CLI_PATH", "").strip()
+    )
+    if explicit:
+        path = Path(explicit).expanduser()
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path.resolve())
+    found = shutil.which("lark-cli")
+    if found:
+        return found
+    home = Path.home()
+    nvm_candidates = sorted(
+        home.glob(".nvm/versions/node/*/bin/lark-cli"),
+        key=lambda p: p.stat().st_mtime if p.is_file() else 0,
+        reverse=True,
+    )
+    for candidate in nvm_candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate.resolve())
+    return None
 
 
 def lark_cli_installed() -> bool:
@@ -62,7 +84,19 @@ class LarkCliAuthSummary:
     config_ok: bool
     bot_ready: bool
     hint: str
+    user_open_id: str = ""
+    user_name: str = ""
     raw: dict[str, Any] | None = None
+
+
+def _user_identity_from_auth(data: dict[str, Any]) -> tuple[str, str]:
+    identities = data.get("identities") or {}
+    user = identities.get("user") if isinstance(identities, dict) else {}
+    if not isinstance(user, dict):
+        return "", ""
+    open_id = str(user.get("openId") or user.get("open_id") or "").strip()
+    user_name = str(user.get("userName") or user.get("name") or "").strip()
+    return open_id, user_name
 
 
 def auth_summary() -> LarkCliAuthSummary:
@@ -94,11 +128,14 @@ def auth_summary() -> LarkCliAuthSummary:
     hint = "Bot 凭证由 lark-cli 管理（config init）；发消息使用 --as bot"
     if not bot_ready:
         hint = "请完成 lark-cli config init，并在开发者后台为个人应用开通 IM Bot 权限"
+    user_open_id, user_name = _user_identity_from_auth(data)
     return LarkCliAuthSummary(
         installed=True,
         config_ok=verified,
         bot_ready=bot_ready,
         hint=hint,
+        user_open_id=user_open_id,
+        user_name=user_name,
         raw=data,
     )
 

@@ -43,7 +43,7 @@ def test_change_request_returns_to_requirement_gate():
     assert "尚未经过对应关卡批准" in (st.values.get("change_baseline_note") or "")
 
 
-def test_cursor_backend_must_declare_shell_for_tester(monkeypatch):
+def test_cursor_backend_must_declare_run_commands_for_tester(monkeypatch):
     class _Bare:
         capabilities = frozenset({"text"})
 
@@ -51,7 +51,7 @@ def test_cursor_backend_must_declare_shell_for_tester(monkeypatch):
             return "x"
 
     monkeypatch.setattr("geni_studio.backends.runner.get_default_backend", lambda: _Bare())
-    with pytest.raises(CapabilityError, match="shell"):
+    with pytest.raises(CapabilityError, match="run_commands"):
         invoke_role(role_name="tester", user_prompt="u", stub_note="n")
 
 
@@ -419,3 +419,30 @@ def test_cli_run_reports_waiting_gate(capsys):
     out = capsys.readouterr().out
     assert "thread_id=" in out
     assert "awaiting=gate" in out
+
+
+def test_write_lock_records_only_current_owner(tmp_path: Path):
+    from geni_studio.workspace.policy import _read_lock_owner, exclusive_write
+
+    lock = tmp_path / ".geni_studio" / "write.lock"
+    for owner in ("run-a", "run-b", "run-c"):
+        with exclusive_write(tmp_path, owner=owner):
+            lines = lock.read_text(encoding="utf-8").splitlines()
+            assert len(lines) == 1
+            assert _read_lock_owner(lock)["thread"] == owner
+    assert lock.read_text(encoding="utf-8") == ""
+
+
+def test_second_writer_waits_for_release(tmp_path: Path):
+    import threading
+    import time
+
+    from geni_studio.workspace.policy import exclusive_write
+
+    held = exclusive_write(tmp_path, owner="first")
+    held.__enter__()
+    threading.Timer(0.3, lambda: held.__exit__(None, None, None)).start()
+    started = time.monotonic()
+    with exclusive_write(tmp_path, owner="second", wait_seconds=5):
+        waited = time.monotonic() - started
+    assert 0.2 <= waited < 5

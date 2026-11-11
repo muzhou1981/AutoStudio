@@ -18,6 +18,10 @@ class ConfigError(ValueError):
     """配置解析或校验失败。"""
 
 
+class ConfigNotFound(ConfigError):
+    """引用的场景或项目不存在。"""
+
+
 def factory_root() -> Path:
     """GeniStudio 仓库根目录（含 scenarios/、projects/）。"""
     return Path(__file__).resolve().parents[3]
@@ -95,6 +99,7 @@ class RunContext:
     merged: dict[str, Any]
     scenario_path: Path | None = None
     project_path: Path | None = None
+    notices: list[str] = field(default_factory=list)
 
     @property
     def workflow(self) -> dict[str, Any]:
@@ -157,7 +162,7 @@ def load_scenario_config(root: Path, scenario_key: str) -> tuple[dict[str, Any],
     scenario_file = scenario_dir / "scenario.yaml"
     profile_file = scenario_dir / "workflow_profile.yaml"
     if not scenario_file.is_file():
-        raise ConfigError(f"未知 scenario_key={key!r}，缺少 {scenario_file}")
+        raise ConfigNotFound(f"未知 scenario_key={key!r}，缺少 {scenario_file}")
     merged = _load_yaml(scenario_file)
     if profile_file.is_file():
         merged = deep_merge(merged, _load_yaml(profile_file))
@@ -171,7 +176,7 @@ def load_project_config(root: Path, project_id: str) -> tuple[dict[str, Any], Pa
     pid = project_id.strip()
     project_file = root / "projects" / pid / "project.yaml"
     if not project_file.is_file():
-        raise ConfigError(f"未知 project_id={pid!r}，缺少 {project_file}")
+        raise ConfigNotFound(f"未知 project_id={pid!r}，缺少 {project_file}")
     return _load_yaml(project_file), project_file
 
 
@@ -197,10 +202,29 @@ def build_run_context(
     root: Path | None = None,
 ) -> RunContext:
     root = root or factory_root()
+    """合并顺序：项目 > 场景（兼容层）> 所选流程的 profile。单次 Run 的覆盖在状态中另行生效。"""
+    from geni_studio.config.workflow_defs import workflow_exists, workflow_profile
+
     scenario_key, project_id = resolve_scenario_and_project(scenario_key, project_id, root)
     scenario_cfg, scenario_path = load_scenario_config(root, scenario_key)
     project_cfg, project_path = load_project_config(root, project_id)
-    merged = deep_merge(scenario_cfg, project_cfg)
+    legacy = deep_merge(scenario_cfg, project_cfg)
+    profile_id = str(_workflow_section(legacy).get("profile_id") or "").strip()
+    notices: list[str] = []
+    base: dict[str, Any] = {}
+    if profile_id and workflow_exists(profile_id, root):
+        base = profile_layer(workflow_profile(profile_id, root))
+    elif profile_id:
+        notices.append(f"profile_id={profile_id} 不对应任何流程，本轮按默认流程运行。")
+    if scenario_key.strip():
+        target = str(scenario_cfg.get("migrate_to") or "").strip()
+        hint = f"，对应的流程是 {target}" if target else ""
+        notices.append(
+            f"项目仍引用场景「{scenario_key.strip()}」{hint}。场景已降为兼容层："
+            "请在项目的 workflow.profile_id 中选择流程，把 features、limits、gates 移到流程的 profile "
+            "或项目的 workflow 中，然后删除 scenario_key。"
+        )
+    merged = deep_merge(base, legacy)
     skip_list = list(_workflow_section(merged).get("skip_nodes") or [])
     if skip_list:
         _validate_skip_nodes([str(x) for x in skip_list])
@@ -211,7 +235,19 @@ def build_run_context(
         merged=merged,
         scenario_path=scenario_path if scenario_path.is_file() else None,
         project_path=project_path if project_path.is_file() else None,
+        notices=notices,
     )
+
+
+def profile_layer(profile: Mapping[str, Any]) -> dict[str, Any]:
+    """把流程 profile 映射到合并配置的结构：运行档案放在 workflow 下，验证命令放在顶层。"""
+    layer: dict[str, Any] = {}
+    workflow = {key: profile[key] for key in ("features", "limits", "gates", "skip_nodes") if key in profile}
+    if workflow:
+        layer["workflow"] = workflow
+    if "verification" in profile:
+        layer["verification"] = profile["verification"]
+    return layer
 
 
 def resolve_template(artifact_name: str, ctx: RunContext) -> ResolvedTemplate:

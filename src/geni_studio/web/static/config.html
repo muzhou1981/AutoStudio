@@ -144,13 +144,18 @@
               <wa-button id="btnAddApiKey" appearance="outlined" variant="neutral" hidden>添加密钥</wa-button>
             </div>
             <wa-select id="modelPick" label="默认模型" placeholder="后端默认"></wa-select>
+            <div id="codexReasoningField" hidden>
+              <wa-select id="reasoningPick" label="Codex 推理强度" value="default" hint="选择模型后从 SDK 读取支持的推理级别。">
+                <wa-option value="default">沿用 Codex 默认</wa-option>
+              </wa-select>
+            </div>
             <wa-select id="larkBackend" label="飞书后端" value="lark_cli">
               <wa-option value="lark_cli">lark-cli</wa-option>
               <wa-option value="env_bot">应用凭据</wa-option>
             </wa-select>
             <wa-input id="publicBase" label="Web 地址" hint="卡片里的打开链接" placeholder="http://127.0.0.1:8765" spellcheck="false"></wa-input>
-            <wa-input id="feishuChat" label="默认通知群" hint="项目未填 chat_id 时使用" placeholder="oc_…" spellcheck="false"></wa-input>
-            <wa-input id="feishuOpen" label="默认通知人" hint="项目未填 open_id 时使用" placeholder="ou_…" spellcheck="false"></wa-input>
+            <wa-input id="feishuChat" label="默认通知群" hint="项目未填 chat_id 时使用" placeholder="oc_…" spellcheck="false" autocomplete="off"></wa-input>
+            <wa-input id="feishuOpen" label="默认通知人" hint="飞书用户 open_id（ou_…），不是 Agent 后端名称" placeholder="ou_…" spellcheck="false" autocomplete="off"></wa-input>
             <div class="row-actions">
               <wa-button id="btnSaveRuntime" variant="brand">写入 .env</wa-button>
             </div>
@@ -206,6 +211,6 @@
   </div>
   <wa-button id="themeToggle" class="theme-fab" appearance="filled" variant="neutral" size="s" aria-label="切换浅色与深色主题">夜晚</wa-button>
   <script src="/static/api-utils.js?v=20261110-web-ui"></script>
-  <script src="/static/config.js?v=20261110-runtime-rebase"></script>
+  <script src="/static/config.js?v=20261111-config-init"></script>
 </body>
 </html>

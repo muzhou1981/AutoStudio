@@ -3,6 +3,11 @@ title: 自我改进
 description: 日常驱动 Agent 改 GeniStudio 自身。直接在目标仓库当前检出的分支上修改，不另建工作树。先听清改动并等人确认，再改代码、自行核对。人确认入库后，由程序员在当前分支提交。各活动只产出一类主产物，避免同一段正文写入多个状态键。要改，先复制一份。
 builtin: true
 workspace: current_branch
+profile:
+  features:
+    design_track: false
+  limits:
+    max_dev_retries: 2
 nodes:
 - id: start
   kind: start

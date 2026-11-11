@@ -7,12 +7,14 @@ import secrets
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from geni_studio.hitl.feishu_cards import build_settled_gate_card
 from geni_studio.hitl.feishu_inbound import (
     FeishuInboundError,
     card_action_toast_response,
+    card_operator_open_id,
     event_type_from_body,
     extract_event_payload,
     normalize_im_hitl_reply,
@@ -27,7 +29,7 @@ from geni_studio.hitl.feishu_notify import (
 )
 from geni_studio.hitl.feishu_session import bound_thread_ids
 from geni_studio.hitl.feishu_status import answer_status_query, is_status_query
-from geni_studio.hitl.service import GraphRunService, HitlError
+from geni_studio.hitl.service import GraphRunService, HitlError, NotAwaiting
 
 router = APIRouter(tags=["feishu"])
 
@@ -52,9 +54,12 @@ class CardActionBody(BaseModel):
 
 
 def _webhook_authorized(request: Request) -> None:
+    """回调须带令牌。内置事件桥启动时自动生成令牌；外部桥须显式配置。"""
     expected = os.environ.get("GENI_STUDIO_FEISHU_WEBHOOK_TOKEN", "").strip()
     if not expected:
-        return
+        if os.environ.get("GENI_STUDIO_FEISHU_WEBHOOK_INSECURE", "").strip() == "1":
+            return
+        raise HTTPException(status_code=401, detail="未配置 GENI_STUDIO_FEISHU_WEBHOOK_TOKEN，拒绝飞书回调。")
     got = request.headers.get("x-geni-studio-webhook-token", "")
     if not secrets.compare_digest(got, expected):
         raise HTTPException(status_code=401, detail="飞书回调未通过校验。")
@@ -74,7 +79,9 @@ def _awaiting_threads(svc: GraphRunService, candidates: list[str]) -> list[str]:
 
 def _service() -> GraphRunService:
     if _run_service is None:
-        raise HTTPException(status_code=503, detail="Run 服务未就绪")
+        from geni_studio.web.app import run_service
+
+        return run_service()
     return _run_service
 
 
@@ -110,10 +117,11 @@ def _handle_im_message(body: dict) -> dict:
     if st.phase != "awaiting_human" or st.awaiting_human is None:
         return {"ok": True, "ignored": "not_awaiting_human"}
     ah = st.awaiting_human
+    actor = im.get("open_id") or ""
     reply = normalize_im_hitl_reply(text)
     try:
         if ah.kind == "pm_clarification":
-            st = svc.submit_hitl(thread_id, human_reply=reply, channel="feishu")
+            st = svc.request_hitl(thread_id, human_reply=reply, channel="feishu", actor=actor)
         elif ah.kind == "gate":
             decision = None
             if reply in ("批准", "通过", "approved", "LGTM", "ok"):
@@ -122,11 +130,12 @@ def _handle_im_message(body: dict) -> dict:
                 decision = "rejected"
             if decision is None:
                 return {"ok": True, "ignored": "gate_needs_decision_keyword"}
-            st = svc.submit_hitl(
+            st = svc.request_hitl(
                 thread_id,
                 gate_decision=decision,
                 human_reply=reply,
                 channel="feishu",
+                actor=actor,
             )
         elif ah.kind == "escalation":
             choice = reply.strip().lower()
@@ -135,18 +144,17 @@ def _handle_im_message(body: dict) -> dict:
                 choice = mapping.get(reply, "")
             if choice not in ("continue", "pause", "abort"):
                 return {"ok": True, "ignored": "escalation_needs_choice"}
-            st = svc.submit_hitl(
+            st = svc.request_hitl(
                 thread_id,
                 escalation_choice=choice,  # type: ignore[arg-type]
                 human_reply=reply,
                 channel="feishu",
+                actor=actor,
             )
         else:
             return {"ok": True, "ignored": ah.kind}
     except HitlError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
-    project_id = str(st.values.get("project_id") or "")
-    notify_awaiting_human_via_lark_cli(svc, st.thread_id, project_id)
     return {"ok": True, "phase": st.phase, "thread_id": st.thread_id}
 
 
@@ -164,6 +172,10 @@ async def feishu_webhook(request: Request) -> dict[str, Any]:
         return challenge
     _webhook_authorized(request)
 
+    return await run_in_threadpool(_handle_event, body)
+
+
+def _handle_event(body: dict) -> dict[str, Any]:
     event_type = event_type_from_body(body)
     if event_type == "im.message.receive_v1":
         return _handle_im_message(body)
@@ -185,6 +197,7 @@ async def feishu_webhook(request: Request) -> dict[str, Any]:
         action = parse_card_action_trigger(event if event else body)
     except FeishuInboundError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    actor = card_operator_open_id(event if event else body)
 
     settled = None
     if action.get("hitl_action") not in ("escalation", "pm_clarification"):
@@ -208,21 +221,24 @@ async def feishu_webhook(request: Request) -> dict[str, Any]:
                 thread_id=action["thread_id"],
                 escalation_choice=action["escalation_choice"],  # type: ignore[arg-type]
                 human_reply=action.get("human_reply") or "",
+                actor=actor,
             )
         elif action.get("hitl_action") == "pm_clarification":
-            st = svc.submit_hitl(
+            st = svc.request_hitl(
                 action["thread_id"],
                 human_reply=action.get("human_reply") or "",
                 channel="feishu",
+                actor=actor,
             )
         else:
             st = svc.submit_from_feishu_card(
                 thread_id=action["thread_id"],
                 gate_decision=action["gate_decision"],  # type: ignore[arg-type]
                 human_reply=action.get("human_reply") or "",
+                actor=actor,
             )
     except HitlError as e:
-        if "不在 awaiting_human" in str(e):
+        if isinstance(e, NotAwaiting):
             return {
                 **card_action_toast_response("这一轮已经不在等待批复。"),
                 "ok": True,
@@ -230,8 +246,6 @@ async def feishu_webhook(request: Request) -> dict[str, Any]:
             }
         raise HTTPException(status_code=409, detail=str(e)) from e
 
-    project_id = str(st.values.get("project_id") or "")
-    notify_awaiting_human_via_lark_cli(svc, st.thread_id, project_id)
     payload = {
         **card_action_toast_response("已提交，工厂续跑中"),
         "ok": True,
@@ -244,8 +258,9 @@ async def feishu_webhook(request: Request) -> dict[str, Any]:
 
 
 @router.post("/api/webhooks/feishu/card-action")
-def feishu_card_action_test(body: CardActionBody) -> dict[str, Any]:
+def feishu_card_action_test(body: CardActionBody, request: Request) -> dict[str, Any]:
     """本地/联调：模拟卡片 callback（无需公网 Webhook）。"""
+    _webhook_authorized(request)
     svc = _service()
     try:
         st = svc.submit_from_feishu_card(
@@ -255,8 +270,6 @@ def feishu_card_action_test(body: CardActionBody) -> dict[str, Any]:
         )
     except HitlError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
-    project_id = str(st.values.get("project_id") or "")
-    notify_awaiting_human_via_lark_cli(svc, st.thread_id, project_id)
     return svc.status_dict(st.thread_id)
 
 

@@ -10,7 +10,7 @@ import yaml
 
 from geni_studio.hitl.service import GraphRunService
 from geni_studio.verification.acceptance import extract_acceptance_ids
-from geni_studio.workflows.default import graph
+from geni_studio.workflows.default import get_graph
 
 
 def load_task(path: Path) -> dict[str, Any]:
@@ -43,7 +43,7 @@ def run_task(
 ) -> dict[str, Any]:
     task = load_task(path)
     expected = [str(item) for item in task.get("expect_acceptance_ids") or []]
-    svc = GraphRunService(graph)
+    svc = GraphRunService(get_graph())
     st = svc.start(
         human_request=str(task.get("human_request") or "").strip(),
         scenario_key=str(task.get("scenario_key") or "npu_operator"),

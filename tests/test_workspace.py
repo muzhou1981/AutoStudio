@@ -18,7 +18,7 @@ def test_start_persists_artifacts_and_worktree(tmp_path, monkeypatch):
     worktree = st.values["workspace_path"]
     assert os.path.isdir(worktree)
     run_dir = tmp_path / ".geni_studio" / "runs" / st.thread_id
-    spec = (run_dir / "requirement_spec.md").read_text(encoding="utf-8")
+    spec = (run_dir / "artifacts" / "requirement_spec.md").read_text(encoding="utf-8")
     assert "requirement" in spec or "stub" in spec or "需求" in spec
     assert (run_dir / "manifest.json").is_file()
     branch = subprocess.check_output(

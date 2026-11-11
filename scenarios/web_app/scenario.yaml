@@ -2,9 +2,10 @@ scenario_key: web_app
 title: Web 应用
 description: 需求确认后启用 UX → UI → 美工设计链。
 
+# 兼容层：新项目请直接选择流程 factory_default，运行档案见该流程的 profile。
+migrate_to: factory_default
 workflow:
   graph_id: default
-  profile_id: web_app_v1
   skip_nodes: []
   features:
     design_track: true

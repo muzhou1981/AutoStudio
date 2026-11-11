@@ -24,7 +24,7 @@ class AgentBackend(Protocol):
 class StubBackend:
     """占位后端，保持图可跑通。不具备文件与命令能力。"""
 
-    capabilities: frozenset[str] = frozenset({"text"})
+    capabilities: frozenset[str] = frozenset()
 
     def complete(
         self,

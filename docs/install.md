@@ -182,7 +182,9 @@ curl -sS -i -X POST http://127.0.0.1:8765/api/runs \
 
 - **自我改进**（`self_improve`、工作区指向工厂或目标仓库当前分支）允许开工时已有未提交改动；确认入库时由程序员节点在同一分支提交。
 - **分离头指针**（`git` 处于 detached HEAD）仍不能启动，需先切回命名分支。
-- 提示 **「目标项目已有写入进行中」**：同一工作区上一次启动未正常结束，`.geni_studio/write.lock` 仍被占用。先结束卡住的 `geni-studio-web` 或等待该轮 invoke 结束，再重启 Web 后重试。
+- 提示 **「目标项目已有写入进行中」**：同一可写目录上一次启动未正常结束，锁仍被占用。独立工作树的锁在 `.geni_studio/locks/<运行标识>.lock`，各轮互不阻塞；当前分支模式的锁在 `.geni_studio/write.lock`，同一仓库同时只有一轮。锁文件记录了持有者（`pid=… thread=… since=…`）。执行器遇到写锁占用时，该轮显示「等待写锁」并自动重试；若持有进程已不存在，结束卡住的 `geni-studio-web` 或执行进程后重启。
+- **推送防护**：每个运行工作区在 `config.worktree` 中把远端的 `pushurl` 设为不可用地址，并把 `core.hooksPath` 指向拒绝推送的钩子目录（其余钩子链接回原钩子）。当前分支模式下防护作用于仓库本身，本轮结束（完成、驳回或停止）后自动撤销；运行期间如需人工推送，请等本轮结束。
+- **回收**：删除运行时会移除其工作树与运行目录，未合入的 `geni-studio/<thread_id>` 分支保留。`geni-studio gc --dry-run` 列出孤立的工作树、运行目录与已合入分支，去掉 `--dry-run` 执行回收。
 
 ### 本地项目与流程不进 git
 
@@ -190,7 +192,13 @@ Web 里新建的项目目录与「另存为」流程默认在 `.gitignore` 中�
 
 ### 测试与生产启动行为
 
-持续集成与本地 `pytest` 默认设置 `GENI_STUDIO_SYNC_START=1`，`POST /api/runs` 会等图跑到关卡再返回。日常手工启动的 `geni-studio-web` **不**设置该项，启动请求会尽快返回，图在后台继续执行。不要用测试环境变量去跑长期手工服务，除非你明确要比对同步行为。
+持续集成与本地 `pytest` 默认设置 `GENI_STUDIO_SYNC_START=1`，推进任务在请求线程内执行（执行器 `inline` 模式），`POST /api/runs` 会等图跑到关卡再返回。日常手工启动的 `geni-studio-web` **不**设置该项：启动、批复、继续与续跑请求只写入决定并入队，立即返回「运行中」，由 Web 进程内的执行器推进（`GENI_STUDIO_EXECUTOR_WORKERS` 控制并发，默认 4）。设置 `GENI_STUDIO_EXECUTOR=external` 时 Web 只入队，另起 `.venv/bin/geni-studio-worker` 执行；两者须使用同一检查点目录。设计见 [ADR 0011](decisions/0011-run-executor-and-runtime-store.md)。
+
+### 访问控制
+
+- `GENI_STUDIO_WEB_TOKEN`：设置后，`/api/*`（飞书回调除外）须带令牌，可用请求头 `X-Geni-Studio-Token`、`Authorization: Bearer <令牌>` 或 Cookie。浏览器首次打开 `http://<地址>/?token=<令牌>` 写入 Cookie。
+- `GENI_STUDIO_WEB_HOST`：监听地址，默认 `127.0.0.1`。监听非回环地址时必须设置访问令牌，否则 `geni-studio-web` 拒绝启动。
+- `GENI_STUDIO_WEB_OPERATOR`：Web 入口的审批人名称，写入审计行的 `actor=`，缺省为 `web`。审计中的 `channel` 由服务端按入口确定，不读取请求体。
 
 ## 接上 Cursor
 
@@ -208,6 +216,8 @@ Web 里新建的项目目录与「另存为」流程默认在 `.gitignore` 中�
 ```
 
 `CURSOR_API_KEY` 一行应显示为前四个字符加省略号，不应出现完整密钥。模型要用固定值时再写 `GENI_STUDIO_CURSOR_MODEL`；留空表示 Auto。
+
+Cursor 角色的推理强度可在项目 YAML 的 `backends.<角色>.reasoning_effort` 中填写，或在运行页点选活动节点后于右栏为本轮选择。可选级别取自 `Cursor.models.list` 中该模型声明的推理参数，调用时以 `ModelSelection` 参数传给 SDK；Auto 模型不能指定推理强度，所选级别不受该模型支持时拒绝启动。目录中列出的模型可能因账号所在地区不可用，此时调用会返回地区不支持的错误。
 
 连通性脚本是 `scripts/smoke_cursor_backend.py`。只有人要求验证 Cursor 连通时才运行，并且不要把它的输出里的凭据转述出来。
 
@@ -240,16 +250,42 @@ export GENI_STUDIO_WORKSPACE=1
 backends:
   developer:
     backend: codex
+    reasoning_effort: high
     sandbox: workspace-write
     timeout_seconds: 1800
   code_reviewer:
     backend: codex
+    reasoning_effort: medium
     sandbox: read-only
 verification:
   command: python -m unittest discover -v
 ```
 
 `model` 是各角色可选字段；运行页临时选择优先于项目配置。沙箱只接受 `read-only` 和 `workspace-write`，需要写入的角色不能选择只读。`timeout_seconds` 为 SDK 客户端启动完成后的调用时限，必须是有限正数。验证命令在本轮工作树中执行；真实测试角色缺少验证命令时，工厂不会自动认定测试通过。
+
+推理强度可在「配置 → Agent」选择 Codex 后设置，或在工厂 `.env` 中填写 `GENI_STUDIO_CODEX_REASONING_EFFORT=high`。也可在运行页点选活动节点后，在右栏为该角色选择本轮的推理强度。优先级是本轮角色选择、项目 YAML 中该角色的 `reasoning_effort`、工厂环境配置、Codex 默认；省略项目角色字段表示继承工厂设置，填写 `default`、`auto` 或空字符串表示跳过工厂设置并沿用 Codex 默认。
+
+运行页选择「沿用项目 / 工厂设置」表示不覆盖原配置；选择「沿用 Codex 默认」则跳过项目和工厂推理设置。可用级别随该角色选中的模型刷新；继承的默认模型已明确时，也会直接显示其支持的级别。本轮选择随「保存 Run 配置」、重新打开、复制与 Run 续跑保留，不修改 `.env` 或项目 YAML；已启动 Run 的控件与模型控件一样只读。
+
+模型列表通过 SDK `models()` 动态获取；推理选项来自该模型的 `supported_reasoning_efforts`，并将 `default_reasoning_effort` 标为「模型建议」。页面不再枚举固定的推理选项。模型切换后，若已有推理设置不在新模型能力列表中，会保留原值并提示重新选择，保存时拒绝明确不支持的组合。
+
+模型留在「Codex 默认」时，SDK 模型目录的 `is_default` 不保证等于本机配置或目标工作区最终使用的模型，页面不据此猜测推理能力；要选择具体推理级别，请先明确选择模型。请求失败或已保存模型不在目录中时，保留已有配置并显示未确认支持的提示，可刷新配置页重试，不自动清空配置。
+
+当前 SDK 协议接受 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`、`ultra`，配置写入仍作协议枚举校验；这不等于各模型都支持全部级别。未设置时不传 SDK 的 `effort` 参数，由 Codex 配置及模型默认决定，不保证是 medium。参考 [Codex 配置说明](https://developers.openai.com/codex/config-reference/)。
+
+工厂推理设置和角色配置在 Run 启动时保存，后续修改供新 Run 使用；旧 Run 续跑仍使用其快照。选择「沿用 Codex 默认」时，工厂不冻结外部 Codex 配置文件的内容。显式推理级别不同的调用使用不同会话，不复用可能带有旧推理设置的线程。
+
+`verification` 还支持以下字段：
+
+```yaml
+verification:
+  command: [make, test]        # 字符串或参数列表
+  allow: [make, ctest, bash]   # 在内置白名单（pytest、python、python3、go、cargo、npm）之外追加
+  timeout_seconds: 1800        # 缺省 120 秒
+  sandbox: bwrap               # none（缺省）或 bwrap：根文件系统只读、仅工作树可写、无网络
+```
+
+验证命令的子进程不继承密钥类环境变量（名称含 `KEY`、`TOKEN`、`SECRET`、`PASSWORD`、`CREDENTIAL`，或以 `LARK_`、`CURSOR_`、`OPENAI_` 等前缀开头）。命令不允许包含 shell 元字符；需要管道时写成脚本，并把解释器（如 `bash`）加入 `allow`。
 
 配置页连通检查不生成内容，不能证明某个模型具有推理权限。开发者明确需要执行真实 SDK 集成测试时，可运行：
 
@@ -271,7 +307,9 @@ GENI_STUDIO_CODEX_LIVE_TEST=1 .venv/bin/pytest tests/test_codex_live.py -v
 .venv/bin/geni-studio-feishu-bridge --webhook http://127.0.0.1:8765/api/webhooks/feishu
 ```
 
-Web 端口如果改过，把 `GENI_STUDIO_FEISHU_WEBHOOK` 和 `GENI_STUDIO_PUBLIC_BASE_URL` 改成同一个端口。若设置了 `GENI_STUDIO_FEISHU_WEBHOOK_TOKEN`，桥接会带上这个请求头，Webhook 拒绝没有该头的批复。项目里的通知群或通知人优先于 `.env` 里的 `GENI_STUDIO_FEISHU_NOTIFY_CHAT_ID` 与 `GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID`。
+Web 端口如果改过，把 `GENI_STUDIO_FEISHU_WEBHOOK` 和 `GENI_STUDIO_PUBLIC_BASE_URL` 改成同一个端口。飞书回调必须带 `GENI_STUDIO_FEISHU_WEBHOOK_TOKEN`：内置桥接在未配置时自动生成一个随机令牌；单独运行 `geni-studio-feishu-bridge` 时须在 `.env` 中设置该令牌并与 Web 进程一致，否则桥接拒绝启动、Webhook 拒绝回调。仅本地调试可设置 `GENI_STUDIO_FEISHU_WEBHOOK_INSECURE=1` 跳过校验。项目可在 `project.yaml` 的 `hitl.feishu.approvers` 中列出允许批复的 `open_id`，配置后名单外的飞书批复被拒绝；审计行记录批复人的 `open_id`。项目里的通知群或通知人优先于 `.env` 里的 `GENI_STUDIO_FEISHU_NOTIFY_CHAT_ID` 与 `GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID`。
+
+从桌面、IDE 或 systemd 启动 `geni-studio-web` 时，进程 `PATH` 往往**不含** nvm 下的 `lark-cli`，日志会出现 `[feishu-bridge] 未启动：找不到 lark-cli`，配置页也会显示 lark-cli 未安装。任选一种处理：在启动命令前 `export PATH="$HOME/.nvm/versions/node/<版本>/bin:$PATH"`；`ln -s "$(which lark-cli)" ~/bin/lark-cli`（`~/bin` 常在默认 PATH 中）；或在 `.env` 设置 `GENI_STUDIO_LARK_CLI_PATH=/绝对路径/lark-cli`。代码也会对 `~/.nvm/versions/node/*/bin/lark-cli` 做补充查找，但重启 Web 后方能生效。
 
 ## 开发这个仓库时
 
@@ -282,4 +320,4 @@ Web 端口如果改过，把 `GENI_STUDIO_FEISHU_WEBHOOK` 和 `GENI_STUDIO_PUBLI
 .venv/bin/pytest -q
 ```
 
-`langgraph dev` 使用 `src/geni_studio/workflows/default.py` 里的 `graph`，它不是使用产品的必要步骤。角色文件 `roles/*/role.md` 与该文件中的节点函数由人编写；安装手册不要求改它们。
+`langgraph dev` 使用 `src/geni_studio/workflows/default.py` 里的 `graph`，它由 `workflows/factory_default/workflow.yaml` 编译而来，不是使用产品的必要步骤。角色文件 `roles/*/role.md` 与 `default.py` 中的节点函数由人编写；安装手册不要求改它们。

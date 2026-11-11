@@ -7,8 +7,12 @@ import os
 import tempfile
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from typing import Any
+
+_CURSOR_PROBE_TIMEOUT_SEC = 12.0
 
 
 def probe_saved_settings() -> dict[str, Any]:
@@ -127,8 +131,19 @@ def validate_agent_secret(key: str, value: str) -> tuple[bool, str]:
     return status == "ok", detail
 
 
+def _cursor_verify_disabled() -> bool:
+    return os.environ.get("GENI_STUDIO_CURSOR_VERIFY", "1").strip().lower() in (
+        "0",
+        "false",
+        "no",
+    )
+
+
 def probe_cursor_key(api_key: str, model: str) -> tuple[str, str]:
     """用 Cursor.me 核对密钥，不发起一轮生成。"""
+    chosen = model.strip() or "Auto"
+    if _cursor_verify_disabled():
+        return "ok", f"已跳过 Cursor 联网校验（GENI_STUDIO_CURSOR_VERIFY=0）。运行时模型为 {chosen}。"
     try:
         from cursor_sdk import Cursor
         from cursor_sdk._client import _default_client
@@ -139,15 +154,25 @@ def probe_cursor_key(api_key: str, model: str) -> tuple[str, str]:
         )
     except ImportError:
         return "fail", "未安装 cursor-sdk。安装后再写入。"
-    try:
+
+    def _me() -> None:
         Cursor.me(client=_default_client(), api_key=api_key)
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_me)
+            future.result(timeout=_CURSOR_PROBE_TIMEOUT_SEC)
+    except FuturesTimeoutError:
+        return (
+            "fail",
+            "Cursor 连通校验超时。配置已写入；请检查网络，或设 GENI_STUDIO_CURSOR_VERIFY=0 跳过联网校验。",
+        )
     except AuthenticationError:
         return "fail", "API Key 无效。到 Cursor 设置里更新 User API Key，再写入一次。"
     except ConfigurationError:
         return "fail", "Cursor 桥接未就绪。确认本机桥接可用后再写入。"
     except CursorSDKError:
         return "fail", "连不上 Cursor。检查网络或代理后再写入。"
-    chosen = model.strip() or "Auto"
     return "ok", f"API Key 可用。运行时模型为 {chosen}。"
 
 

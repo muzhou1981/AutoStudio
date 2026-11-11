@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from contextvars import ContextVar
 
 from geni_studio.backends.base import (
@@ -31,10 +32,16 @@ def reset_role_models(token: object) -> None:
     _role_models.reset(token)  # type: ignore[arg-type]
 
 
-ROLE_CAPABILITIES: dict[str, frozenset[str]] = {
-    "developer": frozenset({"file_write", "shell"}),
-    "tester": frozenset({"shell"}),
-}
+_backend_lock = threading.Lock()
+_codex_backends: dict[tuple[str, object], object] = {}
+
+
+def reset_backend_cache() -> None:
+    from geni_studio.backends.cursor_backend import reset_cursor_backend_cache
+
+    with _backend_lock:
+        _codex_backends.clear()
+    reset_cursor_backend_cache()
 
 
 class CapabilityError(RuntimeError):
@@ -42,16 +49,15 @@ class CapabilityError(RuntimeError):
 
 
 def required_capabilities(role_name: str) -> frozenset[str]:
+    """角色所需能力，唯一来源是 role.md 的 `capabilities`。"""
+    from geni_studio.roles.capabilities import normalize
     from geni_studio.roles.loader import role_front_matter
 
-    aliases = {"read_files": "file_read", "write_files": "file_write", "run_commands": "shell"}
     try:
         raw = role_front_matter(load_role_system_prompt(role_name)).get("capabilities") or []
     except FileNotFoundError:
         raw = []
-    if isinstance(raw, str):
-        raw = [raw]
-    return ROLE_CAPABILITIES.get(role_name, frozenset()) | frozenset(aliases.get(x, x) for x in raw)
+    return normalize(raw)
 
 
 def _role_config(role_name: str, project_id: str = "") -> dict:
@@ -85,7 +91,17 @@ def model_for_role(role_name: str, project_id: str = "") -> str | None:
     return factory_default_model(backend) or None
 
 
+def effort_for_role(role_name: str, project_id: str = "") -> str:
+    """本轮该角色的推理强度：Run 覆盖优先，其次项目配置；空串表示交给模型默认。"""
+    from geni_studio.backends.reasoning import normalize_effort, reasoning_for_role
+
+    configured = _role_config(role_name, project_id).get("reasoning_effort")
+    return normalize_effort(reasoning_for_role(role_name, configured))
+
+
 def backend_for_role(role_name: str, project_id: str = ""):
+    import os
+
     name = str(_role_config(role_name, project_id).get("backend") or "").strip().lower()
     from geni_studio.backends.runtime import current_config
 
@@ -101,21 +117,48 @@ def backend_for_role(role_name: str, project_id: str = ""):
         if backend is None:
             raise CapabilityError(f"{role_name} 配置为 cursor，但 Cursor 后端不可用")
         return backend
-    if name == "codex":
+    if name == "codex" or (not name and os.environ.get("GENI_STUDIO_BACKEND", "").strip().lower() == "codex"):
         from geni_studio.backends.codex_backend import CodexBackend
+        from geni_studio.backends.reasoning import reasoning_for_role
 
         try:
             import openai_codex  # noqa: F401
         except ImportError as exc:
             raise CapabilityError(f"{role_name} 配置为 codex，但未安装 openai-codex") from exc
         cfg = _role_config(role_name, project_id)
-        return CodexBackend(
-            sandbox=str(cfg.get("sandbox") or ""),
-            timeout_seconds=cfg.get("timeout_seconds", 1800),
+        key = (
+            str(cfg.get("sandbox") or ""),
+            cfg.get("timeout_seconds", 1800),
+            reasoning_for_role(role_name, cfg.get("reasoning_effort")),
         )
+        with _backend_lock:
+            backend = _codex_backends.get(key)
+            if backend is None:
+                backend = CodexBackend(sandbox=key[0], timeout_seconds=key[1], reasoning_effort=key[2])
+                _codex_backends[key] = backend
+        return backend
     if name:
         raise CapabilityError(f"{role_name} 配置了未知后端：{name}")
     return get_default_backend()
+
+
+def backend_reads_files(role_name: str) -> bool:
+    """该角色当前的后端能否自行读取文件；不能时提示词须内联产物全文。"""
+    from geni_studio.roles.capabilities import normalize
+
+    try:
+        backend = backend_for_role(role_name)
+    except CapabilityError:
+        return False
+    return "read_files" in normalize(getattr(backend, "capabilities", frozenset()))
+
+
+def role_is_simulated(role_name: str) -> bool:
+    """该角色当前是否由 Stub 后端模拟；模拟运行的结论只用于调试分支。"""
+    try:
+        return isinstance(backend_for_role(role_name), StubBackend)
+    except CapabilityError:
+        return False
 
 
 def invoke_role(
@@ -136,8 +179,10 @@ def invoke_role(
     if isinstance(backend, StubBackend):
         note_cost(f"role={role_name} backend=stub cost=0")
         return f"[stub:{role_name}] {stub_note}"
+    from geni_studio.roles.capabilities import normalize
+
     required = required_capabilities(role_name)
-    have = getattr(backend, "capabilities", frozenset())
+    have = normalize(getattr(backend, "capabilities", frozenset()))
     missing = required - have
     if missing:
         raise CapabilityError(f"{role_name} 需要 {sorted(missing)}，后端未声明")

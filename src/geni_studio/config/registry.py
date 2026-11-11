@@ -11,7 +11,12 @@ from typing import Any
 
 import yaml
 
-from geni_studio.config.context import ConfigError, build_run_context, factory_root
+from geni_studio.config.context import (
+    ConfigError,
+    ConfigNotFound,
+    build_run_context,
+    factory_root,
+)
 
 _PROJECT_ID_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]*$")
 
@@ -95,7 +100,7 @@ def get_scenario_yaml(scenario_key: str, root: Path | None = None) -> str:
     key = scenario_key.strip()
     sf = _scenario_dir(root, key) / "scenario.yaml"
     if not sf.is_file():
-        raise ConfigError(f"未知 scenario_key={key!r}")
+        raise ConfigNotFound(f"未知 scenario_key={key!r}")
     return sf.read_text(encoding="utf-8")
 
 
@@ -134,7 +139,7 @@ def get_project_yaml(project_id: str, root: Path | None = None) -> str:
     pid = project_id.strip()
     pf = _project_dir(root, pid) / "project.yaml"
     if not pf.is_file():
-        raise ConfigError(f"未知 project_id={pid!r}")
+        raise ConfigNotFound(f"未知 project_id={pid!r}")
     return pf.read_text(encoding="utf-8")
 
 
@@ -193,7 +198,7 @@ def delete_project(project_id: str, *, root: Path | None = None) -> None:
     proj_dir = _project_dir(root, pid)
     pf = proj_dir / "project.yaml"
     if not pf.is_file():
-        raise ConfigError(f"未知 project_id={pid!r}")
+        raise ConfigNotFound(f"未知 project_id={pid!r}")
     projects_root = (root / "projects").resolve()
     resolved = proj_dir.resolve()
     try:
@@ -609,6 +614,7 @@ def effective_config_summary(
         "skip_nodes": sorted(ctx.skip_nodes),
         "max_dev_retries": ctx.max_dev_retries,
         "config_plan_summary": ctx.config_plan_summary(),
+        "notices": list(ctx.notices),
     }
 
 
@@ -636,6 +642,7 @@ _SETTINGS_KEYS = (
     "GENI_STUDIO_BACKEND",
     "GENI_STUDIO_CURSOR_MODEL",
     "GENI_STUDIO_CODEX_MODEL",
+    "GENI_STUDIO_CODEX_REASONING_EFFORT",
     "GENI_STUDIO_DEFAULT_MODEL",
     "GENI_STUDIO_TARGET_ROOT",
 )
@@ -654,6 +661,19 @@ def settings_status(root: Path | None = None) -> dict[str, Any]:
             env_vars[k.strip()] = v.strip()
 
     effective_vars = {**env_vars, **os.environ}
+    _env_file_value_keys = {
+        "GENI_STUDIO_PUBLIC_BASE_URL",
+        "GENI_STUDIO_FEISHU_NOTIFY_CHAT_ID",
+        "GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID",
+        "GENI_STUDIO_BACKEND",
+        "GENI_STUDIO_TARGET_ROOT",
+    }
+
+    def _setting_val(key: str) -> str:
+        if key in _env_file_value_keys and key in env_vars:
+            return env_vars[key]
+        return effective_vars.get(key, "")
+
     explicit_backend = effective_vars.get("GENI_STUDIO_BACKEND", "").strip().lower()
     cursor_key = env_vars.get("CURSOR_API_KEY", "").strip() or os.environ.get(
         "CURSOR_API_KEY", ""
@@ -665,11 +685,23 @@ def settings_status(root: Path | None = None) -> dict[str, Any]:
     else:
         effective_backend = "cursor"
 
+    from geni_studio.hitl.feishu_config import resolve_lark_backend
+    from geni_studio.hitl.lark_cli_client import auth_summary
+
+    lark = auth_summary()
+    backend = resolve_lark_backend(root)
+    backend_labels = {
+        "cursor": "Cursor SDK",
+        "codex": "Codex SDK",
+        "stub": "stub",
+    }
+
     keys = []
     for name in _SETTINGS_KEYS:
-        val = effective_vars.get(name, "")
+        val = _setting_val(name)
         if name == "GENI_STUDIO_BACKEND":
-            hint = val or f"未设置（当前生效 {effective_backend}）"
+            eff_label = backend_labels.get(effective_backend, effective_backend)
+            hint = val or f"未设置（当前生效 {eff_label}）"
             keys.append({"name": name, "configured": bool(val), "value_hint": hint})
         elif name == "GENI_STUDIO_DEFAULT_MODEL":
             keys.append({
@@ -683,17 +715,26 @@ def settings_status(root: Path | None = None) -> dict[str, Any]:
                 "configured": bool(val),
                 "value_hint": val or "Auto（default）",
             })
-        elif name == "GENI_STUDIO_CODEX_MODEL":
+        elif name in {"GENI_STUDIO_CODEX_MODEL", "GENI_STUDIO_CODEX_REASONING_EFFORT"}:
             keys.append({
                 "name": name,
                 "configured": bool(val),
                 "value_hint": val or "Codex 默认",
             })
+        elif name == "GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID":
+            entry: dict[str, Any] = {
+                "name": name,
+                "configured": bool(val),
+                "value_hint": val,
+            }
+            if not val.strip() and lark.user_open_id:
+                entry["value_hint"] = lark.user_open_id
+                entry["suggested"] = True
+            keys.append(entry)
         elif name in {
             "GENI_STUDIO_TARGET_ROOT",
             "GENI_STUDIO_PUBLIC_BASE_URL",
             "GENI_STUDIO_FEISHU_NOTIFY_CHAT_ID",
-            "GENI_STUDIO_FEISHU_NOTIFY_OPEN_ID",
         }:
             keys.append({"name": name, "configured": bool(val), "value_hint": val})
         elif name == "LANGSMITH_TRACING":
@@ -711,11 +752,6 @@ def settings_status(root: Path | None = None) -> dict[str, Any]:
         else:
             keys.append({"name": name, "configured": bool(val), "value_hint": "已设置" if val else ""})
 
-    from geni_studio.hitl.feishu_config import resolve_lark_backend
-    from geni_studio.hitl.lark_cli_client import auth_summary
-
-    backend = resolve_lark_backend(root)
-    lark = auth_summary()
     if backend == "lark_cli":
         note = (
             "飞书 HITL 走官方 lark-cli（Bot 凭据在 CLI 配置中，不必写 LARK_APP_SECRET）。"
@@ -746,6 +782,8 @@ def settings_status(root: Path | None = None) -> dict[str, Any]:
             "config_ok": lark.config_ok,
             "bot_ready": lark.bot_ready,
             "hint": lark.hint,
+            "user_open_id": lark.user_open_id,
+            "user_name": lark.user_name,
         },
         "note": note,
     }

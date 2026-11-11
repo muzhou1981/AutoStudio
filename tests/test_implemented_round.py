@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,9 +26,11 @@ def svc() -> GraphRunService:
 def test_project_snapshot_stays_after_the_file_would_change(
     svc: GraphRunService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    project = Path(__file__).resolve().parents[1] / "projects" / "_example" / "project.yaml"
+    original = project.read_text(encoding="utf-8")
     st = svc.start(human_request="项目快照", project_id="_example", run_name="快照轮")
     frozen = str(st.values.get("config_snapshot_project") or "")
-    assert "title: 示例项目" in frozen
+    assert frozen == original
     assert "scenario_key: npu_operator" in str(st.values.get("config_snapshot_scenario") or "")
     monkeypatch.setattr(
         "geni_studio.config.registry.get_project_yaml",
@@ -38,7 +41,7 @@ def test_project_snapshot_stays_after_the_file_would_change(
     assert "后来改过" not in str(again.values.get("config_snapshot_project"))
 
 
-def test_run_list_filters_by_project_and_reports_retry_limit(svc: GraphRunService) -> None:
+def test_run_list_filters_by_project_and_reports_retry_limit(svc: GraphRunService, example_retry_limit) -> None:
     st = svc.start(human_request="列表项目", project_id="_example", run_name="项目列表")
     matched = svc.list_runs(project_id="_example")
     assert any(row["thread_id"] == st.thread_id and row["run_name"] == "项目列表" for row in matched)
@@ -46,7 +49,7 @@ def test_run_list_filters_by_project_and_reports_retry_limit(svc: GraphRunServic
     other = svc.list_runs(project_id="helloworld")
     assert all(row["thread_id"] != st.thread_id for row in other)
     data = svc.status_dict(st.thread_id)
-    assert data["limits"]["max_dev_retries"] == 5
+    assert data["limits"]["max_dev_retries"] == example_retry_limit
     assert data["rail"]["current"] == "gate_requirement_confirm"
 
 
@@ -84,14 +87,15 @@ def test_gate_timeout_waits_then_records_and_approval_still_advances(
 
 
 def test_console_markup_has_list_inspect_and_resize_handles() -> None:
-    text = TestClient(app).get("/").text
+    client = TestClient(app)
+    text = client.get("/").text + client.get("/static/hitl.js").text
     assert 'id="runPhaseFilter"' in text
     assert ">Run列表</span>" in text
     assert 'value="all"' in text
     assert "runListSeq" in text
     assert "conversationSection" in text
-    assert "展开全文" in text
-    assert 'card.classList.add("is-open")' in text
+    assert "function artifactCard(" not in text
+    assert 'textContent = "产物"' not in text
     assert "renderMarkdown" in text
     assert 'id="swimRail"' in text
     assert ">运行状态</p>" in text
@@ -180,7 +184,8 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert 'label.textContent = title;' in text
     assert 'button.textContent = "增加";' in text
     assert '"后端没有列出 " + title + "。"' in text
-    assert ">保存草稿</wa-button>" in text
+    assert ">保存 Run 配置</wa-button>" in text
+    assert ">保存草稿</wa-button>" not in text
     todo_at = text.index('id="region-todo"')
     inspect_run_at = text.index("inspect-body-run")
     assert inspect_run_at < todo_at
@@ -206,7 +211,8 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
 
 
 def test_run_prompt_has_no_example_placeholder() -> None:
-    text = TestClient(app).get("/").text
+    client = TestClient(app)
+    text = client.get("/").text + client.get("/static/hitl.js").text
     start = text.index('id="req"')
     tag = text[start:text.index(">", start)]
     assert 'label="描述本轮交付目标"' in tag
@@ -217,38 +223,54 @@ def test_run_prompt_has_no_example_placeholder() -> None:
     assert 'placeholder="补充范围说明或驳回原因…"' in text
 
 
-def test_run_role_model_hint_stays_empty_unless_stub_or_detail() -> None:
+def test_role_model_settings_live_in_the_inspect_panel() -> None:
     page = TestClient(app).get("/").text
-    hint_at = page.index('id="roleModelHint"')
-    open_gt = page.index(">", hint_at) + 1
-    hint_tag = page[page.rindex("<", 0, hint_at) : open_gt]
-    hint_inner = page[open_gt : page.index("</p>", open_gt)]
-    assert "hidden" in hint_tag
-    assert hint_inner.strip() == ""
-    assert "留空表示沿用配置里的默认模型" not in page
-    assert "这一轮的选择不影响其它 Run" not in page
-    assert "启动前可改；运行中随当前节点只读" not in page
+    script = TestClient(app).get("/static/hitl.js").text
     config = TestClient(app).get("/static/config.js").text
-    assert "留空表示沿用配置里的默认模型" not in config
-    assert "这一轮的选择不影响其它 Run" not in config
-    assert 'hint.textContent = "";' in config
-    assert "hint.hidden = true;" in config
-    assert "当前后端为 stub，不调用外部模型" in config
-    assert 'hint.textContent = detail;' in config
-    assert config.count("hint.hidden = false;") >= 2
+    assert 'id="roleModelHint"' not in page
+    assert 'id="roleModelList"' not in page
+    assert "角色模型与推理强度</p>" not in page
+    assert "roleGroup.appendChild(roleModelSection(cell, data, notes));" in script
+    assert "stepGroup.append(...nodeToolColumns(cell, data, notes));" in script
+    assert 'settingsGroup("角色属性", "settings-group-role"' in script
+    assert 'settingsGroup("步骤属性", "settings-group-step"' in script
+    assert "个节点共用" not in script
+    assert "remove.innerHTML = TRASH_ICON;" in script
+    assert "del.innerHTML = TRASH_ICON;" in script
+    assert "nodeToolsSection" not in script
+    settings_at = script.index("if (isActivityCell(cell)) inspectParts.push(inspectSettings(cell, data));")
+    assert settings_at < script.index("inspectParts.push(conversationSection(cell.id, session));")
+    assert "runRoleDefaultsError = \"读不到角色的模型设置：\"" in script
+    assert "Skill 和 MCP 不能再改" not in script
+    assert "以上设置不能再改" not in script
+    assert "模型与推理强度不能再改" not in script
+    css = TestClient(app).get("/static/hitl.css").text
+    assert ".role-model-block { display: contents; }" in css
+    assert "@container (max-width: 44rem)" in css
+    assert 'model.label = "模型"' in script
+    assert 'effort.label = "推理强度"' in script
+    assert 'note(runModelDetails[s.backend] || "读不到模型列表。")' in script
+    assert "window.__backendModelsDetail" in config
+    assert "留空表示沿用配置里的默认模型" not in page + config
+    assert "这一轮的选择不影响其它 Run" not in page + config
 
 
 def test_hitl_reading_fills_parent_width() -> None:
-    text = TestClient(app).get("/").text
+    client = TestClient(app)
+    text = client.get("/").text + client.get("/static/hitl.js").text
     todo = text[text.index('id="region-todo"'):text.index('id="gateIdleHint"')]
     assert 'id="hitlReading" class="hitl-reading"' in todo
     assert 'id="hitlChoiceActions"' in todo
-    assert 'href="/static/hitl.css?v=20261113-skill-pick-down"' in text
+    stylesheet = re.search(r'href="(/static/hitl\.css\?v=[^\"]+)"', text)
+    assert stylesheet is not None
     assert "skillPickMenu" in text
     assert "skill-pick-shell" in text
     assert "closeSkillPick" in text
-    assert 'key !== "skills"' in text
-    css = TestClient(app).get("/static/hitl.css?v=20261113-skill-pick-down").text
+    assert "toolAddSelect" not in text
+    assert "if (add) list.lastElementChild.appendChild(add);" in text
+    assert 's.problem || locked || s.auto ? ""' in text
+    assert "Auto 模型由 Cursor 自动选择，不能指定推理强度。\"" not in text
+    css = TestClient(app).get(stylesheet.group(1)).text
     assert "wa-color-surface-raised" in css
     assert "wa-color-neutral-fill-normal" in css
     assert "inspect-run-scroll .status-empty" in css
@@ -339,3 +361,13 @@ def test_paused_round_resumes_on_a_new_graph(tmp_path, monkeypatch: pytest.Monke
     assert resumed.awaiting_human is not None
     assert resumed.awaiting_human.gate_id == "gate_requirement_confirm"
     assert resumed.values.get("requirement_spec")
+
+
+def test_inspect_sections_have_no_redundant_headings() -> None:
+    client = TestClient(app)
+    script = client.get("/static/hitl.js").text
+    assert 'heading.textContent = "会话"' not in script
+    assert 'heading.textContent = "Skill 与 MCP"' not in script
+    assert 'section.setAttribute("aria-label", "会话")' in script
+    assert 'strip.setAttribute("aria-label", "本步骤设置")' in script
+    assert 'heading.textContent = "本步骤设置"' not in script

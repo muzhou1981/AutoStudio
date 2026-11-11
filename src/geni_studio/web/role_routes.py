@@ -16,6 +16,7 @@ from geni_studio.roles.admin import (
     list_roles,
     save_role,
 )
+from geni_studio.web.errors import http_error
 
 router = APIRouter(prefix="/api/roles", tags=["roles"])
 
@@ -35,8 +36,7 @@ class SaveRoleBody(BaseModel):
 
 
 def _http(exc: ConfigError) -> HTTPException:
-    missing = str(exc).startswith("角色不存在")
-    return HTTPException(status_code=404 if missing else 400, detail=str(exc))
+    return http_error(exc)
 
 
 @router.get("")
