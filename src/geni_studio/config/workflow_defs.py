@@ -284,16 +284,6 @@ def save_workflow(workflow_id: str, payload: dict[str, Any], root: Path | None =
     return {"workflow": data, "yaml": _dump(data)}
 
 
-def save_workflow_yaml(workflow_id: str, text: str, root: Path | None = None) -> dict[str, Any]:
-    try:
-        loaded = yaml.safe_load(text) if text.strip() else {}
-    except yaml.YAMLError as exc:
-        raise ConfigError("原文不是合法的 YAML。") from exc
-    if not isinstance(loaded, dict):
-        raise ConfigError("原文的根节点须为 mapping。")
-    return save_workflow(workflow_id, loaded, root=root)
-
-
 def delete_workflow(workflow_id: str, root: Path | None = None) -> None:
     """删除 workflows/<id>/。内置流程不能删。不检查是否仍被其他流程当作子图引用。"""
     path = _workflow_path(workflow_id, root, must_exist=True)

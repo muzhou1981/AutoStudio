@@ -528,8 +528,8 @@ def _activity_update(
             origin = node["id"]
         else:
             target = str(node.get("graph_return") or node["returns_to"])
-            if not parallel:
-                update["return_feedback"] = f"「{node.get('label') or node['name']}」未通过：\n{body}"
+        if not parallel:
+            update["return_feedback"] = f"「{node.get('label') or node['name']}」未通过：\n{body}"
     if parallel:
         update["return_counts"] = {node["id"]: counts[node["id"]]} if target else {}
         if target:
@@ -841,6 +841,21 @@ def _walk_steps(nodes: list[dict[str, Any]]):
 
 def _iter_steps(nodes: list[dict[str, Any]]):
     yield from _walk_steps(nodes)
+
+
+def redo_target(workflow: dict[str, Any], node_id: str) -> str:
+    """回退次数用完后人选择继续时重做的起点：该节点的回退目标。没有回退时返回空串。"""
+    nodes = workflow.get("nodes") or []
+    executable = [node for node in nodes if node["kind"] not in {"start", "end"}]
+    found = next((step for step in _iter_steps(executable) if step["id"] == node_id), None)
+    returns = str((found or {}).get("returns_to") or "")
+    if not returns:
+        return ""
+    target = _graph_target(returns, nodes, executable)
+    if target is END:
+        return ""
+    matched = next((node for node in executable if node["id"] == target), None)
+    return _entry(matched) if matched else str(target)
 
 
 def _entry(node: dict[str, Any]) -> str:

@@ -136,6 +136,34 @@ def test_reviewer_fail_verdict_returns_to_developer_with_report(real_backend, tm
     assert not st.values.get("return_feedback")
 
 
+
+def test_escalation_continue_reruns_developer(real_backend) -> None:
+    """评审连续失败升级后选择继续，重新执行开发，而不是从开发之后的变更接着走。"""
+
+    def reply(role: str, prompt: str) -> str:
+        if role == "code_reviewer":
+            return "仍有问题\n" + _verdict("fail")
+        return f"{role} 产出"
+
+    backend = real_backend(reply)
+    svc = GraphRunService(compile_graph(MemorySaver()))
+    st = svc.start(human_request="评审一直不过", scenario_key="npu_operator")
+    svc.submit_hitl(st.thread_id, gate_decision="approved", channel="test")
+    st = svc.submit_hitl(st.thread_id, gate_decision="approved", channel="test")
+    assert st.awaiting_human is not None and st.awaiting_human.kind == "escalation"
+    developed = sum(1 for role, _ in backend.prompts if role == "developer")
+    reviewed = sum(1 for role, _ in backend.prompts if role == "code_reviewer")
+    assert developed == reviewed == st.values["dev_retry_count"]
+
+    st = svc.submit_hitl(st.thread_id, escalation_choice="continue", channel="test")
+    roles = [role for role, _ in backend.prompts]
+    assert roles.count("developer") == developed + 1
+    assert roles.count("code_reviewer") == reviewed + 1
+    assert roles[-2:] == ["developer", "code_reviewer"]
+    rerun = [prompt for role, prompt in backend.prompts if role == "developer"][-1]
+    assert "仍有问题" in rerun
+    assert st.awaiting_human is not None and st.awaiting_human.kind == "escalation"
+
 def test_developer_change_request_returns_to_requirement_gate(real_backend) -> None:
     def reply(role: str, prompt: str) -> str:
         if role == "developer":

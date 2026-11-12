@@ -282,7 +282,7 @@ def test_config_page_and_static():
     assert 'id="projectRaw"' not in page.text
     assert 'id="projectYaml"' not in page.text
     assert 'id="btnSaveRaw"' not in page.text
-    assert "原文 workflow.yaml" in page.text
+    assert "原文 workflow.yaml" not in page.text
     assert "原文 JSON" in page.text
     assert client.get("/static/shared.css").status_code == 200
 
@@ -446,7 +446,7 @@ def test_project_page_workspace_follows_description():
     assert 'aria-label="选择工作区目录"' in page
     assert 'id="btnClearWorkspace"' in page
     assert "待开发项目的 git 目录，可空" in page
-    assert "原文 workflow.yaml" in page
+    assert "原文 workflow.yaml" not in page
     css = client.get("/static/hitl.css").text
     row = css.split(".workspace-pick-row {", 1)[1].split("}", 1)[0]
     assert "align-items: flex-end" in row

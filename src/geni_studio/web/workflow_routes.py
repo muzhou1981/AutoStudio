@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -19,7 +20,6 @@ from geni_studio.config.workflow_defs import (
     list_workflows,
     save_as_subgraph,
     save_workflow,
-    save_workflow_yaml,
     workflow_activity_roles,
 )
 from geni_studio.web.errors import http_error
@@ -37,11 +37,10 @@ class SaveWorkflowBody(BaseModel):
     title: str = ""
     description: str = ""
     subgraph: bool = False
+    workspace: str = ""
+    rail: str = ""
+    profile: dict[str, Any] | None = None
     nodes: list[dict[str, Any]] = Field(default_factory=list)
-
-
-class SaveWorkflowYamlBody(BaseModel):
-    yaml: str = ""
 
 
 class ImportWorkflowBody(BaseModel):
@@ -118,9 +117,10 @@ def api_copy_workflow(workflow_id: str, body: CopyWorkflowBody) -> dict:
         raise _http(exc) from exc
     title = body.title.strip() or ("副本 · " + str(source.get("title") or workflow_id))
     new_id = allocate_identifier(
-        title,
+        re.sub(r"-copy(-\d+)?$", "", workflow_id) + "-copy",
         prefix="workflow",
         taken=[item["workflow_id"] for item in list_workflows()],
+        translate=lambda _text: "",
     )
     try:
         return copy_workflow(workflow_id, new_id, title)
@@ -148,14 +148,6 @@ def api_get_workflow(workflow_id: str) -> dict:
 def api_save_workflow(workflow_id: str, body: SaveWorkflowBody) -> dict:
     try:
         return save_workflow(workflow_id, body.model_dump())
-    except ConfigError as exc:
-        raise _http(exc) from exc
-
-
-@router.put("/{workflow_id}/raw")
-def api_save_workflow_yaml(workflow_id: str, body: SaveWorkflowYamlBody) -> dict:
-    try:
-        return save_workflow_yaml(workflow_id, body.yaml)
     except ConfigError as exc:
         raise _http(exc) from exc
 

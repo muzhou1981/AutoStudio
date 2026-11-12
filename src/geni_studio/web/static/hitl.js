@@ -1619,15 +1619,16 @@
       row.after(panel);
     }
 
-    /** 列表次行的更新时间：当天只写时分，其余写月日与时分。 */
-    function runWhen(seconds) {
+    /** 更新时间：当天只写时分，其余写月日与时分；short 时其余只写月日，供列表项左侧使用。 */
+    function runWhen(seconds, short = false) {
       const value = Number(seconds);
       if (!value) return "";
       const at = new Date(value * 1000);
       const pad = (n) => String(n).padStart(2, "0");
       const time = pad(at.getHours()) + ":" + pad(at.getMinutes());
       if (at.toDateString() === new Date().toDateString()) return time;
-      return pad(at.getMonth() + 1) + "-" + pad(at.getDate()) + " " + time;
+      const day = pad(at.getMonth() + 1) + "-" + pad(at.getDate());
+      return short ? day : day + " " + time;
     }
 
     const RUN_PHASE_FILTERS = new Set([
@@ -1667,17 +1668,14 @@
           const phaseLabel = PHASE_LABELS[item.phase] || item.phase;
           const text = document.createElement("span");
           text.className = "run-text";
+          const when = runWhen(item.updated_at);
+          const stamp = document.createElement("span");
+          stamp.className = "run-when";
+          stamp.textContent = runWhen(item.updated_at, true);
           const name = document.createElement("span");
           name.className = "run-name";
           name.textContent = label;
-          text.append(name);
-          const when = runWhen(item.updated_at);
-          if (when) {
-            const sub = document.createElement("span");
-            sub.className = "run-when";
-            sub.textContent = when;
-            text.append(sub);
-          }
+          text.append(stamp, name);
           const meta = phaseMark(item.phase);
           const phaseText = document.createElement("span");
           phaseText.className = "run-phase-label";

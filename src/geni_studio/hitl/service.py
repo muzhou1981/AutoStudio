@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from langgraph.graph import START
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command
 
 from geni_studio.backends.cost import (
     begin_cost_log,
@@ -1077,13 +1078,23 @@ class GraphRunService:
             _note_answer(thread_id, st, human_reply, str(choice), channel, actor)
             _note_decision(thread_id, st, human_reply, str(choice), channel, actor)
             if choice == "continue":
-                snap = self._bound(thread_id).get_state(cfg)
+                graph = self._bound(thread_id)
+                snap = graph.get_state(cfg)
                 if not snap.next:
-                    resume_at = str(st.values.get("escalated_from") or "developer")
-                    if resume_at not in self._bound(thread_id).nodes:
-                        resume_at = "developer"
-                    self._bound(thread_id).update_state(cfg, None, as_node=resume_at)
-                    snap = self._bound(thread_id).get_state(cfg)
+                    from geni_studio.workflows.executable import redo_target
+
+                    # as_node 表示该节点刚执行完、走向它的下一步；重做须用 goto 直接指定下一步。
+                    source = next((name for name in ("escalate_dev_retry", "workflow_escalate") if name in graph.nodes), None)
+                    origin = str(st.values.get("escalated_from") or "")
+                    definition = workflow_definition_of(st.values) if origin else None
+                    redo = redo_target(definition, origin) if definition else ""
+                    if redo in graph.nodes:
+                        graph.update_state(cfg, Command(goto=redo), as_node=source)
+                    elif origin in graph.nodes:
+                        graph.update_state(cfg, None, as_node=origin)
+                    elif "developer" in graph.nodes:
+                        graph.update_state(cfg, Command(goto="developer"), as_node=source)
+                    snap = graph.get_state(cfg)
                 # 继续后若停在关卡前，等待人的决定，不直接执行关卡。
                 gates = set(GATE_NODES) | set(snap.values.get("workflow_gates") or [])
                 return not any(node in gates for node in snap.next)

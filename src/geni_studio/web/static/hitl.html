@@ -33,7 +33,7 @@
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css" />
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/utilities.css" />
   <link rel="stylesheet" href="/static/shared.css?v=20261112-run-ux" />
-  <link rel="stylesheet" href="/static/hitl.css?v=20261112-run-ux" />
+  <link rel="stylesheet" href="/static/hitl.css?v=20261112-flow-review1" />
   <script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
 </head>
 <body>
@@ -313,9 +313,22 @@
           <p class="section-title" id="flowHeading">编排</p>
           <input id="flowImport" type="file" accept=".yaml,.yml,text/yaml,text/x-yaml" hidden />
           <div id="flowOpen" hidden>
-            <wa-select id="flowPick" label="选择流程" placeholder="选择流程"></wa-select>
-            <div class="row-actions">
-              <wa-button id="btnCopyFlow" appearance="outlined" variant="neutral">复制</wa-button>
+            <div class="flow-head-row">
+              <wa-select id="flowPick" label="选择流程" placeholder="选择流程"></wa-select>
+              <button type="button" class="role-menu-chip flow-tool-chip" id="btnFlowAdd" aria-haspopup="menu" aria-expanded="false" hidden>
+                <span class="flow-tool-plus" aria-hidden="true">+</span>
+                <span id="btnFlowAddLabel">添加节点</span>
+                <span class="role-chip-caret" aria-hidden="true"></span>
+              </button>
+              <span class="flow-dirty" id="flowDirty" hidden>未保存</span>
+              <wa-button id="btnSaveFlow" variant="brand" hidden>保存</wa-button>
+              <button type="button" class="role-menu-chip flow-tool-chip" id="btnFlowMore" aria-haspopup="menu" aria-expanded="false" hidden>
+                <span>更多</span>
+                <span class="role-chip-caret" aria-hidden="true"></span>
+              </button>
+              <wa-input id="flowNameEdit" label="流程标题" spellcheck="false" hidden></wa-input>
+              <wa-button id="btnNameSave" variant="brand" hidden>保存</wa-button>
+              <wa-button id="btnNameCancel" appearance="outlined" variant="neutral" hidden>取消</wa-button>
             </div>
             <p class="hint-block" id="flowHint">先选择要编辑的流程。</p>
             <p class="hint-block" id="flowEmpty" hidden>还没有流程。</p>
@@ -323,75 +336,60 @@
               <wa-button id="btnFlowGoNew" appearance="outlined" variant="neutral">新建</wa-button>
             </div>
           </div>
+          <wa-callout id="flowError" variant="danger" hidden></wa-callout>
+          <p class="save-note" id="flowSaved" hidden aria-live="polite"></p>
           <div id="flowEditor" hidden>
-            <div class="field-row flow-meta">
+            <div class="flow-head-row" id="flowCreateRow">
               <wa-input id="flowTitle" label="标题"></wa-input>
-            </div>
-            <div class="row-actions" id="flowCreateRow">
               <wa-button id="btnCreateFlow" variant="brand" hidden>创建</wa-button>
             </div>
             <div id="flowWork" hidden>
+            <div class="flow-inline-form" id="flowSubgraphForm" hidden>
+              <wa-input id="flowSubgraphTitle" label="子图标题" spellcheck="false"></wa-input>
+              <wa-button id="btnSaveSubgraph" variant="brand">存为子图</wa-button>
+              <wa-button id="btnSubgraphCancel" appearance="outlined" variant="neutral">取消</wa-button>
+            </div>
+            <div class="stop-confirm" id="flowDeleteConfirm" role="alertdialog" aria-labelledby="flowDeleteText" hidden>
+              <p id="flowDeleteText"></p>
+              <wa-button id="btnDeleteFlow" variant="danger">删除流程</wa-button>
+              <wa-button id="btnDeleteCancel" appearance="outlined" variant="neutral">取消</wa-button>
+            </div>
             <div class="flow-stage">
-            <div class="flow-scroll" id="flowScroll">
-              <div id="flowBoard" class="flow-board"></div>
+            <div class="flow-viewport" id="flowViewport">
+              <div class="flow-scroll" id="flowScroll">
+                <div id="flowBoard" class="flow-board"></div>
+              </div>
             </div>
             <ol class="flow-column" id="flowColumn"></ol>
-            <wa-details class="raw" id="flowRaw" summary="原文 workflow.yaml" hidden>
-              <wa-textarea id="flowYaml" label="整份 YAML" rows="12" spellcheck="false"></wa-textarea>
-              <div class="row-actions">
-                <wa-button id="btnSaveFlowRaw" appearance="outlined" variant="neutral">用原文覆盖</wa-button>
-              </div>
-            </wa-details>
-            </div>
-            <div class="flow-composer">
-            <div class="flow-add">
-              <wa-select id="flowRole" label="角色"></wa-select>
-              <wa-input id="flowActivityName" label="活动名" spellcheck="false"></wa-input>
-              <wa-button id="btnAddActivity" appearance="outlined" variant="neutral">添加活动</wa-button>
-              <wa-input id="flowGateName" label="决策点" spellcheck="false"></wa-input>
-              <wa-button id="btnAddGate" appearance="outlined" variant="neutral">添加关卡</wa-button>
-              <wa-input id="flowParallelName" label="并行" spellcheck="false"></wa-input>
-              <wa-button id="btnAddParallel" appearance="outlined" variant="neutral">添加并行</wa-button>
-            </div>
-            <div class="flow-add" id="flowSubgraphBar">
-              <wa-input id="flowSubgraphTitle" label="子图标题" spellcheck="false"></wa-input>
-              <wa-button id="btnSaveSubgraph" appearance="outlined" variant="neutral">存为子图</wa-button>
-              <wa-select id="flowInsertSubgraph" label="插入子图"></wa-select>
-              <wa-button id="btnInsertSubgraph" appearance="outlined" variant="neutral">插入</wa-button>
-            </div>
-            <div class="row-actions" id="flowSaveRow">
-              <wa-button id="btnCopyLoaded" appearance="outlined" variant="neutral" hidden>复制</wa-button>
-              <wa-button id="btnSaveFlow" appearance="outlined" variant="neutral" hidden>保存</wa-button>
-              <wa-button id="btnDeleteFlow" appearance="outlined" variant="danger" hidden>删除</wa-button>
-            </div>
+            <ul class="flow-legend" aria-label="连线图例">
+              <li><span class="flow-legend-line" aria-hidden="true"></span>顺序</li>
+              <li><span class="flow-legend-line is-return" aria-hidden="true"></span>回退：未通过时回到更早的节点</li>
+              <li><span class="flow-legend-line is-reject" aria-hidden="true"></span>不通过：决策点不批准时的去向</li>
+            </ul>
             </div>
             </div>
           </div>
-          <wa-callout id="flowError" variant="danger" hidden></wa-callout>
-          <p class="save-note" id="flowSaved" hidden aria-live="polite"></p>
         </main>
-        <aside class="workspace-inspect" aria-label="流程说明">
+        <aside class="workspace-inspect" aria-label="流程设置">
           <div class="inspect-resize" role="separator" aria-orientation="vertical" aria-label="拖动调整检视栏宽度" tabindex="0"></div>
-          <div class="inspect-head">
-            <h2>流程说明</h2>
+          <div class="inspect-head flow-inspect-head">
+            <h2 id="flowInspectTitle">流程说明</h2>
+            <span class="flow-kind-tag" id="flowInspectKind" hidden></span>
           </div>
           <div class="inspect-body">
-          <wa-textarea id="flowDescription" label="说明" rows="6" hidden></wa-textarea>
           <div id="flowInspectMeta">
+            <wa-textarea id="flowDescription" label="说明" rows="6" hidden></wa-textarea>
             <p class="hint-block" id="flowIdHint">标识按标题自动生成。中文标题会译成英文。创建后不再改变。</p>
             <p class="hint-block" id="flowIdLine" hidden></p>
-            <p class="hint-block" id="flowMetaHint">点空白处回到这里。点一个节点后，在右侧修改它。</p>
+            <p class="hint-block" id="flowMetaHint">点空白处回到这里。点一个节点或一条虚线，在右侧修改它。</p>
           </div>
           <div id="flowInspectNode" hidden>
-            <p class="section-title" id="flowNodeHeading">节点</p>
             <wa-input id="flowNodeName" label="名称" spellcheck="false"></wa-input>
-            <wa-select id="flowNodeRole" label="角色"></wa-select>
-            <wa-select id="flowNodeReturn" label="回退到"></wa-select>
-            <wa-input id="flowNodeLoops" label="最大循环次数" type="number" min="1" step="1" hint="到达这个次数后，停下来等人处理。" hidden></wa-input>
-            <wa-select id="flowNodeDecision" label="决定类型">
-              <wa-option value="approve">批准或驳回</wa-option>
-            </wa-select>
-            <wa-select id="flowNodeReject" label="不通过时前往" hidden></wa-select>
+            <div id="flowNodeSettings">
+              <p class="section-title">设置</p>
+              <div class="role-menu-shell" id="flowNodeMenuShell"></div>
+              <p class="hint-block" id="flowNodeRouteHint" hidden></p>
+            </div>
             <div id="flowSubgraphBox" hidden>
               <p class="hint-block" id="flowSubgraphNote" hidden></p>
               <p class="section-title">子图内容</p>
@@ -402,25 +400,41 @@
             </div>
             <div id="flowParallelBox" hidden></div>
             <div id="flowContract" hidden>
-              <p class="section-title">输入</p>
-              <p class="hint-block" id="flowInputEmpty" hidden>这个活动不读取已有产物。</p>
-              <div id="flowInputList" class="io-list"></div>
-              <div class="row-actions">
-                <wa-button id="btnAddInput" appearance="outlined" variant="neutral">添加输入</wa-button>
-              </div>
-              <p class="section-title">输出</p>
-              <p class="hint-block" id="flowOutputEmpty" hidden>这个活动还没有输出。</p>
-              <div id="flowOutputList" class="io-list"></div>
-              <div class="row-actions">
-                <wa-button id="btnAddOutput" appearance="outlined" variant="neutral">添加输出</wa-button>
-              </div>
+              <wa-details class="flow-io-group" id="flowInputGroup" open>
+                <span slot="summary" class="flow-io-summary"><span>输入</span><span class="flow-io-count" id="flowInputCount"></span></span>
+                <p class="hint-block" id="flowInputEmpty" hidden>这个活动不读取已有产物。</p>
+                <div id="flowInputList" class="io-list"></div>
+                <div class="row-actions">
+                  <wa-button id="btnAddInput" size="s" appearance="outlined" variant="neutral">添加输入</wa-button>
+                </div>
+              </wa-details>
+              <wa-details class="flow-io-group" id="flowOutputGroup" open>
+                <span slot="summary" class="flow-io-summary"><span>输出</span><span class="flow-io-count" id="flowOutputCount"></span></span>
+                <p class="hint-block" id="flowOutputEmpty" hidden>这个活动还没有输出。</p>
+                <div id="flowOutputList" class="io-list"></div>
+                <div class="row-actions">
+                  <wa-button id="btnAddOutput" size="s" appearance="outlined" variant="neutral">添加输出</wa-button>
+                </div>
+              </wa-details>
             </div>
             <p class="hint-block" id="flowNodeNeighbors"></p>
             <p class="hint-block" id="flowNodeFixed" hidden>启动和结束不能改名，也不能删除，也不能跳过。</p>
-            <div class="row-actions">
-              <wa-button id="btnFlowUp" appearance="outlined" variant="neutral">上移</wa-button>
-              <wa-button id="btnFlowDown" appearance="outlined" variant="neutral">下移</wa-button>
-              <wa-button id="btnFlowDelete" appearance="outlined" variant="neutral">删除</wa-button>
+            <div class="row-actions flow-node-actions" id="flowNodeActions">
+              <wa-button id="btnFlowUp" size="s" appearance="outlined" variant="neutral">前移</wa-button>
+              <wa-button id="btnFlowDown" size="s" appearance="outlined" variant="neutral">后移</wa-button>
+              <span class="flow-toolbar-gap"></span>
+              <wa-button id="btnFlowDelete" size="s" appearance="outlined" variant="danger">删除节点</wa-button>
+            </div>
+          </div>
+          <div id="flowInspectEdge" hidden>
+            <p class="hint-block" id="flowEdgeText"></p>
+            <p class="section-title">设置</p>
+            <div class="role-menu-shell" id="flowEdgeMenuShell"></div>
+            <p class="hint-block" id="flowEdgeDragHint" hidden>也可以在画布上拖动箭头端的圆点，把它放到另一个节点上。</p>
+            <div class="row-actions flow-node-actions">
+              <wa-button id="btnEdgeSource" size="s" appearance="outlined" variant="neutral">选中起点节点</wa-button>
+              <span class="flow-toolbar-gap"></span>
+              <wa-button id="btnEdgeDelete" size="s" appearance="outlined" variant="danger">删除这条连线</wa-button>
             </div>
           </div>
           </div>
@@ -811,8 +825,9 @@
           <article class="help-copy" data-help-article="workflow" hidden>
             <ul>
               <li>可以新建、编辑或导入一份流程。新建只写标题，标识按标题生成。编辑时选中一份就载入，选择框保持可用。导入读取 workflow.yaml，内置标记不会带入。</li>
-              <li>载入非内置流程后，可以在复制和保存旁边删除。删除前要确认。内置流程不能删除。</li>
+              <li>载入非内置流程后，删除在选择框右侧的「更多」里，删除前要确认。内置流程只能查看和复制，不能删除。</li>
               <li>宽屏用泳道排列活动和决策点。右栏左缘可以拖动，改变右栏宽度。</li>
+              <li>「添加节点」或连线中点的「+」可以插入活动、决策点、并行或子图。回退和不通过画成虚线，点虚线可以改去向或删除。</li>
               <li>活动要写出输入和输出。每项输出要有模板。</li>
               <li>模板是服务进程能读取的本地文件，或一个 http、https 链接。</li>
               <li>决策点目前的决定类型是批准或驳回。</li>
@@ -880,7 +895,7 @@
   </div>
 
   <script src="/static/api-utils.js?v=20261110-web-ui"></script>
-  <script src="/static/hitl.js?v=20261112-run-flow-hint"></script>
+  <script src="/static/hitl.js?v=20261112-run-list2"></script>
   <div id="filePicker" class="dir-picker" hidden>
     <div class="dir-picker-card" role="dialog" aria-modal="true" aria-labelledby="filePickerTitle">
       <p class="section-title" id="filePickerTitle">选择模板文件</p>
@@ -920,7 +935,7 @@
     </div>
   </div>
   <script src="/static/config.js?v=20261112-project-form"></script>
-  <script src="/static/workflow.js?v=20261110-delete"></script>
+  <script src="/static/workflow.js?v=20261112-flow-review1"></script>
   <script src="/static/role.js?v=20261112-role-pick-top"></script>
 </body>
 </html>

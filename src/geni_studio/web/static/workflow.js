@@ -1,18 +1,41 @@
 (function () {
   const $ = (id) => document.getElementById(id);
-  const STEP = 118;
-  const NODE_W = 92;
-  const LANE_H = 84;
-  const ORIGIN_X = 84;
+  const NODE_GAP = 56;
+  const MAX_GAP = 140;
+  const BOARD_END = 40;
+  const NODE_W = 104;
+  const LANE_H = 88;
+  const ORIGIN_X = 100;
+  const TRACK_TOP = 22;
+  const TRACK_GAP = 22;
+  const LOOP_OUT = 8;
+  const LOOP_IN = 24;
+  const LOOP_DY = 11;
+  /** 编辑器有控件的节点字段；其余字段（handler、routes、when、instruction 等）原样带回保存。 */
+  const MANAGED_KEYS = new Set([
+    "id", "kind", "name", "role", "returns_to", "decision", "max_loops", "reject_to",
+    "commits_on_branch", "subgraph_id", "branches", "inputs", "outputs", "contractTouched",
+  ]);
+  const LOOP_CHOICES = [1, 2, 3, 4, 5, 10];
+  const DEFAULT_LOOPS = 3;
+  const KIND_LABELS = {
+    start: "启动", end: "结束", activity: "活动", gate: "决策点", parallel: "并行", subgraph: "子图", system: "系统节点",
+  };
+  const DECISIONS = [{ id: "approve", label: "批准或驳回" }];
 
   let mode = "new";
   let loadedId = "";
   let ignorePick = false;
   let selectedId = "";
+  let selectedEdge = null;
+  let boardGap = NODE_GAP;
+  let fittedWidth = -1;
   let roles = [];
   let workflows = [];
   let graph = blankGraph("", "");
   let snapshot = "";
+  let savedGraph = null;
+  let nameEdit = "";
   let yamlText = "";
 
   function blankGraph(id, title) {
@@ -98,6 +121,9 @@
       item.outputs = normalizeOutputs(node.outputs || []);
       item.contractTouched = true;
     }
+    Object.keys(node).forEach((key) => {
+      if (!MANAGED_KEYS.has(key) && !(key in item) && node[key] !== undefined && node[key] !== null) item[key] = node[key];
+    });
     return item;
   }
 
@@ -148,6 +174,17 @@
     $("flowOutputList").replaceChildren();
     inputs.forEach((name, index) => $("flowInputList").appendChild(inputRow(node, name, index)));
     outputs.forEach((item, index) => $("flowOutputList").appendChild(outputRow(node, item, index)));
+    refreshContractCounts(node);
+  }
+
+  function refreshContractCounts(node) {
+    const inputs = viewInputs(node);
+    const outputs = viewOutputs(node);
+    $("flowInputCount").textContent = inputs.length ? inputs.length + " 项" : "无";
+    const problems = outputs.filter((item, index) => outputProblem(node, index)).length;
+    const count = $("flowOutputCount");
+    count.textContent = (outputs.length ? outputs.length + " 项" : "无") + (problems ? " · " + problems + " 项待补" : "");
+    count.classList.toggle("is-warn", problems > 0 || !outputs.length);
   }
 
   function inputChoices(node, current) {
@@ -301,6 +338,7 @@
       note.textContent = kind === "input" ? inputProblem(node, Number(index)) : outputProblem(node, Number(index));
       note.hidden = !note.textContent;
     });
+    refreshContractCounts(node);
   }
 
   async function checkTemplate(node, index) {
@@ -375,6 +413,7 @@
 
   function markClean() {
     snapshot = snapshotNow();
+    refreshDirty();
   }
 
   function isDirty() {
@@ -420,8 +459,13 @@
     const index = new Map(graph.nodes.map((node, pos) => [node.id, pos]));
     graph.nodes.forEach((node, pos) => {
       const target = index.get(node.returns_to);
-      if (node.returns_to && (target === undefined || target >= pos)) node.returns_to = "";
+      if (node.returns_to && (target === undefined || target >= pos)) {
+        node.returns_to = "";
+        delete node.max_loops;
+      }
+      if (node.reject_to && !index.has(node.reject_to)) delete node.reject_to;
     });
+    if (selectedEdge && !edgeExists(selectedEdge)) selectedEdge = null;
   }
 
   function setGraph(data, yaml) {
@@ -432,12 +476,19 @@
       builtin: Boolean(data.builtin),
       subgraph: Boolean(data.subgraph),
       workspace: data.workspace || "",
+      profile: data.profile || null,
+      rail: data.rail || "",
       nodes: (data.nodes || []).map((node) => normalizeNode(node)),
     };
     yamlText = yaml || "";
-    $("flowYaml").value = yamlText;
+    savedGraph = JSON.parse(JSON.stringify(graph));
+    selectedEdge = null;
     $("flowTitle").value = graph.title;
     $("flowDescription").value = graph.description;
+  }
+
+  function locked() {
+    return Boolean(graph.builtin);
   }
 
   function showPieces() {
@@ -446,32 +497,31 @@
     if ($("flowPick")) $("flowPick").disabled = false;
     $("flowEditor").hidden = !editing;
     const created = mode === "open" && Boolean(loadedId);
-    const builtin = Boolean(graph.builtin);
+    const builtin = locked();
     $("flowCreateRow").hidden = mode !== "new";
     $("flowWork").hidden = !created;
     $("btnCreateFlow").hidden = mode !== "new";
-    $("btnSaveFlow").hidden = !created || builtin;
-    if ($("btnCopyLoaded")) $("btnCopyLoaded").hidden = !created;
-    if ($("btnDeleteFlow")) $("btnDeleteFlow").hidden = !created || builtin;
+    $("flowSubgraphForm").hidden = true;
+    $("flowDeleteConfirm").hidden = true;
+    closeNameEdit();
     $("flowTitle").disabled = builtin;
     $("flowDescription").hidden = !editing;
     $("flowDescription").disabled = builtin;
-    ["btnAddActivity", "btnAddGate", "btnAddParallel", "btnSaveSubgraph", "btnInsertSubgraph", "btnFlowUp", "btnFlowDown", "btnFlowDelete", "btnSaveFlowRaw"].forEach((id) => {
-      if ($(id)) $(id).disabled = builtin;
-    });
-    if ($("flowSubgraphBar")) $("flowSubgraphBar").hidden = Boolean(graph.subgraph);
-    if ($("flowInsertSubgraph")) $("flowInsertSubgraph").disabled = builtin || Boolean(graph.subgraph);
-    if ($("btnInsertSubgraph")) $("btnInsertSubgraph").disabled = builtin || Boolean(graph.subgraph);
-    if ($("flowYaml")) $("flowYaml").readonly = builtin;
-    if ($("flowMetaHint") && builtin) $("flowMetaHint").textContent = "这是内置流程。要改，先复制一份。";
-    else if ($("flowMetaHint") && !builtin) $("flowMetaHint").textContent = "点空白处回到这里。点一个节点后，在右侧修改它。";
-    $("flowRaw").hidden = mode !== "open" || !loadedId;
+    $("flowMetaHint").hidden = mode === "new";
+    $("flowMetaHint").textContent = builtin
+      ? "这是内置流程，只能查看。要修改，从「更多」复制为新流程。点节点或虚线可以查看设置。"
+      : "点空白处回到这里。点一个节点或一条虚线，在右侧修改它。";
     if ($("flowIdHint")) $("flowIdHint").hidden = mode !== "new";
     $("flowIdLine").hidden = mode !== "open" || !loadedId;
     if (loadedId) $("flowIdLine").textContent = "流程标识：" + loadedId;
     highlight(mode);
     renderInspect();
     renderBoard();
+  }
+
+  function refreshDirty() {
+    const show = mode === "open" && Boolean(loadedId) && !locked() && !nameEdit && isDirty();
+    $("flowDirty").hidden = !show;
   }
 
   function laneKey(node) {
@@ -513,9 +563,27 @@
         width,
         height,
       };
-      left += Math.max(STEP, width + 26);
+      left += width + boardGap;
       return box;
     });
+  }
+
+  /** 顺序连线在两节点间的拐点：左侧留给流出的虚线，右侧留给流入的虚线。 */
+  function seqElbow(x1, x2) {
+    return x2 - x1 >= LOOP_OUT + LOOP_IN + 16 ? (x1 + LOOP_OUT + x2 - LOOP_IN) / 2 : (x1 + x2) / 2;
+  }
+
+  /** 按中栏可用宽度排布：有富余时拉开节点间距；放不下时保持原尺寸，横向滚动查看。 */
+  function fitBoard() {
+    const scroll = $("flowScroll");
+    const avail = scroll ? scroll.clientWidth : 0;
+    fittedWidth = avail;
+    boardGap = NODE_GAP;
+    const count = graph.nodes.length;
+    if (!avail || count < 2) return;
+    const fixed = ORIGIN_X + graph.nodes.reduce((sum, node) => sum + nodeWidth(node), 0) + BOARD_END;
+    const spare = Math.floor((avail - fixed) / (count - 1));
+    boardGap = Math.min(MAX_GAP, Math.max(NODE_GAP, spare));
   }
 
   function roundedLink(a, b) {
@@ -525,7 +593,7 @@
     const x2 = b.left;
     if (x2 >= x1 + 8 && Math.abs(y2 - y1) < 3) return `M ${x1} ${y1} H ${x2}`;
     const forward = x2 > x1 + 20;
-    const elbow = forward ? (x1 + x2) / 2 : x1 + 18;
+    const elbow = forward ? seqElbow(x1, x2) : x1 + 18;
     const dir = y2 >= y1 ? 1 : -1;
     const gap = Math.abs(y2 - y1);
     const radius = Math.min(8, gap / 2, Math.abs(elbow - x1), Math.abs(x2 - elbow));
@@ -541,16 +609,90 @@
     ].join(" ");
   }
 
+  /** 回退与不通过的连线；每条占画布下方的一条横向通道，跨度短的靠近泳道。 */
+  function loopEdges(boxes) {
+    const at = new Map(boxes.map((box) => [box.node.id, box]));
+    const edges = [];
+    graph.nodes.forEach((node) => {
+      if (node.returns_to && at.has(node.returns_to)) edges.push({ from: node.id, to: node.returns_to, kind: "return" });
+      if (node.kind === "gate" && node.reject_to && at.has(node.reject_to)) edges.push({ from: node.id, to: node.reject_to, kind: "reject" });
+    });
+    edges.forEach((edge) => {
+      edge.a = at.get(edge.from);
+      edge.b = at.get(edge.to);
+      edge.span = Math.abs(edge.a.left - edge.b.left);
+    });
+    edges.sort((x, y) => x.span - y.span);
+    return edges;
+  }
+
+  function edgeExists(edge) {
+    const node = graph.nodes.find((item) => item.id === edge.from);
+    if (!node) return false;
+    return edge.kind === "return" ? Boolean(node.returns_to) : node.kind === "gate" && Boolean(node.reject_to);
+  }
+
+  function sameEdge(a, b) {
+    return Boolean(a && b) && a.from === b.from && a.kind === b.kind;
+  }
+
+  /** 虚线的起止点：比顺序连线低一点，避免与顺序连线的箭头重合；接入前留出一段直线放箭头。 */
+  function loopEnds(a, b) {
+    const r = 6;
+    const x1 = a.left + a.width;
+    const x2 = b.left;
+    const xo = x1 + LOOP_OUT;
+    let xi = x2 - LOOP_IN;
+    if (xi >= xo && xi - xo < 2 * r) xi = xo + 2 * r;
+    return {
+      x1,
+      y1: a.top + a.height / 2 + Math.min(LOOP_DY, a.height / 2 - 6),
+      x2,
+      y2: b.top + b.height / 2 + Math.min(LOOP_DY, b.height / 2 - 6),
+      xo,
+      xi,
+    };
+  }
+
+  /** 从较晚节点右侧流出，沿下方通道绕回，从目标节点左侧流入；不从节点上下边接入。 */
+  function loopLink(a, b, y) {
+    const r = 6;
+    const { x1, y1, x2, y2, xo, xi } = loopEnds(a, b);
+    const dir = xi >= xo ? 1 : -1;
+    return [
+      `M ${x1} ${y1}`,
+      `H ${xo - r}`,
+      `Q ${xo} ${y1} ${xo} ${y1 + r}`,
+      `V ${y - r}`,
+      `Q ${xo} ${y} ${xo + dir * r} ${y}`,
+      `H ${xi - dir * r}`,
+      `Q ${xi} ${y} ${xi} ${y - r}`,
+      `V ${y2 + r}`,
+      `Q ${xi} ${y2} ${xi + r} ${y2}`,
+      `H ${x2}`,
+    ].join(" ");
+  }
+
+  function edgeLabelText(edge) {
+    if (edge.kind === "reject") return "不通过";
+    const node = graph.nodes.find((item) => item.id === edge.from);
+    return node && node.max_loops ? "回退 · 最多 " + node.max_loops + " 轮" : "回退 · 未设轮数";
+  }
+
   function renderBoard() {
+    closeMenu();
     const board = $("flowBoard");
     const column = $("flowColumn");
     board.replaceChildren();
     column.replaceChildren();
+    fitBoard();
     const lanes = lanesOf();
     const boxes = layoutBoxes();
+    const edges = loopEdges(boxes);
     const last = boxes[boxes.length - 1];
-    const width = Math.max((last ? last.left + last.width : ORIGIN_X) + 24, 280);
-    const height = Math.max(lanes.length, 1) * LANE_H;
+    const width = Math.max((last ? last.left + last.width : ORIGIN_X) + BOARD_END, 280);
+    const lanesHeight = Math.max(lanes.length, 1) * LANE_H;
+    const height = lanesHeight + (edges.length ? TRACK_TOP + (edges.length - 1) * TRACK_GAP + 18 : 0);
     board.style.width = width + "px";
     board.style.height = height + "px";
     lanes.forEach((lane, index) => {
@@ -567,29 +709,69 @@
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("class", "flow-edges");
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-    const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
-    marker.setAttribute("id", "flowReturnHead");
-    marker.setAttribute("viewBox", "0 0 8 8");
-    marker.setAttribute("markerWidth", "7");
-    marker.setAttribute("markerHeight", "7");
-    marker.setAttribute("refX", "7");
-    marker.setAttribute("refY", "4");
-    marker.setAttribute("orient", "auto");
-    const head = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    head.setAttribute("d", "M0,0 L8,4 L0,8 Z");
-    head.setAttribute("fill", "context-stroke");
-    marker.appendChild(head);
-    defs.appendChild(marker);
+    ["seq", "return", "reject"].forEach((kind) => {
+      const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+      marker.setAttribute("id", "flowHead-" + kind);
+      marker.setAttribute("class", "flow-head is-" + kind);
+      marker.setAttribute("viewBox", "0 0 8 8");
+      marker.setAttribute("markerUnits", "userSpaceOnUse");
+      marker.setAttribute("markerWidth", "9");
+      marker.setAttribute("markerHeight", "9");
+      marker.setAttribute("refX", "8");
+      marker.setAttribute("refY", "4");
+      marker.setAttribute("orient", "auto");
+      const head = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      head.setAttribute("d", "M0,0 L8,4 L0,8 Z");
+      marker.appendChild(head);
+      defs.appendChild(marker);
+    });
     svg.appendChild(defs);
     boxes.forEach((box, index) => {
-      if (index < boxes.length - 1) svg.appendChild(pathEl(roundedLink(box, boxes[index + 1])));
-      if (box.node.returns_to) {
-        const target = boxes.find((item) => item.node.id === box.node.returns_to);
-        if (target) svg.appendChild(pathEl(returnLink(box, target), "is-return"));
-      }
+      if (index < boxes.length - 1) svg.appendChild(pathEl(roundedLink(box, boxes[index + 1]), "is-seq"));
+    });
+    const editable = !locked();
+    const labels = [];
+    edges.forEach((edge, index) => {
+      const y = lanesHeight + TRACK_TOP + index * TRACK_GAP;
+      const d = loopLink(edge.a, edge.b, y);
+      const related = selectedId && (edge.from === selectedId || edge.to === selectedId);
+      const picked = sameEdge(edge, selectedEdge);
+      const cls = "is-" + edge.kind + (picked ? " is-selected" : related ? " is-related" : "");
+      svg.appendChild(pathEl(d, cls));
+      const hit = pathEl(d, "flow-edge-hit");
+      hit.removeAttribute("marker-end");
+      hit.addEventListener("click", (event) => {
+        event.stopPropagation();
+        selectEdge(edge);
+      });
+      svg.appendChild(hit);
+      const label = document.createElement("button");
+      label.type = "button";
+      label.className = "flow-edge-label is-" + edge.kind + (picked ? " is-selected" : "");
+      label.textContent = edgeLabelText(edge);
+      const fromName = edge.a.node.name;
+      const toName = edge.b.node.name;
+      label.setAttribute("aria-label", label.textContent + "：从「" + fromName + "」到「" + toName + "」");
+      const ends = loopEnds(edge.a, edge.b);
+      const left = Math.min(ends.xo, ends.xi);
+      const right = Math.max(ends.xo, ends.xi);
+      label.style.left = (left + right) / 2 + "px";
+      label.style.top = y + "px";
+      label.addEventListener("click", (event) => {
+        event.stopPropagation();
+        selectEdge(edge);
+      });
+      labels.push(label);
+      if (picked && editable) labels.push(edgeHandle(edge));
     });
     board.appendChild(svg);
     boxes.forEach((box) => board.appendChild(nodeButton(box)));
+    if (editable) {
+      boxes.forEach((box, index) => {
+        if (index < boxes.length - 1) board.appendChild(insertButton(box, boxes[index + 1], index + 1));
+      });
+    }
+    labels.forEach((label) => board.appendChild(label));
     board.onclick = (event) => {
       const target = event.target;
       if (target === board || target.classList.contains("flow-lane") || target.classList.contains("flow-lane-label")) {
@@ -606,41 +788,118 @@
       item.appendChild(button);
       column.appendChild(item);
     });
+    refreshDirty();
+    requestAnimationFrame(updateScrollHints);
   }
 
-  function returnLink(from, to) {
-    const x1 = from.left + from.width / 2;
-    const y1 = from.top + from.height;
-    const x2 = to.left + to.width / 2;
-    const y2 = to.top + to.height;
-    const low = Math.max(y1, y2) + 16;
-    const span = Math.abs(x2 - x1);
-    const radius = Math.min(8, span / 2, (low - y1) / 2, (low - y2) / 2);
-    if (radius < 3) return `M ${x1} ${y1} V ${low} H ${x2} V ${y2}`;
-    const dir = x2 >= x1 ? 1 : -1;
-    return [
-      `M ${x1} ${y1}`,
-      `V ${low - radius}`,
-      `Q ${x1} ${low} ${x1 + dir * radius} ${low}`,
-      `H ${x2 - dir * radius}`,
-      `Q ${x2} ${low} ${x2} ${low - radius}`,
-      `V ${y2}`,
-    ].join(" ");
-  }
-
-  function pathEl(d, kind) {
+  function pathEl(d, cls) {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", d);
-    if (kind) {
-      path.setAttribute("class", kind);
-      path.setAttribute("marker-end", "url(#flowReturnHead)");
-    }
+    path.setAttribute("class", cls);
+    const kind = /is-(seq|return|reject)/.exec(cls);
+    if (kind) path.setAttribute("marker-end", "url(#flowHead-" + kind[1] + ")");
     return path;
+  }
+
+  /** 两个相邻节点之间连线中点的「+」：在这里插入新节点。 */
+  function insertButton(a, b, index) {
+    const x1 = a.left + a.width;
+    const y1 = a.top + a.height / 2;
+    const x2 = b.left;
+    const y2 = b.top + b.height / 2;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "flow-insert";
+    button.textContent = "+";
+    button.setAttribute("aria-label", "在「" + a.node.name + "」和「" + b.node.name + "」之间添加节点");
+    button.title = "在这里添加节点";
+    button.setAttribute("aria-haspopup", "menu");
+    button.setAttribute("aria-expanded", "false");
+    button.style.left = seqElbow(x1, x2) + "px";
+    button.style.top = (y1 + y2) / 2 + "px";
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleMenu(button, () => insertRows(index), event.detail === 0);
+    });
+    return button;
+  }
+
+  /** 选中连线时，箭头端的圆点可以拖到另一个节点上，改这条连线的去向。 */
+  function edgeHandle(edge) {
+    const handle = document.createElement("span");
+    handle.className = "flow-edge-handle is-" + edge.kind;
+    handle.title = "拖到另一个节点上，改去向";
+    const ends = loopEnds(edge.a, edge.b);
+    const x = ends.x2 - 14;
+    const y = ends.y2;
+    handle.style.left = x + "px";
+    handle.style.top = y + "px";
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      handle.style.pointerEvents = "none";
+      handle.classList.add("is-dragging");
+      const board = $("flowBoard");
+      board.classList.add("is-edge-dragging");
+      const ns = "http://www.w3.org/2000/svg";
+      const ghost = document.createElementNS(ns, "path");
+      ghost.setAttribute("class", "flow-edge-ghost is-" + edge.kind);
+      ghost.setAttribute("marker-end", "url(#flowHead-" + edge.kind + ")");
+      board.querySelector(".flow-edges").appendChild(ghost);
+      const sx = ends.xo;
+      const sy = ends.y1;
+      let hover = null;
+      const point = (ev) => {
+        const rect = board.getBoundingClientRect();
+        return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+      };
+      const nodeAt = (ev) => {
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        const btn = el && el.closest && el.closest(".flow-node");
+        return btn && board.contains(btn) ? btn : null;
+      };
+      const onMove = (ev) => {
+        const p = point(ev);
+        handle.style.left = p.x + "px";
+        handle.style.top = p.y + "px";
+        const over = nodeAt(ev);
+        if (hover && hover !== over) hover.classList.remove("is-drop", "is-drop-bad");
+        hover = over;
+        const bad = over && edgeTargetProblem(edge, over.dataset.nodeId);
+        if (over) over.classList.add(bad ? "is-drop-bad" : "is-drop");
+        if (over && !bad) {
+          const rect = board.getBoundingClientRect();
+          const box = over.getBoundingClientRect();
+          const tx = box.left - rect.left;
+          const half = box.height / 2;
+          const ty = box.top - rect.top + half + Math.min(LOOP_DY, half - 6);
+          ghost.setAttribute("d", `M ${ends.x1} ${sy} H ${sx} L ${tx - LOOP_IN} ${ty} H ${tx}`);
+        } else {
+          ghost.setAttribute("d", `M ${ends.x1} ${sy} H ${sx} L ${p.x} ${p.y}`);
+        }
+      };
+      const onUp = (ev) => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        board.classList.remove("is-edge-dragging");
+        const over = nodeAt(ev);
+        if (!over) {
+          renderBoard();
+          return;
+        }
+        setEdgeTarget(edge, over.dataset.nodeId);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    });
+    return handle;
   }
 
   function nodeButton(box) {
     const button = document.createElement("button");
     button.type = "button";
+    button.dataset.nodeId = box.node.id;
     const kindClass = box.node.kind === "gate"
       ? "gate"
       : box.node.kind === "activity" || box.node.kind === "system"
@@ -712,8 +971,9 @@
 
   function reorderByX(id, clientX) {
     const board = $("flowBoard");
-    const x = clientX - board.getBoundingClientRect().left + $("flowScroll").scrollLeft;
-    let to = Math.round((x - ORIGIN_X) / STEP);
+    const x = clientX - board.getBoundingClientRect().left;
+    const others = layoutBoxes().filter((box) => box.node.id !== id);
+    let to = others.filter((box) => box.left + box.width / 2 < x).length;
     to = Math.max(1, Math.min(graph.nodes.length - 2, to));
     const from = graph.nodes.findIndex((node) => node.id === id);
     if (from < 0 || to === from) {
@@ -724,6 +984,7 @@
     graph.nodes.splice(to, 0, item);
     sanitizeReturns();
     selectedId = id;
+    selectedEdge = null;
     renderBoard();
     renderInspect();
   }
@@ -743,34 +1004,824 @@
 
   function selectNode(id) {
     selectedId = id;
+    selectedEdge = null;
+    showError("");
     renderBoard();
     renderInspect();
+    revealSelected();
+  }
+
+  function selectEdge(edge) {
+    selectedId = "";
+    showError("");
+    selectedEdge = { from: edge.from, kind: edge.kind };
+    renderBoard();
+    renderInspect();
+  }
+
+  function revealSelected() {
+    if (!selectedId) return;
+    const button = $("flowBoard").querySelector('.flow-node[data-node-id="' + CSS.escape(selectedId) + '"]');
+    if (button) button.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  function updateScrollHints() {
+    const scroll = $("flowScroll");
+    const view = $("flowViewport");
+    if (!scroll || !view) return;
+    view.classList.toggle("can-left", scroll.scrollLeft > 2);
+    view.classList.toggle("can-right", scroll.scrollLeft + scroll.clientWidth < scroll.scrollWidth - 2);
+  }
+
+  function nodeById(id) {
+    return graph.nodes.find((item) => item.id === id) || null;
+  }
+
+  function indexOf(id) {
+    return graph.nodes.findIndex((item) => item.id === id);
+  }
+
+  /** 回退只能指向更早的、不是结束的节点；不通过可以去启动以外的任何其他节点。 */
+  function edgeTargetProblem(edge, targetId) {
+    const from = indexOf(edge.from);
+    const to = indexOf(targetId);
+    const target = nodeById(targetId);
+    if (!target || targetId === edge.from) return "不能指向自己。";
+    if (edge.kind === "return") {
+      if (to >= from || target.kind === "end") return "回退只能指向更早的节点。";
+      return "";
+    }
+    if (target.kind === "start") return "不通过不能回到启动。";
+    return "";
+  }
+
+  function returnTargets(node) {
+    return graph.nodes.slice(0, indexOf(node.id)).filter((item) => item.kind !== "end");
+  }
+
+  function rejectTargets(node) {
+    return graph.nodes.filter((item) => item.id !== node.id && item.kind !== "start" && item.kind !== "end");
+  }
+
+  function setReturn(node, targetId) {
+    node.returns_to = targetId || "";
+    if (!node.returns_to) delete node.max_loops;
+    else if (!node.max_loops) node.max_loops = DEFAULT_LOOPS;
+  }
+
+  function setReject(node, targetId) {
+    if (targetId) node.reject_to = targetId;
+    else delete node.reject_to;
+  }
+
+  function setEdgeTarget(edge, targetId) {
+    const node = nodeById(edge.from);
+    const problem = edgeTargetProblem(edge, targetId);
+    if (!node || problem) {
+      showError(problem);
+      renderBoard();
+      return;
+    }
+    showError("");
+    if (edge.kind === "return") setReturn(node, targetId);
+    else setReject(node, targetId);
+    selectedEdge = { from: edge.from, kind: edge.kind };
+    renderBoard();
+    renderInspect();
+  }
+
+  function deleteEdge(edge) {
+    const node = nodeById(edge.from);
+    if (!node) return;
+    if (edge.kind === "return") setReturn(node, "");
+    else setReject(node, "");
+    selectedEdge = null;
+    selectedId = node.id;
+    renderBoard();
+    renderInspect();
+  }
+
+  function deleteNode(node) {
+    if (!node || node.kind === "start" || node.kind === "end" || locked()) return;
+    if (!window.confirm("删除「" + node.name + "」？删除后前后节点会重新连上。")) return;
+    graph.nodes = graph.nodes.filter((item) => item.id !== node.id);
+    graph.nodes.forEach((item) => {
+      if (item.returns_to === node.id) setReturn(item, "");
+      if (item.reject_to === node.id) setReject(item, "");
+    });
+    selectedId = "";
+    selectedEdge = null;
+    renderBoard();
+    renderInspect();
+  }
+
+  function defaultName(kind) {
+    return kind === "gate" ? "新决策点" : kind === "parallel" ? "新并行" : "新活动";
+  }
+
+  function insertNode(index, kind, extra) {
+    const at = Math.max(1, Math.min(graph.nodes.length - 1, index));
+    let created;
+    if (kind === "activity") {
+      created = { id: nextNodeId(), kind, name: defaultName(kind), role: extra.role, returns_to: "", decision: "" };
+      applyRoleContract(created, extra.role, false);
+    } else if (kind === "gate") {
+      created = { id: nextNodeId(), kind, name: defaultName(kind), role: "human", returns_to: "", decision: "approve" };
+    } else if (kind === "parallel") {
+      created = {
+        id: nextNodeId(), kind, name: defaultName(kind), role: "", returns_to: "",
+        branches: [
+          { id: "b1", name: "支路1", nodes: [] },
+          { id: "b2", name: "支路2", nodes: [] },
+        ],
+      };
+    } else {
+      const found = workflows.find((item) => item.workflow_id === extra.subgraph_id);
+      created = { id: nextNodeId(), kind: "subgraph", name: found ? found.title : extra.subgraph_id, role: "", returns_to: "", subgraph_id: extra.subgraph_id };
+    }
+    graph.nodes.splice(at, 0, created);
+    showError("");
+    selectNode(created.id);
+    if (kind !== "subgraph") {
+      const field = $("flowNodeName");
+      requestAnimationFrame(() => {
+        field.focus();
+        if (typeof field.select === "function") field.select();
+      });
+    }
+  }
+
+  /** 「添加节点」插在选中节点之后；没有选中、或选中的是结束时，插在结束之前。 */
+  function toolbarInsertIndex() {
+    const at = selectedId ? indexOf(selectedId) : -1;
+    if (at < 0 || at >= graph.nodes.length - 1) return graph.nodes.length - 1;
+    return at + 1;
+  }
+
+  function insertRows(index) {
+    const before = graph.nodes[index - 1];
+    const after = graph.nodes[index];
+    const rows = [];
+    if (before && after) rows.push({ caption: "插在「" + before.name + "」与「" + after.name + "」之间" });
+    const activityRoles = roles.filter((item) => item.id !== "human");
+    rows.push({
+      title: "活动",
+      value: "选择角色",
+      items: activityRoles.map((role) => ({ text: role.label, onPick: () => insertNode(index, "activity", { role: role.id }) })),
+      empty: "还没有可用的角色。",
+    });
+    rows.push({ title: "决策点", value: "人类批复", onPick: () => insertNode(index, "gate") });
+    rows.push({ title: "并行", value: "两条支路", onPick: () => insertNode(index, "parallel") });
+    if (!graph.subgraph) {
+      const subgraphs = workflows.filter((item) => item.subgraph && item.workflow_id !== loadedId);
+      rows.push({
+        title: "子图",
+        value: subgraphs.length ? subgraphs.length + " 份" : "还没有",
+        items: subgraphs.map((item) => ({
+          text: (item.builtin ? "内置 · " : "") + item.title,
+          onPick: () => insertNode(index, "subgraph", { subgraph_id: item.workflow_id }),
+        })),
+        empty: "还没有子图。可以从「更多」把一份流程存为子图。",
+      });
+    }
+    return rows;
+  }
+
+  function moreRows() {
+    const rows = [];
+    const builtin = locked();
+    if (!builtin) rows.push({ title: "重命名…", onPick: () => openNameEdit("rename") });
+    rows.push({ title: "复制为新流程", onPick: () => openNameEdit("copy") });
+    if (!builtin && !graph.subgraph) {
+      rows.push({ title: "存为子图…", onPick: openSubgraphForm });
+    }
+    rows.push({
+      title: "导出 YAML",
+      value: isDirty() ? "已保存的版本" : "",
+      onPick: exportYaml,
+      disabled: !yamlText,
+    });
+    if (!builtin) {
+      rows.push("divider");
+      rows.push({ title: "删除流程…", danger: true, onPick: openDeleteConfirm });
+    }
+    return rows;
+  }
+
+  function exportYaml() {
+    if (!yamlText || !loadedId) return;
+    const blob = new Blob([yamlText], { type: "text/yaml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = loadedId + ".yaml";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showSaved(isDirty() ? "已导出上次保存的版本，未保存的修改不在其中。" : "已导出 " + loadedId + ".yaml。");
+  }
+
+  // 改名与复制都在选择框原位输入标题，保存或取消后换回选择框。
+  function showNameEdit(on) {
+    const created = mode === "open" && Boolean(loadedId);
+    const builtin = locked();
+    $("flowPick").hidden = on || !workflows.length;
+    $("btnFlowAdd").hidden = on || !created || builtin;
+    $("btnSaveFlow").hidden = on || !created || builtin;
+    $("btnFlowMore").hidden = on || !created;
+    ["flowNameEdit", "btnNameSave", "btnNameCancel"].forEach((id) => {
+      $(id).hidden = !on;
+    });
+    refreshDirty();
+  }
+
+  function openNameEdit(kind) {
+    nameEdit = kind;
+    $("flowSubgraphForm").hidden = true;
+    $("flowDeleteConfirm").hidden = true;
+    showError("");
+    const input = $("flowNameEdit");
+    const title = (savedGraph && savedGraph.title) || graph.title || loadedId;
+    input.label = kind === "copy" ? "新流程标题" : "流程标题";
+    input.value = kind === "copy" ? "副本 · " + title : title;
+    showNameEdit(true);
+    requestAnimationFrame(() => {
+      input.focus();
+      if (typeof input.select === "function") input.select();
+    });
+  }
+
+  function closeNameEdit() {
+    nameEdit = "";
+    showNameEdit(false);
+  }
+
+  async function saveNameEdit() {
+    const title = ($("flowNameEdit").value || "").trim();
+    if (!title) {
+      showError("先写标题。");
+      $("flowNameEdit").focus();
+      return;
+    }
+    const button = $("btnNameSave");
+    if (button.loading) return;
+    showError("");
+    showSaved("");
+    button.loading = true;
+    button.disabled = true;
+    try {
+      if (nameEdit === "copy") {
+        if (confirmLeave()) await copySelected(loadedId, title);
+      }
+      else if (nameEdit === "rename") await renameLoaded(title);
+    } finally {
+      button.loading = false;
+      button.disabled = false;
+    }
+  }
+
+  async function renameLoaded(title) {
+    if (!loadedId || !savedGraph || graph.builtin) return;
+    if (title === savedGraph.title) {
+      closeNameEdit();
+      return;
+    }
+    try {
+      const response = await fetch("/api/workflows/" + encodeURIComponent(loadedId), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...savedGraph, title }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        showError(data.detail || "没能重命名流程。");
+        return;
+      }
+      const saved = data.workflow.title;
+      const clean = JSON.parse(snapshot || "{}");
+      clean.title = saved;
+      snapshot = JSON.stringify(clean);
+      savedGraph.title = saved;
+      yamlText = data.yaml || yamlText;
+      graph.title = saved;
+      $("flowTitle").value = saved;
+      refreshDirty();
+      await loadLists();
+      closeNameEdit();
+      showSaved("已重命名为「" + saved + "」。");
+    } catch (err) {
+      showError(err.message || "没能重命名流程。");
+    }
+  }
+
+  function openSubgraphForm() {
+    $("flowDeleteConfirm").hidden = true;
+    $("flowSubgraphForm").hidden = false;
+    requestAnimationFrame(() => $("flowSubgraphTitle").focus());
+  }
+
+  function openDeleteConfirm() {
+    $("flowSubgraphForm").hidden = true;
+    const title = ($("flowTitle").value || "").trim() || graph.title || loadedId;
+    $("flowDeleteText").textContent = "删除流程「" + title + "」（" + loadedId + "）？删除后不能恢复。";
+    $("flowDeleteConfirm").hidden = false;
+    requestAnimationFrame(() => $("btnDeleteCancel").focus());
+  }
+
+  // ---- 级联菜单：与运行页的模型菜单同一套样式与键盘操作 ----
+
+  let menuState = null;
+
+  function closeMenu() {
+    if (menuState) menuState.close();
+  }
+
+  function toggleMenu(anchor, build, viaKeyboard) {
+    if (menuState && menuState.anchor === anchor) {
+      closeMenu();
+      return;
+    }
+    openMenu(anchor, build(), viaKeyboard);
+  }
+
+  function menuRow(spec) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "role-menu-row" + (spec.danger ? " is-danger" : "");
+    row.setAttribute("role", "menuitem");
+    row.disabled = Boolean(spec.disabled);
+    if (spec.hint) row.title = spec.hint;
+    const name = document.createElement("span");
+    name.className = "role-menu-row-title";
+    name.textContent = spec.title;
+    const value = document.createElement("span");
+    value.className = "role-menu-row-value";
+    value.textContent = spec.value || "";
+    row.append(name, value);
+    if (spec.items) {
+      const more = document.createElement("span");
+      more.className = "role-menu-more";
+      more.setAttribute("aria-hidden", "true");
+      row.appendChild(more);
+      row.setAttribute("aria-haspopup", "menu");
+    }
+    return row;
+  }
+
+  function menuOption(item) {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "role-menu-option" + (item.checked ? " is-checked" : "");
+    el.setAttribute("role", "menuitemradio");
+    el.setAttribute("aria-checked", item.checked ? "true" : "false");
+    el.disabled = Boolean(item.disabled);
+    if (item.hint) el.title = item.hint;
+    const label = document.createElement("span");
+    label.className = "role-menu-option-label";
+    label.textContent = item.text;
+    el.appendChild(label);
+    if (item.suffix) {
+      const extra = document.createElement("span");
+      extra.className = "role-menu-option-suffix";
+      extra.textContent = item.suffix;
+      el.appendChild(extra);
+    }
+    const mark = document.createElement("span");
+    mark.className = "role-menu-check";
+    mark.setAttribute("aria-hidden", "true");
+    el.appendChild(mark);
+    return el;
+  }
+
+  /**
+   * 一级菜单列出各项及当前值；鼠标移到或焦点落在有下级的行上时，在一级菜单旁弹出取值列表，
+   * 优先放在右侧，右侧放不下才放左侧。右方向键进入取值列表，左方向键或 Esc 回到一级菜单。
+   */
+  function openMenu(anchor, rows, viaKeyboard) {
+    closeMenu();
+    const wrap = document.createElement("div");
+    wrap.className = "role-menu-wrap flow-menu";
+    wrap.setAttribute("role", "menu");
+    const fly = document.createElement("div");
+    fly.className = "role-menu-flyout";
+    fly.hidden = true;
+    const rowEls = [];
+    let returning = false;
+
+    const hideFly = () => {
+      fly.hidden = true;
+      fly.replaceChildren();
+      rowEls.forEach((row) => row.classList.remove("is-open"));
+    };
+    const focusFly = () => {
+      const target = fly.querySelector(".role-menu-option.is-checked:not([disabled])")
+        || fly.querySelector(".role-menu-option:not([disabled])");
+      if (target) target.focus({ preventScroll: true });
+    };
+    const placeFly = (row) => {
+      const menu = wrap.getBoundingClientRect();
+      const at = row.getBoundingClientRect();
+      const gap = 4;
+      const margin = 8;
+      let left = menu.right + gap;
+      if (left + fly.offsetWidth > window.innerWidth - margin) left = Math.max(margin, menu.left - gap - fly.offsetWidth);
+      let top = at.top - 5;
+      if (top + fly.offsetHeight > window.innerHeight - margin) top = Math.max(margin, window.innerHeight - margin - fly.offsetHeight);
+      fly.style.left = left + "px";
+      fly.style.top = top + "px";
+    };
+    const pick = (fn) => {
+      close();
+      if (typeof fn === "function") fn();
+    };
+    const showFly = (row, spec, focus) => {
+      if (!fly.hidden && row.classList.contains("is-open")) {
+        if (focus) focusFly();
+        return;
+      }
+      rowEls.forEach((item) => item.classList.toggle("is-open", item === row));
+      const list = document.createElement("div");
+      list.className = "role-menu-list";
+      list.setAttribute("role", "menu");
+      spec.items.forEach((item) => {
+        const el = menuOption(item);
+        el.addEventListener("click", () => pick(item.onPick));
+        list.appendChild(el);
+      });
+      if (!spec.items.length) {
+        const empty = document.createElement("p");
+        empty.className = "role-menu-empty";
+        empty.textContent = spec.empty || "没有可选项。";
+        list.appendChild(empty);
+      }
+      fly.replaceChildren(list);
+      fly.hidden = false;
+      placeFly(row);
+      if (focus) focusFly();
+    };
+    const backToRow = (row) => {
+      hideFly();
+      returning = true;
+      row.focus({ preventScroll: true });
+      returning = false;
+    };
+
+    rows.forEach((spec) => {
+      if (spec === "divider") {
+        const divider = document.createElement("div");
+        divider.className = "role-menu-divider";
+        divider.setAttribute("role", "separator");
+        wrap.appendChild(divider);
+        return;
+      }
+      if (spec.caption) {
+        const caption = document.createElement("p");
+        caption.className = "flow-menu-caption";
+        caption.textContent = spec.caption;
+        wrap.appendChild(caption);
+        return;
+      }
+      const row = menuRow(spec);
+      if (spec.items) {
+        row.dataset.sub = "1";
+        row.addEventListener("click", () => showFly(row, spec, true));
+        if (!spec.disabled) {
+          row.addEventListener("mouseenter", () => showFly(row, spec, false));
+          row.addEventListener("focus", () => {
+            if (!returning) showFly(row, spec, false);
+          });
+          row.addEventListener("keydown", (ev) => {
+            if (ev.key === "ArrowRight") {
+              ev.preventDefault();
+              showFly(row, spec, true);
+            }
+          });
+        }
+      } else {
+        row.addEventListener("click", () => pick(spec.onPick));
+        row.addEventListener("mouseenter", hideFly);
+        row.addEventListener("focus", hideFly);
+      }
+      rowEls.push(row);
+      wrap.appendChild(row);
+    });
+
+    wrap.addEventListener("keydown", (ev) => {
+      if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+      const items = rowEls.filter((row) => !row.disabled);
+      if (!items.length) return;
+      ev.preventDefault();
+      const at = items.indexOf(document.activeElement);
+      const step = ev.key === "ArrowDown" ? 1 : -1;
+      items[(at + step + items.length) % items.length].focus();
+    });
+    fly.addEventListener("keydown", (ev) => {
+      if (ev.key === "ArrowLeft") {
+        ev.preventDefault();
+        const row = rowEls.find((item) => item.classList.contains("is-open"));
+        if (row) backToRow(row);
+        return;
+      }
+      if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+      const items = [...fly.querySelectorAll(".role-menu-option:not([disabled])")];
+      if (!items.length) return;
+      ev.preventDefault();
+      const at = items.indexOf(document.activeElement);
+      const step = ev.key === "ArrowDown" ? 1 : -1;
+      items[at < 0 ? 0 : (at + step + items.length) % items.length].focus();
+    });
+
+    const onDoc = (ev) => {
+      if (ev.type === "keydown") {
+        if (ev.key !== "Escape") return;
+        ev.preventDefault();
+        const row = !fly.hidden && fly.contains(document.activeElement) && rowEls.find((item) => item.classList.contains("is-open"));
+        if (row) {
+          backToRow(row);
+          return;
+        }
+        close();
+        anchor.focus({ preventScroll: true });
+        return;
+      }
+      if (anchor.contains(ev.target) || wrap.contains(ev.target) || fly.contains(ev.target)) return;
+      close();
+    };
+    const onScroll = (ev) => {
+      if (ev.target instanceof Node && (wrap.contains(ev.target) || fly.contains(ev.target))) return;
+      close();
+    };
+    function close() {
+      document.removeEventListener("pointerdown", onDoc, true);
+      document.removeEventListener("keydown", onDoc, true);
+      document.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", close);
+      wrap.remove();
+      fly.remove();
+      anchor.setAttribute("aria-expanded", "false");
+      anchor.classList.remove("is-menu-open");
+      if (menuState && menuState.anchor === anchor) menuState = null;
+    }
+
+    document.body.append(wrap, fly);
+    const rect = anchor.getBoundingClientRect();
+    const margin = 8;
+    let left = rect.left;
+    if (left + wrap.offsetWidth > window.innerWidth - margin) left = Math.max(margin, rect.right - wrap.offsetWidth);
+    let top = rect.bottom + 6;
+    if (top + wrap.offsetHeight > window.innerHeight - margin) top = Math.max(margin, rect.top - 6 - wrap.offsetHeight);
+    wrap.style.left = left + "px";
+    wrap.style.top = top + "px";
+    anchor.setAttribute("aria-expanded", "true");
+    anchor.classList.add("is-menu-open");
+    document.addEventListener("pointerdown", onDoc, true);
+    document.addEventListener("keydown", onDoc, true);
+    document.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", close);
+    menuState = { anchor, close };
+    if (viaKeyboard) {
+      const first = rowEls.find((row) => !row.disabled);
+      if (first) first.focus({ preventScroll: true });
+    }
   }
 
   function selectedNode() {
     return graph.nodes.find((node) => node.id === selectedId) || null;
   }
 
+  function nodeHeading(node) {
+    if (node.kind === "activity") return "活动 · " + roleLabel(node.role);
+    return KIND_LABELS[node.kind] || "节点";
+  }
+
+  function loopsText(node) {
+    return node.max_loops ? "最多 " + node.max_loops + " 轮" : "未设轮数";
+  }
+
+  function nameOf(id) {
+    const node = nodeById(id);
+    return node ? node.name : id;
+  }
+
+  function loopItems(node) {
+    const values = LOOP_CHOICES.slice();
+    if (node.max_loops && !values.includes(node.max_loops)) values.push(node.max_loops);
+    values.sort((a, b) => a - b);
+    return values.map((count) => ({
+      text: count + " 轮",
+      suffix: count === DEFAULT_LOOPS ? "默认" : "",
+      checked: node.max_loops === count,
+      onPick: () => {
+        node.max_loops = count;
+        renderBoard();
+        renderInspect();
+      },
+    }));
+  }
+
+  function returnItems(node, afterPick) {
+    const items = [{ text: "不回退", checked: !node.returns_to, onPick: () => { setReturn(node, ""); afterPick(); } }];
+    returnTargets(node).forEach((item) => items.push({
+      text: item.name,
+      suffix: KIND_LABELS[item.kind] === "活动" ? "" : KIND_LABELS[item.kind],
+      checked: node.returns_to === item.id,
+      onPick: () => { setReturn(node, item.id); afterPick(); },
+    }));
+    return items;
+  }
+
+  function rejectItems(node, afterPick) {
+    const items = [{ text: "结束本轮", checked: !node.reject_to, onPick: () => { setReject(node, ""); afterPick(); } }];
+    rejectTargets(node).forEach((item) => items.push({
+      text: item.name,
+      suffix: indexOf(item.id) < indexOf(node.id) ? "更早" : "更晚",
+      checked: node.reject_to === item.id,
+      onPick: () => { setReject(node, item.id); afterPick(); },
+    }));
+    return items;
+  }
+
+  function changeKind(node, kind) {
+    if (node.kind === kind) return;
+    if (kind === "gate") {
+      delete node.inputs;
+      delete node.outputs;
+      node.contractTouched = false;
+      node.role = "human";
+      node.kind = "gate";
+      node.decision = node.decision || "approve";
+      return;
+    }
+    const role = (roles.find((item) => item.id !== "human") || {}).id || "";
+    node.kind = "activity";
+    node.role = role;
+    node.decision = "";
+    delete node.reject_to;
+    applyRoleContract(node, role, false);
+  }
+
+  function changeRole(node, roleId) {
+    if (!node.contractTouched) applyRoleContract(node, roleId, false);
+    node.role = roleId;
+  }
+
+  /** 节点设置的一级菜单行：类型、角色、回退、循环轮数、决定类型、不通过去向、子图。 */
+  function nodeMenuRows(node) {
+    const after = () => {
+      renderBoard();
+      renderInspect();
+    };
+    const rows = [];
+    if (node.kind === "activity" || node.kind === "gate") {
+      rows.push({
+        title: "类型",
+        value: KIND_LABELS[node.kind],
+        items: ["activity", "gate"].map((kind) => ({
+          text: KIND_LABELS[kind],
+          suffix: kind === "gate" ? "由人批复" : "",
+          checked: node.kind === kind,
+          onPick: () => { changeKind(node, kind); after(); },
+        })),
+      });
+    }
+    if (node.kind === "activity") {
+      rows.push({
+        title: "角色",
+        value: roleLabel(node.role),
+        items: roles.filter((item) => item.id !== "human").map((role) => ({
+          text: role.label,
+          checked: node.role === role.id,
+          onPick: () => { changeRole(node, role.id); after(); },
+        })),
+      });
+    }
+    if (node.kind === "gate") {
+      rows.push({
+        title: "决定类型",
+        value: (DECISIONS.find((item) => item.id === (node.decision || "approve")) || DECISIONS[0]).label,
+        items: DECISIONS.map((item) => ({
+          text: item.label,
+          checked: (node.decision || "approve") === item.id,
+          onPick: () => { node.decision = item.id; after(); },
+        })),
+      });
+      rows.push({
+        title: "不通过时",
+        value: node.reject_to ? "前往 " + nameOf(node.reject_to) : "结束本轮",
+        items: rejectItems(node, after),
+      });
+    }
+    if (node.kind === "activity" || (node.kind === "gate" && node.returns_to)) {
+      rows.push("divider");
+      rows.push({
+        title: "回退到",
+        value: node.returns_to ? nameOf(node.returns_to) : "不回退",
+        items: returnItems(node, after),
+        empty: "前面没有可以回退的节点。",
+      });
+      if (node.returns_to) rows.push({ title: "最多循环", value: loopsText(node), items: loopItems(node) });
+    }
+    if (node.kind === "subgraph" && !graph.subgraph) {
+      const subgraphs = workflows.filter((item) => item.subgraph && item.workflow_id !== loadedId);
+      rows.push({
+        title: "子图",
+        value: nameOf(node.id),
+        items: subgraphs.map((item) => ({
+          text: (item.builtin ? "内置 · " : "") + item.title,
+          checked: node.subgraph_id === item.workflow_id,
+          onPick: () => {
+            const old = workflows.find((wf) => wf.workflow_id === node.subgraph_id);
+            if (!old || node.name === old.title) node.name = item.title;
+            node.subgraph_id = item.workflow_id;
+            after();
+          },
+        })),
+      });
+    }
+    return rows;
+  }
+
+  function nodeSummary(node) {
+    const parts = [];
+    if (node.kind === "activity") parts.push({ text: roleLabel(node.role) });
+    if (node.kind === "gate") {
+      parts.push({ text: (DECISIONS.find((item) => item.id === (node.decision || "approve")) || DECISIONS[0]).label });
+      parts.push({ text: node.reject_to ? "不通过 → " + nameOf(node.reject_to) : "不通过则结束", muted: !node.reject_to });
+    }
+    if (node.kind === "activity" || node.returns_to) {
+      parts.push(node.returns_to
+        ? { text: "回退 → " + nameOf(node.returns_to) + " · " + loopsText(node) }
+        : { text: "不回退", muted: true });
+    }
+    if (node.kind === "subgraph") parts.push({ text: nameOf(node.id) });
+    return parts;
+  }
+
+  function menuChip(host, parts, build, disabled, label) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "role-menu-chip flow-settings-chip";
+    chip.disabled = Boolean(disabled);
+    chip.setAttribute("aria-haspopup", "menu");
+    chip.setAttribute("aria-expanded", "false");
+    chip.setAttribute("aria-label", label + "：" + parts.map((part) => part.text).join("，"));
+    const main = document.createElement("span");
+    main.className = "role-chip-main" + (parts[0] && parts[0].muted ? " is-inherited" : "");
+    main.textContent = parts[0] ? parts[0].text : "";
+    const tags = document.createElement("span");
+    tags.className = "role-chip-tags";
+    parts.slice(1).forEach((part) => {
+      const tag = document.createElement("span");
+      tag.className = "role-chip-tag" + (part.muted ? " is-inherited" : "");
+      tag.textContent = part.text;
+      tags.appendChild(tag);
+    });
+    const caret = document.createElement("span");
+    caret.className = "role-chip-caret";
+    caret.setAttribute("aria-hidden", "true");
+    chip.append(main, tags, caret);
+    chip.title = parts.map((part) => part.text).join("；");
+    chip.addEventListener("click", (event) => toggleMenu(chip, build, event.detail === 0));
+    host.replaceChildren(chip);
+  }
+
+  function routeHint(node) {
+    const lines = [];
+    if (node.returns_to) {
+      lines.push("未通过时回到「" + nameOf(node.returns_to) + "」重做，" + loopsText(node) + "；到达上限后停下来等人处理。");
+    }
+    if (node.kind === "gate") {
+      lines.push(node.reject_to ? "不批准时前往「" + nameOf(node.reject_to) + "」。" : "不批准时结束本轮。");
+    }
+    return lines.join("");
+  }
+
+  function setInspectHead(title, kind) {
+    $("flowInspectTitle").textContent = title;
+    $("flowInspectKind").hidden = !kind;
+    $("flowInspectKind").textContent = kind || "";
+  }
+
   function renderInspect() {
     const node = selectedNode();
-    $("flowInspectMeta").hidden = Boolean(node);
+    const edge = !node && selectedEdge && edgeExists(selectedEdge) ? selectedEdge : null;
+    $("flowInspectMeta").hidden = Boolean(node || edge);
     $("flowInspectNode").hidden = !node;
-    if (!node) return;
+    $("flowInspectEdge").hidden = !edge;
+    if (edge) {
+      renderEdgeInspect(edge);
+      return;
+    }
+    if (!node) {
+      setInspectHead("流程说明", "");
+      return;
+    }
     const fixed = node.kind === "start" || node.kind === "end";
-    const structural = node.kind === "parallel" || node.kind === "subgraph";
-    const heading = node.kind === "gate"
-      ? "决策点"
-      : node.kind === "parallel"
-        ? "并行"
-        : node.kind === "subgraph"
-          ? "子图"
-          : node.kind === "system"
-            ? "系统节点"
-            : fixed
-              ? node.name
-              : "活动";
-    $("flowNodeHeading").textContent = heading;
+    const readOnly = locked();
+    setInspectHead(node.name, nodeHeading(node));
     $("flowNodeName").value = node.name;
+    $("flowNodeName").hidden = fixed;
     $("flowNodeName").label = node.kind === "gate"
       ? "决策点"
       : node.kind === "activity"
@@ -780,59 +1831,59 @@
           : node.kind === "subgraph"
             ? "子图"
             : "名称";
-    const locked = Boolean(graph.builtin);
-    $("flowNodeName").disabled = fixed || locked || node.kind === "subgraph";
-    $("flowNodeRole").disabled = locked;
-    $("flowNodeReturn").disabled = locked;
-    $("flowNodeLoops").disabled = locked;
-    $("flowNodeDecision").disabled = locked;
-    $("flowNodeReject").disabled = locked;
-    $("flowNodeRole").hidden = fixed || structural;
-    $("flowNodeReturn").hidden = fixed || structural || node.kind === "system";
-    const showLoops = !fixed && !structural && Boolean(node.returns_to);
-    $("flowNodeLoops").hidden = !showLoops;
-    if (showLoops) $("flowNodeLoops").value = node.max_loops ? String(node.max_loops) : "";
-    $("flowNodeDecision").hidden = node.kind !== "gate";
-    $("flowNodeReject").hidden = node.kind !== "gate";
-    if (node.kind === "gate") {
-      $("flowNodeDecision").value = node.decision || "approve";
-      fillRejectOptions(node);
-    }
-    $("flowContract").hidden = locked || node.kind !== "activity";
-    if (!locked && node.kind === "activity") renderContract(node);
+    $("flowNodeName").disabled = readOnly || node.kind === "subgraph";
+    const rows = fixed || node.kind === "parallel" || node.kind === "system" ? [] : nodeMenuRows(node);
+    $("flowNodeSettings").hidden = !rows.length;
+    if (rows.length) menuChip($("flowNodeMenuShell"), nodeSummary(node), () => nodeMenuRows(node), readOnly, "节点设置");
+    const hint = routeHint(node);
+    $("flowNodeRouteHint").hidden = !hint;
+    $("flowNodeRouteHint").textContent = hint;
+    $("flowContract").hidden = readOnly || node.kind !== "activity";
+    if (!readOnly && node.kind === "activity") renderContract(node);
     $("flowSubgraphBox").hidden = node.kind !== "subgraph";
     $("flowParallelBox").hidden = node.kind !== "parallel";
     if (node.kind === "subgraph") renderSubgraph(node);
     if (node.kind === "parallel") renderParallel(node);
     $("flowNodeFixed").hidden = !fixed;
-    $("btnFlowUp").hidden = fixed;
-    $("btnFlowDown").hidden = fixed;
-    $("btnFlowDelete").hidden = fixed;
-    if (!fixed) $("flowNodeRole").value = node.role;
-    fillReturnOptions(node);
-    const index = graph.nodes.findIndex((item) => item.id === node.id);
+    $("flowNodeActions").hidden = fixed || readOnly;
+    const index = indexOf(node.id);
+    $("btnFlowUp").disabled = index <= 1;
+    $("btnFlowDown").disabled = index >= graph.nodes.length - 2;
     const prev = index > 0 ? graph.nodes[index - 1].name : "无";
     const next = index < graph.nodes.length - 1 ? graph.nodes[index + 1].name : "无";
     $("flowNodeNeighbors").textContent = "前面是" + prev + "，后面是" + next + "。";
   }
 
-  function fillReturnOptions(node) {
-    const select = $("flowNodeReturn");
-    const index = graph.nodes.findIndex((item) => item.id === node.id);
-    select.replaceChildren(option("", "不回退"));
-    graph.nodes.slice(0, index).forEach((item) => {
-      if (item.kind !== "end") select.appendChild(option(item.id, item.name));
-    });
-    select.value = node.returns_to || "";
+  function edgeMenuRows(edge) {
+    const node = nodeById(edge.from);
+    const after = () => {
+      selectedEdge = edgeExists(edge) ? { from: edge.from, kind: edge.kind } : null;
+      if (!selectedEdge) selectedId = node.id;
+      renderBoard();
+      renderInspect();
+    };
+    if (edge.kind === "return") {
+      const rows = [{ title: "回退到", value: nameOf(node.returns_to), items: returnItems(node, after) }];
+      rows.push({ title: "最多循环", value: loopsText(node), items: loopItems(node) });
+      return rows;
+    }
+    return [{ title: "前往", value: nameOf(node.reject_to), items: rejectItems(node, after) }];
   }
 
-  function fillRejectOptions(node) {
-    const select = $("flowNodeReject");
-    select.replaceChildren(option("", "结束本轮"));
-    graph.nodes.forEach((item) => {
-      if (item.id !== node.id) select.appendChild(option(item.id, item.name));
-    });
-    select.value = node.reject_to || "";
+  function renderEdgeInspect(edge) {
+    const node = nodeById(edge.from);
+    const readOnly = locked();
+    const target = edge.kind === "return" ? node.returns_to : node.reject_to;
+    setInspectHead(edge.kind === "return" ? "回退" : "不通过", "连线");
+    $("flowEdgeText").textContent = edge.kind === "return"
+      ? "「" + node.name + "」未通过时回到「" + nameOf(target) + "」重做，" + loopsText(node) + "；到达上限后停下来等人处理。"
+      : "决策点「" + node.name + "」不批准时前往「" + nameOf(target) + "」。删除这条连线后，不批准即结束本轮。";
+    const parts = edge.kind === "return"
+      ? [{ text: "回到 " + nameOf(target) }, { text: loopsText(node) }]
+      : [{ text: "前往 " + nameOf(target) }];
+    menuChip($("flowEdgeMenuShell"), parts, () => edgeMenuRows(edge), readOnly, "连线设置");
+    $("flowEdgeDragHint").hidden = readOnly;
+    $("btnEdgeDelete").hidden = readOnly;
   }
 
   function renderSubgraph(node) {
@@ -998,17 +2049,6 @@
     return "b" + (max + 1);
   }
 
-  function fillRoleSelects() {
-    const add = $("flowRole");
-    const edit = $("flowNodeRole");
-    add.replaceChildren();
-    edit.replaceChildren();
-    roles.forEach((role) => {
-      add.appendChild(option(role.id, role.label));
-      edit.appendChild(option(role.id, role.label));
-    });
-  }
-
   async function loadLists() {
     const [flowRes, roleRes] = await Promise.all([
       fetch("/api/workflows").then((response) => response.json()),
@@ -1016,7 +2056,6 @@
     ]);
     roles = roleRes.roles || [];
     workflows = flowRes.workflows || [];
-    fillRoleSelects();
     const pick = $("flowPick");
     const selected = pick.value || loadedId;
     ignorePick = true;
@@ -1027,22 +2066,11 @@
     });
     if (selected) pick.value = selected;
     ignorePick = false;
-    const insert = $("flowInsertSubgraph");
-    if (insert) {
-      const chosen = insert.value;
-      insert.replaceChildren(option("", "— 选择 —"));
-      workflows.filter((item) => item.subgraph).forEach((item) => {
-        const prefix = item.builtin ? "内置 · " : "";
-        insert.appendChild(option(item.workflow_id, prefix + item.title));
-      });
-      if (chosen) insert.value = chosen;
-    }
     const none = !(flowRes.workflows || []).length;
     $("flowEmpty").hidden = !none;
     $("flowEmptyAction").hidden = !none;
     $("flowPick").hidden = none;
     $("flowPick").disabled = false;
-    if ($("btnCopyFlow")) $("btnCopyFlow").hidden = none;
     $("flowHint").hidden = none || Boolean(loadedId);
   }
 
@@ -1134,27 +2162,30 @@
 
   $("btnFlowGoNew").onclick = () => requestWorkflowMode("new");
 
-  async function copySelected(id) {
+  async function copySelected(id, title) {
     const source = workflows.find((item) => item.workflow_id === id);
     if (!id || !source) {
       showError("先选择要编辑的流程。");
       return;
     }
-    if (!confirmLeave()) return;
     showError("");
-    const response = await fetch("/api/workflows/" + encodeURIComponent(id) + "/copy", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: "副本 · " + source.title }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      showError(data.detail || "没能复制流程。");
-      return;
+    try {
+      const response = await fetch("/api/workflows/" + encodeURIComponent(id) + "/copy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        showError(data.detail || "没能复制流程。");
+        return;
+      }
+      await loadLists();
+      await enterOpen(data.workflow.workflow_id, false);
+      showSaved("已复制为 " + data.workflow.workflow_id + "。");
+    } catch (err) {
+      showError(err.message || "没能复制流程。");
     }
-    await loadLists();
-    await enterOpen(data.workflow.workflow_id, false);
-    showSaved("已复制为 " + data.workflow.workflow_id + "。");
   }
 
   if ($("flowImport")) {
@@ -1187,48 +2218,66 @@
     });
   }
 
-  if ($("btnCopyFlow")) $("btnCopyFlow").onclick = () => copySelected($("flowPick").value);
-  if ($("btnCopyLoaded")) $("btnCopyLoaded").onclick = () => copySelected(loadedId);
+  $("btnNameSave").onclick = saveNameEdit;
+  $("btnNameCancel").onclick = () => {
+    closeNameEdit();
+    $("flowPick").focus();
+  };
+  // 中文输入法用回车确认候选词时 isComposing 为真，不能当作提交。
+  const isSubmitKey = (event) => event.key === "Enter" && !event.isComposing && event.keyCode !== 229;
+  $("flowNameEdit").addEventListener("keydown", (event) => {
+    if (isSubmitKey(event)) saveNameEdit();
+    if (event.key === "Escape") {
+      closeNameEdit();
+      $("flowPick").focus();
+    }
+  });
 
-  if ($("btnDeleteFlow")) {
-    $("btnDeleteFlow").onclick = async () => {
-      const id = loadedId;
-      if (!id) {
-        showError("先选择要编辑的流程。");
+  $("btnFlowAdd").addEventListener("click", (event) => {
+    toggleMenu($("btnFlowAdd"), () => insertRows(toolbarInsertIndex()), event.detail === 0);
+  });
+  $("btnFlowMore").addEventListener("click", (event) => {
+    toggleMenu($("btnFlowMore"), moreRows, event.detail === 0);
+  });
+  $("btnSubgraphCancel").onclick = () => {
+    $("flowSubgraphForm").hidden = true;
+  };
+  $("btnDeleteCancel").onclick = () => {
+    $("flowDeleteConfirm").hidden = true;
+  };
+
+  $("btnDeleteFlow").onclick = async () => {
+    const id = loadedId;
+    if (!id || graph.builtin) return;
+    showError("");
+    showSaved("");
+    const button = $("btnDeleteFlow");
+    button.loading = true;
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/workflows/" + encodeURIComponent(id), { method: "DELETE" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        showError(data.detail || "没能删除流程。");
         return;
       }
-      if (graph.builtin) return;
-      const title = ($("flowTitle").value || "").trim() || graph.title || id;
-      if (!window.confirm("确定删除流程「" + title + "」（" + id + "）？删除后不能恢复。")) return;
-      showError("");
-      showSaved("");
-      const button = $("btnDeleteFlow");
-      button.loading = true;
-      button.disabled = true;
-      try {
-        const response = await fetch("/api/workflows/" + encodeURIComponent(id), { method: "DELETE" });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          showError(data.detail || "没能删除流程。");
-          return;
-        }
-        if (Array.isArray(window.__workflows)) {
-          window.__workflows = window.__workflows.filter((item) => item.workflow_id !== id);
-        }
-        if (typeof window.refreshWorkflowOptions === "function") window.refreshWorkflowOptions();
-        loadedId = "";
-        markClean();
-        await loadLists();
-        await enterOpen("", false);
-        showSaved("已删除 " + id + "。");
-      } catch (err) {
-        showError(err.message || "没能删除流程。");
-      } finally {
-        button.loading = false;
-        button.disabled = false;
+      if (Array.isArray(window.__workflows)) {
+        window.__workflows = window.__workflows.filter((item) => item.workflow_id !== id);
       }
-    };
-  }
+      if (typeof window.refreshWorkflowOptions === "function") window.refreshWorkflowOptions();
+      loadedId = "";
+      markClean();
+      await loadLists();
+      await enterOpen("", false);
+      showSaved("已删除 " + id + "。");
+    } catch (err) {
+      showError(err.message || "没能删除流程。");
+    } finally {
+      button.loading = false;
+      button.disabled = false;
+      $("flowDeleteConfirm").hidden = true;
+    }
+  };
 
   $("btnCreateFlow").onclick = async () => {
     const title = ($("flowTitle").value || "").trim();
@@ -1309,100 +2358,12 @@
       showError(data.detail || "没能保存流程。");
       return;
     }
+    const renamed = (workflows.find((item) => item.workflow_id === loadedId) || {}).title !== data.workflow.title;
     setGraph(data.workflow, data.yaml);
+    if (renamed) await loadLists();
     showPieces();
     markClean();
     showSaved("已保存 " + loadedId + "。");
-  };
-
-  $("btnSaveFlowRaw").onclick = async () => {
-    if (!loadedId) return;
-    if (!confirmLeave() && $("flowYaml").value !== yamlText) return;
-    const response = await fetch("/api/workflows/" + encodeURIComponent(loadedId) + "/raw", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ yaml: $("flowYaml").value }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      showError(data.detail || "没能用原文覆盖。");
-      return;
-    }
-    setGraph(data.workflow, data.yaml);
-    selectedId = "";
-    showPieces();
-    markClean();
-    showSaved("已用原文覆盖 " + loadedId + "。");
-  };
-
-  $("btnAddActivity").onclick = () => {
-    const name = ($("flowActivityName").value || "").trim();
-    const role = $("flowRole").value;
-    if (!name) {
-      showError("先写活动名。");
-      $("flowActivityName").focus();
-      return;
-    }
-    if (!role) {
-      showError("活动要选择已有角色。");
-      return;
-    }
-    showError("");
-    const created = {
-      id: nextNodeId(),
-      kind: role === "human" ? "gate" : "activity",
-      name,
-      role,
-      returns_to: "",
-      decision: role === "human" ? "approve" : "",
-    };
-    if (created.kind === "activity") applyRoleContract(created, role, false);
-    graph.nodes.splice(graph.nodes.length - 1, 0, created);
-    $("flowActivityName").value = "";
-    renderBoard();
-  };
-
-  $("btnAddGate").onclick = () => {
-    const name = ($("flowGateName").value || "").trim();
-    if (!name) {
-      showError("先写决策点。");
-      $("flowGateName").focus();
-      return;
-    }
-    showError("");
-    graph.nodes.splice(graph.nodes.length - 1, 0, {
-      id: nextNodeId(),
-      kind: "gate",
-      name,
-      role: "human",
-      returns_to: "",
-      decision: "approve",
-    });
-    $("flowGateName").value = "";
-    renderBoard();
-  };
-
-  $("btnAddParallel").onclick = () => {
-    const name = ($("flowParallelName").value || "").trim();
-    if (!name) {
-      showError("先写并行的名称。");
-      $("flowParallelName").focus();
-      return;
-    }
-    showError("");
-    graph.nodes.splice(graph.nodes.length - 1, 0, {
-      id: nextNodeId(),
-      kind: "parallel",
-      name,
-      role: "",
-      returns_to: "",
-      branches: [
-        { id: "b1", name: "实现甲", nodes: [] },
-        { id: "b2", name: "实现乙", nodes: [] },
-      ],
-    });
-    $("flowParallelName").value = "";
-    renderBoard();
   };
 
   $("btnSaveSubgraph").onclick = async () => {
@@ -1430,29 +2391,9 @@
       return;
     }
     $("flowSubgraphTitle").value = "";
+    $("flowSubgraphForm").hidden = true;
     await loadLists();
     showSaved("已存为子图 " + data.workflow.workflow_id + "。");
-  };
-
-  $("btnInsertSubgraph").onclick = () => {
-    if (graph.subgraph) return;
-    const subgraphId = $("flowInsertSubgraph").value;
-    if (!subgraphId) {
-      showError("先选择要插入的子图。");
-      return;
-    }
-    const found = workflows.find((item) => item.workflow_id === subgraphId);
-    showError("");
-    graph.nodes.splice(graph.nodes.length - 1, 0, {
-      id: nextNodeId(),
-      kind: "subgraph",
-      name: found ? found.title : subgraphId,
-      role: "",
-      returns_to: "",
-      subgraph_id: subgraphId,
-    });
-    renderBoard();
-    renderInspect();
   };
 
   $("btnOpenSubgraph").onclick = () => {
@@ -1492,6 +2433,12 @@
     });
   }
 
+  $("flowTitle").addEventListener("keydown", (event) => {
+    if (mode === "new" && isSubmitKey(event)) $("btnCreateFlow").click();
+  });
+  $("flowSubgraphTitle").addEventListener("keydown", (event) => {
+    if (isSubmitKey(event)) $("btnSaveSubgraph").click();
+  });
   $("flowTitle").addEventListener("input", () => {
     graph.title = $("flowTitle").value;
   });
@@ -1502,67 +2449,63 @@
     const node = selectedNode();
     if (!node || node.kind === "start" || node.kind === "end") return;
     node.name = $("flowNodeName").value.trim() || node.name;
+    $("flowInspectTitle").textContent = node.name;
     renderBoard();
-  });
-  $("flowNodeRole").addEventListener("change", () => {
-    const node = selectedNode();
-    if (!node || node.kind === "start" || node.kind === "end") return;
-    const nextRole = $("flowNodeRole").value;
-    const nextKind = nextRole === "human" ? "gate" : "activity";
-    if (nextKind === "activity" && !node.contractTouched) applyRoleContract(node, nextRole, false);
-    if (nextKind !== "activity") {
-      delete node.inputs;
-      delete node.outputs;
-      node.contractTouched = false;
-    }
-    node.role = nextRole;
-    node.kind = nextKind;
-    node.decision = node.kind === "gate" ? (node.decision || "approve") : "";
-    renderBoard();
-    renderInspect();
-  });
-  $("flowNodeReturn").addEventListener("change", () => {
-    const node = selectedNode();
-    if (!node) return;
-    node.returns_to = $("flowNodeReturn").value;
-    if (!node.returns_to) delete node.max_loops;
-    renderBoard();
-    renderInspect();
-  });
-  $("flowNodeReject").addEventListener("change", () => {
-    const node = selectedNode();
-    if (!node || node.kind !== "gate") return;
-    const target = $("flowNodeReject").value;
-    if (target) node.reject_to = target;
-    else delete node.reject_to;
-  });
-  $("flowNodeLoops").addEventListener("input", () => {
-    const node = selectedNode();
-    if (!node) return;
-    const raw = ($("flowNodeLoops").value || "").trim();
-    const count = Number(raw);
-    if (!raw || !Number.isInteger(count) || count < 1) delete node.max_loops;
-    else node.max_loops = count;
-  });
-  $("flowNodeDecision").addEventListener("change", () => {
-    const node = selectedNode();
-    if (!node || node.kind !== "gate") return;
-    node.decision = $("flowNodeDecision").value;
   });
   $("btnFlowUp").onclick = () => moveSelected(-1);
   $("btnFlowDown").onclick = () => moveSelected(1);
-  $("btnFlowDelete").onclick = () => {
-    const node = selectedNode();
-    if (!node || node.kind === "start" || node.kind === "end") return;
-    if (!window.confirm("删除「" + node.name + "」？删除后前后节点会重新连上。")) return;
-    graph.nodes = graph.nodes.filter((item) => item.id !== node.id);
-    graph.nodes.forEach((item) => {
-      if (item.returns_to === node.id) item.returns_to = "";
-    });
-    selectedId = "";
-    renderBoard();
-    renderInspect();
+  $("btnFlowDelete").onclick = () => deleteNode(selectedNode());
+  $("btnEdgeDelete").onclick = () => {
+    if (selectedEdge && !locked()) deleteEdge(selectedEdge);
   };
+  $("btnEdgeSource").onclick = () => {
+    if (selectedEdge) selectNode(selectedEdge.from);
+  };
+
+  $("flowScroll").addEventListener("scroll", updateScrollHints, { passive: true });
+  if (typeof ResizeObserver === "function") {
+    let refit = 0;
+    new ResizeObserver(() => {
+      updateScrollHints();
+      if (refit) return;
+      refit = requestAnimationFrame(() => {
+        refit = 0;
+        const scroll = $("flowScroll");
+        const board = $("flowBoard");
+        if (Math.abs(scroll.clientWidth - fittedWidth) < 2) return;
+        if (board.classList.contains("is-edge-dragging") || board.querySelector(".flow-node[style*=translateX]")) return;
+        renderBoard();
+      });
+    }).observe($("flowScroll"));
+  }
+  $("flowScroll").addEventListener("keydown", (event) => {
+    if (event.defaultPrevented || event.target.closest("input, textarea, wa-input, wa-textarea")) return;
+    if (event.key === "Escape" && (selectedId || selectedEdge)) {
+      selectNode("");
+      return;
+    }
+    if (event.key !== "Delete" && event.key !== "Backspace") return;
+    if (locked()) return;
+    if (selectedEdge) {
+      event.preventDefault();
+      deleteEdge(selectedEdge);
+    } else if (selectedId) {
+      event.preventDefault();
+      deleteNode(selectedNode());
+    }
+  });
+
+  const flowView = document.querySelector('.app-view[data-route="workflow"]');
+  if (flowView) {
+    ["input", "change", "click"].forEach((type) => {
+      flowView.addEventListener(type, () => setTimeout(refreshDirty, 0));
+    });
+  }
+  window.addEventListener("beforeunload", (event) => {
+    if (location.pathname !== "/workflow" || !isDirty() || mode !== "open") return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
 
   document.addEventListener("DOMContentLoaded", () => {});
 

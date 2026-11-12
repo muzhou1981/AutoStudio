@@ -84,6 +84,52 @@ def test_workflow_api_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert developer["outputs"] == []
 
 
+
+def test_copy_derives_id_from_source_without_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """复制流程时标识由原标识派生，不调用模型翻译标题。"""
+    _root(tmp_path, monkeypatch)
+
+    def fail(_text: str) -> str:
+        raise AssertionError("复制流程不应调用模型")
+
+    monkeypatch.setattr("geni_studio.config.identifiers.backend_translate", fail)
+    client = TestClient(app)
+    assert client.post("/api/workflows", json={"workflow_id": "demo", "title": "演示"}).status_code == 200
+    first = client.post("/api/workflows/demo/copy", json={"title": "副本 · 演示"})
+    assert first.status_code == 200
+    assert first.json()["workflow"]["workflow_id"] == "demo-copy"
+    second = client.post("/api/workflows/demo-copy/copy", json={"title": "副本 · 副本 · 演示"})
+    assert second.json()["workflow"]["workflow_id"] == "demo-copy-2"
+
+def test_editor_save_keeps_fields_without_controls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """编辑器保存时原样带回它没有控件的字段；原文覆盖入口已经去掉。"""
+    _root(tmp_path, monkeypatch)
+    client = TestClient(app)
+    assert client.post("/api/workflows", json={"workflow_id": "demo", "title": "演示"}).status_code == 200
+    body = {
+        "title": "演示",
+        "workspace": "current_branch",
+        "profile": {"features": {"design_track": True}, "limits": {"dev_retries": 2}},
+        "nodes": [
+            {"id": "start", "kind": "start", "name": "启动", "role": "human", "returns_to": ""},
+            {
+                "id": "n1", "kind": "activity", "name": "开发", "role": "developer", "returns_to": "",
+                "instruction": "写清变更说明。", "primary_output": "code_change",
+                "outputs": [{"name": "code_change", "source": "link", "template": "https://example.com/t.md"}],
+            },
+            {"id": "end", "kind": "end", "name": "结束", "role": "human", "returns_to": ""},
+        ],
+    }
+    saved = client.put("/api/workflows/demo", json=body)
+    assert saved.status_code == 200, saved.text
+    workflow = get_workflow("demo", root=tmp_path)["workflow"]
+    assert workflow["workspace"] == "current_branch"
+    assert workflow["profile"] == {"features": {"design_track": True}, "limits": {"dev_retries": 2}}
+    assert workflow["nodes"][1]["instruction"] == "写清变更说明。"
+    assert workflow["nodes"][1]["primary_output"] == "code_change"
+    assert client.put("/api/workflows/demo/raw", json={"yaml": "title: x\n"}).status_code in (404, 405)
+
+
 def test_delete_plain_workflow_via_api_and_refuse_when_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

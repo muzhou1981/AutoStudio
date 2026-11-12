@@ -67,19 +67,26 @@ def test_gate_rejection_after_escalation_continue_takes_effect(
         encoding="utf-8",
     )
     _patch_root(monkeypatch, tmp_path)
-    calls = {"project_manager": 0}
+    calls = {"project_manager": 0, "developer": 0}
+    prompts: list[str] = []
 
     def fake_invoke(*, role_name: str, user_prompt: str, stub_note: str, model: str | None = None) -> str:
         if role_name == "developer":
-            return "未通过\nSTATUS: fail"
+            calls["developer"] += 1
+            return "未通过\nSTATUS: fail" if calls["developer"] == 1 else "改好了"
         calls["project_manager"] += 1
+        prompts.append(user_prompt)
         return f"[stub:{role_name}] {stub_note}"
 
     monkeypatch.setattr("geni_studio.backends.runner.invoke_role", fake_invoke)
     svc = GraphRunService(compile_graph(MemorySaver()))
     st = svc.start(human_request="做一件事", scenario_key="demo", project_id="bound")
     assert st.awaiting_human is not None and st.awaiting_human.kind == "escalation"
+    assert calls == {"project_manager": 1, "developer": 1}
     st = svc.submit_hitl(st.thread_id, escalation_choice="continue")
+    # 继续即重做一次：回到回退目标「起草」，再执行「开发」。
+    assert calls == {"project_manager": 2, "developer": 2}
+    assert "「开发」未通过" in prompts[-1]
     assert st.awaiting_human is not None and st.awaiting_human.gate_id == "n4"
     drafted = calls["project_manager"]
     svc._write_values(st.thread_id, {"gate_timeout_note": "超时未批复"})

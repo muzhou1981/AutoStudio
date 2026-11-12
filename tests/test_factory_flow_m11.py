@@ -186,4 +186,9 @@ def test_project_page_requires_a_workflow_and_role_model_selects():
     assert 'id="runRoleModels"' not in page
     assert 'id="fieldDirProfile"' in page
     assert ">所选流程</h2>" in page
-    assert 'id="btnCopyFlow"' in page
+    assert 'id="btnCopyFlow"' not in page and 'id="flowRenameForm"' not in page
+    assert 'id="flowNameEdit"' in page and 'id="btnNameSave" variant="brand" hidden>保存</wa-button>' in page
+    flow_script = TestClient(app).get("/static/workflow.js").text
+    assert 'rows.push({ title: "复制为新流程", onPick: () => openNameEdit("copy") });' in flow_script
+    assert 'if (!builtin) rows.push({ title: "重命名…", onPick: () => openNameEdit("rename") });' in flow_script
+    assert "body: JSON.stringify({ ...savedGraph, title })," in flow_script

@@ -109,7 +109,7 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert "安装步骤写在仓库的 README" in text
     assert 'id="btnContinueRun"' in text
     assert "这一轮在中途中断" in text
-    assert 'id="flowNodeLoops"' in text
+    assert 'id="flowNodeMenuShell"' in text and 'id="flowInspectEdge"' in text
     assert "合规管理负责隐私、网络安全和知识产权" in text
     assert "入门指南" in text
     assert 'data-help-article="workflow"' in text
@@ -192,21 +192,26 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     todo_at = text.index('id="region-todo"')
     inspect_run_at = text.index("inspect-body-run")
     assert inspect_run_at < todo_at
-    assert 'id="btnDeleteFlow" appearance="outlined" variant="danger" hidden' in text
-    assert "载入非内置流程后，可以在复制和保存旁边删除。" in text
-    save_at = text.index('id="flowSaveRow"')
-    copy_at = text.index('id="btnCopyLoaded"')
-    save_btn_at = text.index('id="btnSaveFlow"')
-    delete_at = text.index('id="btnDeleteFlow"')
-    assert save_at < copy_at < save_btn_at < delete_at
-    assert "btnDeleteFlow" not in text[text.index('id="btnCopyFlow"'):save_at]
+    # 流程编辑：删除流程移入「更多」并在原位确认，不与保存相邻；只保留一个复制入口；不再显示原文 YAML
+    assert 'id="flowDeleteConfirm"' in text and 'id="btnDeleteFlow" variant="danger">删除流程</wa-button>' in text
+    assert "删除在选择框右侧的「更多」里" in text
+    toolbar = text[text.index('<div class="flow-head-row">'):text.index('id="flowEditor"')]
+    assert 'id="btnSaveFlow" variant="brand"' in toolbar and "btnDeleteFlow" not in toolbar
+    assert 'id="flowToolbar"' not in text
+    assert 'id="btnCopyLoaded"' not in text and 'id="flowRaw"' not in text and 'id="flowYaml"' not in text
+    assert 'class="flow-composer"' not in text
     script = TestClient(app).get("/static/workflow.js").text
-    assert 'btnDeleteFlow").hidden = !created || builtin' in script
-    assert 'btnCopyLoaded").hidden = !created' in script
-    assert 'btnSaveFlow").hidden = !created || builtin' in script
-    assert 'window.confirm("确定删除流程「" + title + "」（" + id + "）？删除后不能恢复。")' in script
+    assert '$("btnSaveFlow").hidden = on || !created || builtin' in script
+    assert "!event.isComposing && event.keyCode !== 229" in script
+    assert 'title: "删除流程…", danger: true, onPick: openDeleteConfirm' in script
+    assert "删除后不能恢复。" in script
     assert 'fetch("/api/workflows/" + encodeURIComponent(id), { method: "DELETE" })' in script
-    assert "if (graph.builtin) return;" in script
+    assert "/raw" not in script
+    # 回退与不通过都画成虚线，从右侧绕回左侧；连线中点可插入节点；节点设置用级联菜单
+    assert 'edges.push({ from: node.id, to: node.reject_to, kind: "reject" })' in script
+    assert "function loopLink(a, b, y)" in script and "function insertButton(a, b, index)" in script
+    assert "function edgeHandle(edge)" in script and "function nodeMenuRows(node)" in script
+    assert "if (!id || graph.builtin) return;" in script
     assert 'await enterOpen("", false);' in script
     assert 'showSaved("已删除 " + id + "。");' in script
     config = TestClient(app).get("/static/config.js").text
