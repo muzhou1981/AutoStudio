@@ -55,7 +55,7 @@ def test_stub_backend_still_gets_the_full_text(tmp_path, monkeypatch):
     prompts: list[tuple[str, str]] = []
     st = _start(tmp_path, monkeypatch, prompts)
     tester = next(prompt for role, prompt in prompts if role == "tester")
-    assert f"需求说明：\n{st.values['requirement_spec']}" in tester
+    assert f"requirement_spec：\n{st.values['requirement_spec']}" in tester
 
 
 def test_attempts_count_up_and_long_text_is_not_truncated():

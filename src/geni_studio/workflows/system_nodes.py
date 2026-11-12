@@ -5,30 +5,30 @@ from __future__ import annotations
 from typing import Any
 
 # 节点实现在 workflows/default.py；按名称在调用时查找，便于测试替换。
+# 系统节点不调用 Agent；调用 Agent 的步骤都是活动，提示词由编译器统一拼装。
 HANDLERS = frozenset(
     {
-        "project_manager_draft",
         "pm_clarification_check",
         "hitl_pause",
-        "tester_testability",
         "config_manager_plan",
-        "ux_designer",
-        "ui_designer",
-        "visual_designer",
-        "finance_budget_rough",
         "project_manager_scope",
-        "architect",
-        "finance_budget_final",
-        "developer",
         "change_control",
-        "code_reviewer",
-        "tester_execute",
-        "qa",
-        "finance_cost_snapshot",
-        "project_manager_delivery",
-        "config_manager_closeout",
-        "process_owner_retro",
         "escalate_dev_retry",
+    }
+)
+
+# 活动的内置后处理（workflows/default.py 的 EFFECTS）：在 Agent 返回后做判定并写入流程状态。
+EFFECTS = frozenset(
+    {
+        "developer",
+        "code_review",
+        "test_execute",
+        "qa_gate",
+        "delivery",
+        "retro",
+        "budget_rough",
+        "budget_final",
+        "cost_snapshot",
     }
 )
 
@@ -40,6 +40,12 @@ def handler(name: str):
     from geni_studio.workflows import default
 
     return getattr(default, name)
+
+
+def effect(name: str):
+    from geni_studio.workflows import default
+
+    return default.EFFECTS[name]
 
 
 def condition_problem(cond: Any) -> str:

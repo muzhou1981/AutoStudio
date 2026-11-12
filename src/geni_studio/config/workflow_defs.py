@@ -59,6 +59,21 @@ def _output_items(value: object) -> list[dict[str, str]]:
     return items
 
 
+def _output_entries(value: object) -> list[str | dict[str, str]]:
+    """保留只写名称的输出：它们取自角色契约，不带模板。"""
+    raw = [value] if isinstance(value, str) else value
+    if not isinstance(raw, list):
+        return []
+    entries: list[str | dict[str, str]] = []
+    for item in raw:
+        if isinstance(item, str):
+            if item.strip():
+                entries.append(item.strip())
+        else:
+            entries.extend(_output_items([item]))
+    return entries
+
+
 def list_role_lanes(root: Path | None = None) -> list[dict[str, Any]]:
     """活动可选的角色。显示名用 role.md 的 title。人类放在最前，用来添加人工关卡。"""
     root = root or factory_root()
@@ -123,11 +138,15 @@ def uses_current_branch(workflow_id: str, root: Path | None = None) -> bool:
 
 
 def has_system_nodes(workflow_id: str, root: Path | None = None) -> bool:
-    """系统节点的路由按节点标识书写，这类流程不能当作子图插入。"""
+    """系统节点、内置后处理和条件去向按节点标识书写，这类流程不能当作子图插入。"""
     if not workflow_exists(workflow_id, root):
         return False
     data = _read_yaml(_workflow_path(workflow_id, root, must_exist=True))
-    return any(isinstance(node, dict) and node.get("kind") == "system" for node in data.get("nodes") or [])
+    return any(
+        isinstance(node, dict)
+        and (node.get("kind") == "system" or node.get("effect") or node.get("routes") or node.get("next"))
+        for node in data.get("nodes") or []
+    )
 
 
 def workflow_activity_roles(workflow_id: str, root: Path | None = None) -> list[dict[str, str]]:
@@ -507,7 +526,7 @@ def validate_workflow(
             if "inputs" in raw:
                 item["inputs"] = _name_list(raw.get("inputs"))
             if "outputs" in raw:
-                item["outputs"] = _output_items(raw.get("outputs"))
+                item["outputs"] = _output_entries(raw.get("outputs"))
             primary = str(raw.get("primary_output") or "").strip()
             if primary:
                 item["primary_output"] = primary
@@ -515,6 +534,8 @@ def validate_workflow(
             item.update(_system_fields(raw, name))
         if kind == "activity" and raw.get("when") not in (None, ""):
             item["when"] = _condition(raw.get("when"), name)
+        if kind == "activity":
+            item.update(_activity_fields(raw, name, returns_to))
         if kind == "subgraph":
             subgraph_id = str(raw.get("subgraph_id") or "").strip()
             _require_subgraph(subgraph_id, expected, root, seen_graphs=set())
@@ -600,14 +621,40 @@ def _system_fields(raw: dict[str, Any], name: str) -> dict[str, Any]:
     out: dict[str, Any] = {"handler": handler}
     if raw.get("when") not in (None, ""):
         out["when"] = _condition(raw.get("when"), name)
+    out.update(_route_fields(raw, name))
+    return out
+
+
+def _activity_fields(raw: dict[str, Any], name: str, returns_to: str) -> dict[str, Any]:
+    """活动的补充说明、内置后处理与条件去向。"""
+    from geni_studio.workflows.system_nodes import EFFECTS
+
+    out: dict[str, Any] = {}
+    instruction = str(raw.get("instruction") or "").strip()
+    if instruction:
+        out["instruction"] = instruction
+    effect = str(raw.get("effect") or "").strip()
+    if effect:
+        if effect not in EFFECTS:
+            raise ConfigError(f"活动「{name}」的内置后处理「{effect}」不存在。")
+        out["effect"] = effect
+    routing = _route_fields(raw, name)
+    if routing and returns_to:
+        raise ConfigError(f"活动「{name}」已写回退，不能再用 routes 或 next 声明去向。")
+    out.update(routing)
+    return out
+
+
+def _route_fields(raw: dict[str, Any], name: str) -> dict[str, Any]:
+    out: dict[str, Any] = {}
     routes = raw.get("routes")
     if routes not in (None, []):
         if not isinstance(routes, list):
-            raise ConfigError(f"系统节点「{name}」的 routes 须为列表。")
+            raise ConfigError(f"「{name}」的 routes 须为列表。")
         cleaned: list[dict[str, Any]] = []
         for route in routes:
             if not isinstance(route, dict) or not str(route.get("to") or "").strip() or not route.get("when"):
-                raise ConfigError(f"系统节点「{name}」的每条路由都要写 when 和 to。")
+                raise ConfigError(f"「{name}」的每条路由都要写 when 和 to。")
             cleaned.append({"when": _condition(route["when"], name), "to": str(route["to"]).strip()})
         out["routes"] = cleaned
     nxt = str(raw.get("next") or "").strip()

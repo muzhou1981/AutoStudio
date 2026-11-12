@@ -7,10 +7,11 @@ import threading
 import time
 from typing import Any
 
-from geni_studio.backends.reasoning import KNOWN_EFFORTS
+from geni_studio.backends.reasoning import KNOWN_EFFORTS, MODEL_PARAMS
 
 # Cursor 各模型表达推理强度的参数名不统一，按此顺序取第一个出现的。
 _CURSOR_EFFORT_PARAMS = ("effort", "reasoning_effort", "reasoning")
+_CURSOR_FAST_PARAM = "fast"
 _CATALOG_TTL_SECONDS = 600
 _cursor_catalog: dict[str, Any] = {"at": 0.0, "key": "", "rows": []}
 _cursor_catalog_lock = threading.Lock()
@@ -57,23 +58,126 @@ def cursor_model_row(item: Any) -> dict[str, Any] | None:
     label = str(getattr(item, "display_name", "") or "").strip() or model_id
     row: dict[str, Any] = {"id": model_id, "label": label}
     params = {str(getattr(p, "id", "")): p for p in getattr(item, "parameters", ()) or ()}
-    param_id = next((name for name in _CURSOR_EFFORT_PARAMS if name in params), "")
-    if not param_id:
-        return row
-    efforts = [
-        {"id": str(v.value), "label": str(getattr(v, "display_name", "") or v.value)}
-        for v in params[param_id].values
-        if str(v.value) in KNOWN_EFFORTS
-    ]
-    if not efforts:
-        return row
-    default = ""
+    defaults: dict[str, str] = {}
     for variant in getattr(item, "variants", ()) or ():
         if getattr(variant, "is_default", False):
-            default = next((str(p.value) for p in variant.params if p.id == param_id), "")
+            defaults = {str(p.id): str(p.value) for p in variant.params}
             break
-    row.update(reasoning_param=param_id, reasoning_efforts=efforts, default_reasoning_effort=default)
+    fast = params.get(_CURSOR_FAST_PARAM)
+    if fast is not None and {str(v.value) for v in fast.values} >= {"true", "false"}:
+        row.update(fast=True, default_fast={"true": "on", "false": "off"}.get(defaults.get(_CURSOR_FAST_PARAM, ""), ""))
+    extra = [
+        {
+            "id": name,
+            "values": [
+                {"id": str(v.value), "label": str(getattr(v, "display_name", "") or v.value)}
+                for v in params[name].values
+            ],
+            "default": defaults.get(name, ""),
+        }
+        for name in MODEL_PARAMS
+        if name in params and params[name].values
+    ]
+    if extra:
+        row["params"] = extra
+    param_id = next((name for name in _CURSOR_EFFORT_PARAMS if name in params), "")
+    efforts = [
+        {"id": str(v.value), "label": str(getattr(v, "display_name", "") or v.value)}
+        for v in (params[param_id].values if param_id else ())
+        if str(v.value) in KNOWN_EFFORTS
+    ]
+    if efforts:
+        row.update(
+            reasoning_param=param_id, reasoning_efforts=efforts,
+            default_reasoning_effort=defaults.get(param_id, ""),
+        )
+    combos = _selectable_variants(item, row)
+    if combos:
+        row["variants"] = combos
     return row
+
+
+def _selectable_variants(item: Any, row: dict[str, Any]) -> list[dict[str, str]]:
+    """目录允许的组合，只保留页面可选的参数。
+
+    全组合都允许，或变体没有逐项列出这些参数（无从判断）时返回空，不做组合校验。
+    """
+    names = {str(p["id"]) for p in row.get("params", ())}
+    if row.get("reasoning_param"):
+        names.add(str(row["reasoning_param"]))
+    if row.get("fast"):
+        names.add(_CURSOR_FAST_PARAM)
+    if not names:
+        return []
+    seen: list[dict[str, str]] = []
+    for variant in getattr(item, "variants", ()) or ():
+        combo = {str(p.id): str(p.value) for p in variant.params if str(p.id) in names}
+        if set(combo) != names:
+            return []
+        if combo not in seen:
+            seen.append(combo)
+    full = 1
+    for param in getattr(item, "parameters", ()) or ():
+        if str(getattr(param, "id", "")) in names:
+            full *= max(len(param.values), 1)
+    return seen if len(seen) < full else []
+
+
+def cursor_selection_params(model: str, effort: str, fast: str, extra: dict[str, str]) -> list[tuple[str, str]]:
+    """把本轮选择换成 Cursor 模型参数；参数未声明、取值不支持或组合不在目录中时报错。"""
+    rows = _cursor_rows()
+    if not rows:
+        raise RuntimeError("读不到 Cursor 模型列表，无法设置模型参数。")
+    row = next((item for item in rows if item["id"] == model), None)
+    if row is None:
+        raise ValueError(f"Cursor 模型 {model} 不在模型目录中。")
+    chosen: list[tuple[str, str]] = []
+    if effort:
+        chosen.append((cursor_effort_param(model, effort), effort))
+    if fast:
+        cursor_fast_supported(model)
+        chosen.append((_CURSOR_FAST_PARAM, "true" if fast == "on" else "false"))
+    declared = {str(p["id"]): p for p in row.get("params", ())}
+    for name, value in sorted(extra.items()):
+        param = declared.get(name)
+        if param is None:
+            raise ValueError(f"Cursor 模型 {model} 没有参数 {name}。")
+        if value not in {str(v["id"]) for v in param["values"]}:
+            raise ValueError(f"Cursor 模型 {model} 的参数 {name} 不支持取值 {value}。")
+        chosen.append((name, value))
+    combos = row.get("variants") or []
+    if not combos:
+        return chosen
+    picked = dict(chosen)
+    fits = [combo for combo in combos if all(combo.get(k) == v for k, v in picked.items())]
+    if not fits:
+        text = "、".join(f"{k}={v}" for k, v in chosen)
+        raise ValueError(f"Cursor 模型 {model} 不支持这组参数：{text}。")
+    defaults = _default_combo(row)
+    if not any(all(combo.get(k) == v for k, v in {**defaults, **picked}.items()) for combo in fits):
+        # 未选的项由服务端按默认补齐会落到目录外的组合，改为显式传离默认最近的允许组合。
+        best = max(fits, key=lambda combo: sum(combo.get(k) == v for k, v in defaults.items()))
+        chosen += [(k, best[k]) for k in sorted(best) if k not in picked and best[k] != defaults.get(k)]
+    return chosen
+
+
+def _default_combo(row: dict[str, Any]) -> dict[str, str]:
+    combo = {str(p["id"]): str(p["default"]) for p in row.get("params", ()) if p.get("default")}
+    if row.get("reasoning_param") and row.get("default_reasoning_effort"):
+        combo[str(row["reasoning_param"])] = str(row["default_reasoning_effort"])
+    if row.get("default_fast"):
+        combo[_CURSOR_FAST_PARAM] = "true" if row["default_fast"] == "on" else "false"
+    return combo
+
+
+def cursor_fast_supported(model: str) -> None:
+    """模型不支持 Fast 模式时报错，不静默忽略。"""
+    rows = _cursor_rows()
+    if not rows:
+        raise RuntimeError("读不到 Cursor 模型列表，无法设置 Fast 模式。")
+    row = next((item for item in rows if item["id"] == model), None)
+    if row is None or not row.get("fast"):
+        raise ValueError(f"Cursor 模型 {model} 不支持 Fast 模式。")
 
 
 def cursor_effort_param(model: str, effort: str) -> str:

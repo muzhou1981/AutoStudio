@@ -114,7 +114,8 @@
       const pill = $("phasePill");
       pill.dataset.phase = p;
       pill.variant = PHASE_VARIANT[p] || "neutral";
-      $("phaseLabel").textContent = PHASE_LABELS[p] || p;
+      $("phaseLabel").textContent = "本轮" + (PHASE_LABELS[p] || p);
+      pill.title = "整轮的阶段，不是所选步骤的状态";
     }
 
     function showError(el, msg) {
@@ -207,6 +208,109 @@
       loadedDraftProject = "";
     }
 
+    /**
+     * 未启动的 Run 改动后自动存为服务端草稿：停笔约 1 秒保存；切换 Run、新建、复制与关页前立即保存。
+     * 所有草稿保存排成一队依次发出，首次保存得到的草稿号由同一份表单的后续保存沿用；
+     * 表单换成另一份 Run 后（draftEpoch 变化），在途的保存只记下草稿号，不再改动页面。
+     */
+    const DRAFT_AUTOSAVE_MS = 1000;
+    let draftEpoch = 0;
+    let draftAutosaveTimer = 0;
+    let draftQueue = Promise.resolve();
+    const draftIdsByEpoch = new Map();
+
+    function draftBody(projectId) {
+      return {
+        project_id: projectId,
+        run_name: String($("runName").value || "").trim(),
+        human_request: $("req").value.trim(),
+        node_tools: pendingNodeTools,
+        attachments: runAttachments.map((item) => ({ id: item.id, name: item.name, size: item.size })),
+        role_models: pendingRoleModels,
+        role_reasoning_efforts: pendingRoleReasoningEfforts,
+        role_fast_modes: pendingRoleFastModes,
+        role_model_params: pendingRoleModelParams,
+      };
+    }
+
+    function draftWorthSaving() {
+      if ($("thread").value.trim() || !String($("project").value || "").trim()) return false;
+      if (runReasoningError()) return false;
+      return !!(draftId || $("req").value.trim() || runAttachments.length
+        || (runNameTouched && String($("runName").value || "").trim())
+        || [pendingNodeTools, pendingRoleModels, pendingRoleReasoningEfforts, pendingRoleFastModes, pendingRoleModelParams]
+          .some((map) => Object.keys(map).length));
+    }
+
+    async function sendDraft(body, epoch, keepalive) {
+      const current = epoch === draftEpoch;
+      const id = current ? draftId : draftIdsByEpoch.get(epoch) || "";
+      const r = await fetch("/api/runs/drafts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, draft_id: id }),
+        keepalive: !!keepalive,
+      });
+      const { ok, data } = await readFetchResponse(r);
+      if (!ok) {
+        if (epoch === draftEpoch) showError($("startError"), apiErrorMessage(data, "Run 配置没有自动保存。"));
+        return;
+      }
+      draftIdsByEpoch.set(epoch, data.draft_id);
+      if (epoch !== draftEpoch || $("thread").value.trim()) {
+        void loadRunList();
+        return;
+      }
+      const created = !draftId;
+      draftId = data.draft_id;
+      draftName = data.run_name || "";
+      loadedDraftProject = String(data.project_id || body.project_id);
+      if (!String($("runName").value || "").trim() && data.run_name) $("runName").value = data.run_name;
+      syncUrlDraft(draftId);
+      setPhase("saved");
+      syncStartButton("saved");
+      showRunSaved("已自动保存，尚未启动。");
+      if (created) void loadRunList();
+    }
+
+    function queueDraftSave(keepalive) {
+      clearTimeout(draftAutosaveTimer);
+      draftAutosaveTimer = 0;
+      if (!draftWorthSaving()) return draftQueue;
+      const body = draftBody(String($("project").value || "").trim());
+      const epoch = draftEpoch;
+      draftQueue = draftQueue
+        .then(() => sendDraft(body, epoch, keepalive))
+        .catch(() => {
+          if (epoch === draftEpoch) showError($("startError"), "Run 配置没有自动保存。检查服务是否还在。");
+        });
+      return draftQueue;
+    }
+
+    function scheduleDraftAutosave() {
+      if ($("thread").value.trim()) return;
+      clearTimeout(draftAutosaveTimer);
+      draftAutosaveTimer = setTimeout(() => { void queueDraftSave(false); }, DRAFT_AUTOSAVE_MS);
+    }
+
+    /** 表单要换成另一份 Run 前调用：有待保存的改动先存掉，再让在途的保存不再改动页面。 */
+    function leaveDraftForm() {
+      if (draftAutosaveTimer) void queueDraftSave(false);
+      if (draftId) draftIdsByEpoch.set(draftEpoch, draftId);
+      draftEpoch += 1;
+    }
+
+    /** 当前草稿将被删除或启动时调用：丢弃待保存的改动，等在途的保存返回，使草稿号确定。 */
+    function settleDraftSaves() {
+      clearTimeout(draftAutosaveTimer);
+      draftAutosaveTimer = 0;
+      return draftQueue;
+    }
+
+    window.addEventListener("pagehide", () => {
+      if (draftAutosaveTimer) void queueDraftSave(true);
+    });
+
     let runAttachments = [];
 
     function formatAttachSize(bytes) {
@@ -236,6 +340,7 @@
         remove.addEventListener("click", () => {
           runAttachments = runAttachments.filter((entry) => entry.id !== item.id);
           renderAttachments();
+          scheduleDraftAutosave();
         });
         row.append(name, size, remove);
         box.appendChild(row);
@@ -273,6 +378,7 @@
           }
           runAttachments.push({ id: data.id, name: data.name, size: data.size });
           renderAttachments();
+          scheduleDraftAutosave();
         } catch (_) {
           showError($("startError"), "附件没有上传。检查服务是否还在，然后重试。");
           return;
@@ -303,8 +409,6 @@
       const compose = !bound;
       board.classList.toggle("is-run-bound", bound);
       board.classList.toggle("is-run-compose", compose);
-      const draftActions = document.querySelector(".region-setup-actions");
-      if (draftActions) draftActions.hidden = bound;
     }
 
     async function ensureProjectOnSelect(projectId) {
@@ -357,6 +461,8 @@
       xhigh: "很高", "extra-high": "很高", max: "最高", ultra: "极限",
     };
 
+    const FAST_LABELS = { on: "开", off: "关" };
+
     function effortLabel(id) {
       return EFFORT_LABELS[id] ? EFFORT_LABELS[id] + "（" + id + "）" : id;
     }
@@ -372,25 +478,223 @@
       const chosenModel = pendingRoleModels[role] || "";
       const modelId = chosenModel || defaults.model || "";
       const auto = backend === "cursor" && (!modelId || modelId === "default");
-      const model = auto ? null : roleModelOptions(role).find((item) => item.id === modelId) || null;
+      const catalog = roleModelOptions(role);
+      const model = auto ? null
+        : modelId ? catalog.find((item) => item.id === modelId) || null
+          : catalog.find((item) => item.is_default) || null;
       const efforts = (model && model.reasoning_efforts) || [];
       const effort = pendingRoleReasoningEfforts[role] || "";
       const explicit = !!effort && effort !== "default";
+      const fast = pendingRoleFastModes[role] || "";
+      const fastSupported = !!(model && model.fast);
+      const params = (model && model.params) || [];
+      const chosenParams = pendingRoleModelParams[role] || {};
+      const name = model ? model.label || modelId : modelId;
       let problem = "";
       if (explicit && auto) {
-        problem = "Auto 模型由 Cursor 自动选择，不能指定推理强度。先选择具体模型，或把推理强度改回沿用默认。";
+        problem = "Auto 模型由 Cursor 自动选择，不能指定推理强度。先选择具体模型，或把推理强度改回由 Auto 决定。";
       } else if (explicit && model && !efforts.some((item) => item.id === effort)) {
-        problem = (model.label || modelId) + " 不支持推理强度 " + effort + "，请重新选择。";
+        problem = name + " 不支持推理强度 " + effort + "，请重新选择。";
+      } else if (fast && auto) {
+        problem = "Auto 模型由 Cursor 自动选择，不能指定 Fast。先选择具体模型，或把 Fast 改回模型默认。";
+      } else if (fast && model && !fastSupported) {
+        problem = name + " 没有 Fast 模式，请把 Fast 改回模型默认。";
+      } else if (Object.keys(chosenParams).length && auto) {
+        problem = "Auto 模型由 Cursor 自动选择，不能指定" + paramTitle(Object.keys(chosenParams)[0]) + "。先选择具体模型，或改回模型默认。";
+      } else if (model) {
+        for (const [id, value] of Object.entries(chosenParams)) {
+          const param = params.find((item) => item.id === id);
+          if (!param) problem = name + " 没有" + paramTitle(id) + "选项，请改回模型默认。";
+          else if (!param.values.some((item) => item.id === value)) problem = name + " 不支持" + paramTitle(id) + " " + value + "，请重新选择。";
+          if (problem) break;
+        }
+        if (!problem && !comboAllowed(model, chosenCombo(model, effort, fast, chosenParams))) {
+          problem = name + " 不支持这组设置，请调整推理强度、" + params.map((p) => paramTitle(p.id)).concat("Fast").join("、") + "中的一项。";
+        }
       }
-      return { backend, defaults, chosenModel, modelId, auto, model, efforts, effort, problem };
+      return {
+        backend, defaults, chosenModel, modelId, auto, model, efforts, effort, fast, fastSupported,
+        params, chosenParams, problem,
+      };
+    }
+
+    const PARAM_TITLES = { context: "上下文" };
+
+    function paramTitle(id) {
+      return PARAM_TITLES[id] || id;
+    }
+
+    /** 本轮显式选择换成模型目录里的参数名与取值；沿用默认的项不参与组合比对。 */
+    function chosenCombo(model, effort, fast, chosenParams) {
+      const combo = { ...chosenParams };
+      if (effort && effort !== "default" && model.reasoning_param) combo[model.reasoning_param] = effort;
+      if (fast) combo.fast = fast === "on" ? "true" : "false";
+      return combo;
+    }
+
+    function comboAllowed(model, combo) {
+      const variants = (model && model.variants) || [];
+      if (!variants.length) return true;
+      return variants.some((item) => Object.entries(combo).every(([k, v]) => item[k] === v));
+    }
+
+    /** 沿用默认的各项实际会取的值：推理强度先看项目配置，其余取模型默认。 */
+    function comboDefaults(s) {
+      const model = s.model;
+      const combo = {};
+      (model.params || []).forEach((param) => {
+        if (param.default) combo[param.id] = param.default;
+      });
+      const effort = s.effort === "default" ? model.default_reasoning_effort
+        : s.defaults.reasoning_effort || model.default_reasoning_effort;
+      if (model.reasoning_param && effort) combo[model.reasoning_param] = effort;
+      if (model.default_fast) combo.fast = model.default_fast === "on" ? "true" : "false";
+      return combo;
+    }
+
+    /**
+     * 显式选择本身允许、但与沿用默认的项拼起来不在目录里时（如 1M 上下文不能开 Fast），
+     * 把需要变动的默认项改成离默认最近的允许取值，返回这些改动；无需改动时返回空对象。
+     */
+    function comboFill(s) {
+      const model = s.model;
+      if (!model || !(model.variants || []).length) return {};
+      const explicit = chosenCombo(model, s.effort, s.fast, s.chosenParams);
+      const defaults = comboDefaults(s);
+      if (comboAllowed(model, { ...defaults, ...explicit })) return {};
+      const matches = (item) => Object.entries(explicit).every(([k, v]) => item[k] === v);
+      let best = null;
+      let score = -1;
+      model.variants.filter(matches).forEach((item) => {
+        const agree = Object.entries(defaults).filter(([k, v]) => item[k] === v).length;
+        if (agree > score) {
+          best = item;
+          score = agree;
+        }
+      });
+      const fill = {};
+      if (!best) return fill;
+      Object.keys(best).forEach((k) => {
+        if (!(k in explicit) && best[k] !== defaults[k]) fill[k] = best[k];
+      });
+      return fill;
     }
 
     function runReasoningError() {
-      for (const role of Object.keys(pendingRoleReasoningEfforts || {})) {
+      const roles = new Set([
+        ...Object.keys(pendingRoleReasoningEfforts || {}),
+        ...Object.keys(pendingRoleFastModes || {}),
+        ...Object.keys(pendingRoleModelParams || {}),
+      ]);
+      for (const role of roles) {
         const problem = roleModelSetting(role).problem;
         if (problem) return (roleTitles[role] || role) + "：" + problem;
       }
       return "";
+    }
+
+    /**
+     * 推理强度、Fast 与其它模型参数按「角色 × 后端:模型」记在服务端用户配置里，与 Cursor IDE 一样随模型保存：
+     * 显式改推理强度、Fast 或参数时记下当前模型的取值；换模型时换上新模型上次的取值，没记过的回到默认。
+     * 换走时不记旧模型：Run 里沿用下来、没被改过的取值不能覆盖别处记下的选择。
+     * 页面持有一份副本，改动逐项写回服务端；刷新角色设置时重新读取，以便看到其它机器或 CLI 的改动。
+     */
+    let roleModelPrefs = {};
+    const LEGACY_PREFS_KEY = "geni_studio_role_model_prefs";
+    const ROLE_PREFS_URL = "/api/config/user/role-model-prefs";
+
+    function rolePrefsKey(role) {
+      const backend = (runRoleDefaults[role] || {}).backend || "";
+      return backend + ":" + (pendingRoleModels[role] || (runRoleDefaults[role] || {}).model || "default");
+    }
+
+    let rolePrefsWrites = 0;
+
+    function saveRolePref(role, key, entry) {
+      const split = key.indexOf(":");
+      return fetch(ROLE_PREFS_URL, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          role,
+          backend: key.slice(0, split),
+          model: key.slice(split + 1),
+          effort: entry.effort || "",
+          fast: entry.fast || "",
+          params: entry.params || {},
+        }),
+      }).then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(apiErrorMessage(payload, "模型参数记忆没有保存。"));
+      }).catch((error) => showError($("startError"), error.message || "模型参数记忆没有保存。"));
+    }
+
+    /** 读取服务端记忆；本浏览器早先存在本地的记忆，服务端还没有的项补写上去后删除本地副本。 */
+    async function loadRolePrefs() {
+      const writes = rolePrefsWrites;
+      let prefs;
+      try {
+        const response = await fetch(ROLE_PREFS_URL);
+        const payload = await response.json();
+        if (!response.ok) return;
+        prefs = payload.role_model_prefs || {};
+      } catch (_) {
+        return;
+      }
+      // 读取期间页面又改过记忆时，以页面副本为准，下次刷新再同步。
+      if (writes !== rolePrefsWrites) return;
+      let legacy = {};
+      try {
+        legacy = JSON.parse(localStorage.getItem(LEGACY_PREFS_KEY) || "{}") || {};
+      } catch (_) {
+        legacy = {};
+      }
+      Object.entries(legacy).forEach(([role, byModel]) => {
+        Object.entries(byModel || {}).forEach(([key, entry]) => {
+          if ((prefs[role] || {})[key] || !entry || typeof entry !== "object" || key.indexOf(":") < 1) return;
+          prefs = { ...prefs, [role]: { ...(prefs[role] || {}), [key]: entry } };
+          void saveRolePref(role, key, entry);
+        });
+      });
+      try {
+        localStorage.removeItem(LEGACY_PREFS_KEY);
+      } catch (_) {
+        // 浏览器禁用存储时没有本地副本可删。
+      }
+      roleModelPrefs = prefs;
+    }
+
+    function rememberRolePrefs(role) {
+      const entry = {};
+      if (pendingRoleReasoningEfforts[role]) entry.effort = pendingRoleReasoningEfforts[role];
+      if (pendingRoleFastModes[role]) entry.fast = pendingRoleFastModes[role];
+      const params = pendingRoleModelParams[role] || {};
+      if (Object.keys(params).length) entry.params = { ...params };
+      const key = rolePrefsKey(role);
+      const byModel = { ...(roleModelPrefs[role] || {}) };
+      if (JSON.stringify(byModel[key] || {}) === JSON.stringify(entry)) return;
+      if (Object.keys(entry).length) byModel[key] = entry;
+      else delete byModel[key];
+      const next = { ...roleModelPrefs };
+      if (Object.keys(byModel).length) next[role] = byModel;
+      else delete next[role];
+      roleModelPrefs = next;
+      rolePrefsWrites += 1;
+      void saveRolePref(role, key, entry);
+    }
+
+    function switchRoleModel(role, model) {
+      const assign = (map, value) => {
+        const next = { ...map };
+        if (value && (typeof value !== "object" || Object.keys(value).length)) next[role] = value;
+        else delete next[role];
+        return next;
+      };
+      pendingRoleModels = assign(pendingRoleModels, model);
+      const entry = (roleModelPrefs[role] || {})[rolePrefsKey(role)] || {};
+      pendingRoleReasoningEfforts = assign(pendingRoleReasoningEfforts, entry.effort || "");
+      pendingRoleFastModes = assign(pendingRoleFastModes, entry.fast || "");
+      pendingRoleModelParams = assign(pendingRoleModelParams, entry.params ? { ...entry.params } : null);
     }
 
     function roleModelsLocked(data) {
@@ -417,8 +721,9 @@
     }
 
     /**
-     * 右栏顶部的本步骤设置。模型与推理强度绑定角色，归入「角色属性」；Skill 与 MCP 只属于这一步，归入「步骤属性」。
-     * 两组各带外框、并排均分，说明统一写在下方。
+     * 右栏顶部的本步骤设置。模型与推理强度绑定角色，归入「角色属性」；Skill 只属于这一步，归入「步骤属性」。
+     * MCP 是全局配置，在配置页只读列出，这里不选择。
+     * 两组各带外框并排：角色属性是一枚模型摘要，点开在菜单里调整；步骤属性只有 Skill。说明统一写在下方。
      */
     function inspectSettings(cell, data) {
       const strip = document.createElement("section");
@@ -428,10 +733,10 @@
       const columns = document.createElement("div");
       columns.className = "inspect-settings-columns";
       const title = roleTitles[cell.role] || cell.role;
-      const roleGroup = settingsGroup("角色属性", "settings-group-role", "角色" + title + "的模型与推理强度");
+      const roleGroup = settingsGroup("角色属性", "settings-group-role", "角色" + title + "的模型、推理强度、上下文与 Fast");
       roleGroup.appendChild(roleModelSection(cell, data, notes));
-      const stepGroup = settingsGroup("步骤属性", "settings-group-step", "本步骤的 Skill 与 MCP");
-      stepGroup.append(...nodeToolColumns(cell, data, notes));
+      const stepGroup = settingsGroup("步骤属性", "settings-group-step", "本步骤的 Skill");
+      stepGroup.appendChild(nodeToolColumn(cell, data, notes));
       columns.append(roleGroup, stepGroup);
       strip.appendChild(columns);
       notes.sort((a, b) => Number(!!b.error) - Number(!!a.error)).forEach((item) => {
@@ -443,14 +748,17 @@
       return strip;
     }
 
-    /** 本步骤所属角色的模型与推理强度；按角色生效，同一角色的所有步骤共用。 */
+    /**
+     * 本步骤所属角色的模型设置；按角色生效，同一角色的所有步骤共用。
+     * 平时只显示一枚摘要，点开后在菜单里调整 Fast、上下文、推理强度与模型；可选项取自所选模型在后端目录中的声明。
+     */
     function roleModelSection(cell, data, notes) {
       const role = cell.role;
       const s = roleModelSetting(role);
       const locked = roleModelsLocked(data);
       const section = document.createElement("div");
       section.className = "role-model-block";
-      section.setAttribute("aria-label", "角色模型与推理强度");
+      section.setAttribute("aria-label", "角色模型设置");
       const note = (text, cls) => {
         const p = document.createElement("p");
         p.className = cls || "hint-block";
@@ -466,78 +774,590 @@
         return section;
       }
       const catalog = roleModelOptions(role);
-      if (!catalog.length) note(runModelDetails[s.backend] || "读不到模型列表。");
-      const model = document.createElement("wa-select");
-      model.label = "模型";
-      model.setAttribute("placement", "bottom-start");
-      model.disabled = locked;
-      const inherited = s.defaults.model;
-      const inheritedLabel = inherited
-        ? (catalog.find((item) => item.id === inherited) || {}).label || inherited
-        : s.backend === "cursor" ? "Auto" : "后端默认";
-      model.appendChild(selectOption("", "沿用默认（" + inheritedLabel + "）"));
-      catalog.forEach((item) => model.appendChild(selectOption(item.id, item.label || item.id)));
-      if (s.chosenModel && !catalog.some((item) => item.id === s.chosenModel)) {
-        model.appendChild(selectOption(s.chosenModel, s.chosenModel + "（目录中没有）"));
-      }
-      model.value = s.chosenModel;
-      model.addEventListener("change", () => setRoleModel(role, "model", model.value || "", data));
-      section.appendChild(model);
-
-      const effort = document.createElement("wa-select");
-      effort.label = "推理强度";
-      effort.setAttribute("placement", "bottom-start");
-      const modelDefault = (s.model && s.model.default_reasoning_effort) || "";
-      const configured = s.defaults.reasoning_effort || "";
-      const inheritText = configured ? effortLabel(configured) + " · 项目配置"
-        : modelDefault ? effortLabel(modelDefault) + " · 模型默认" : "模型默认";
-      effort.appendChild(selectOption("", "沿用默认（" + inheritText + "）"));
-      if (configured) {
-        effort.appendChild(selectOption("default", "模型默认" + (modelDefault ? "（" + effortLabel(modelDefault) + "）" : "")));
-      }
-      s.efforts.forEach((item) => {
-        effort.appendChild(selectOption(item.id, effortLabel(item.id) + (item.id === modelDefault ? " · 模型默认" : "")));
+      if (!catalog.length) notes.push({ text: runModelDetails[s.backend] || "读不到模型列表。" });
+      const label = document.createElement("p");
+      label.className = "section-title";
+      label.textContent = "模型";
+      const shell = document.createElement("div");
+      shell.className = "role-menu-shell";
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "role-menu-chip";
+      chip.disabled = locked;
+      chip.setAttribute("aria-haspopup", "menu");
+      chip.setAttribute("aria-expanded", "false");
+      const parts = roleSummaryParts(s, catalog);
+      const main = document.createElement("span");
+      main.className = "role-chip-main" + (parts[0].inherited ? " is-inherited" : "");
+      main.textContent = parts[0].text;
+      const tags = document.createElement("span");
+      tags.className = "role-chip-tags";
+      parts.slice(1).forEach((part) => {
+        const tag = document.createElement("span");
+        tag.className = "role-chip-tag" + (part.inherited ? " is-inherited" : "");
+        tag.textContent = part.text;
+        tags.appendChild(tag);
       });
-      const explicit = s.effort && s.effort !== "default";
-      if (explicit && !s.efforts.some((item) => item.id === s.effort)) {
-        effort.appendChild(selectOption(s.effort, effortLabel(s.effort) + "（当前设置）"));
+      const caret = document.createElement("span");
+      caret.className = "role-chip-caret";
+      caret.setAttribute("aria-hidden", "true");
+      chip.append(main, tags, caret);
+      chip.title = parts.map((part) => part.full + (part.inherited ? "（默认）" : "")).join("；");
+      const wrap = document.createElement("div");
+      wrap.className = "role-menu-wrap";
+      wrap.setAttribute("role", "menu");
+      wrap.hidden = true;
+      const fly = document.createElement("div");
+      fly.className = "role-menu-flyout";
+      fly.hidden = true;
+      shell.append(chip, wrap);
+      section.append(label, shell);
+
+      let docClose = null;
+      let docScroll = null;
+      const detach = () => {
+        if (docClose) {
+          document.removeEventListener("pointerdown", docClose, true);
+          document.removeEventListener("keydown", docClose, true);
+          docClose = null;
+        }
+        if (docScroll) {
+          document.removeEventListener("scroll", docScroll, true);
+          window.removeEventListener("resize", docScroll);
+          docScroll = null;
+        }
+        fly.remove();
+        if (roleMenuDetach === detach) roleMenuDetach = null;
+      };
+      const close = () => {
+        roleMenuState = null;
+        wrap.hidden = true;
+        fly.hidden = true;
+        chip.setAttribute("aria-expanded", "false");
+        detach();
+      };
+      const open = () => {
+        if (roleMenuDetach && roleMenuDetach !== detach) roleMenuDetach();
+        roleMenuDetach = detach;
+        // 挂在 body 上：设置区是尺寸容器，会成为固定定位的包含块。
+        if (!fly.isConnected) document.body.appendChild(fly);
+        roleMenuState = { flyout: "", query: "", ...(roleMenuState || {}), role };
+        wrap.hidden = false;
+        chip.setAttribute("aria-expanded", "true");
+        renderRoleMenu(wrap, fly, role, s, catalog, data);
+        if (!docClose) {
+          docClose = (ev) => {
+            if (ev.type === "keydown") {
+              if (ev.key !== "Escape") return;
+              const row = !fly.hidden && fly.contains(document.activeElement) && fly.openRow && fly.openRow();
+              if (row) {
+                fly.backToRow(row);
+                return;
+              }
+              close();
+              chip.focus();
+            } else if (!shell.contains(ev.target) && !fly.contains(ev.target)) {
+              close();
+            }
+          };
+          docScroll = (ev) => {
+            if (!fly.hidden && !(ev.target instanceof Node && fly.contains(ev.target)) && fly.hideFlyout) fly.hideFlyout();
+          };
+          document.addEventListener("pointerdown", docClose, true);
+          document.addEventListener("keydown", docClose, true);
+          document.addEventListener("scroll", docScroll, true);
+          window.addEventListener("resize", docScroll);
+        }
+      };
+      chip.addEventListener("click", () => (wrap.hidden ? open() : close()));
+      if (roleMenuState && (locked || roleMenuState.role !== role)) {
+        if (roleMenuDetach) roleMenuDetach();
+        roleMenuState = null;
       }
-      effort.value = s.effort;
-      effort.disabled = locked || (!s.efforts.length && !s.effort);
-      effort.hint = s.problem || locked || s.auto ? ""
-        : s.modelId && !s.model ? "暂未读取到这个模型的能力。"
-        : s.model && !s.efforts.length ? "这个模型没有可调的推理强度。"
-        : !s.modelId ? "先选择模型，再选推理强度。" : "";
-      effort.addEventListener("change", () => setRoleModel(role, "effort", effort.value || "", data));
-      section.appendChild(effort);
+      if (roleMenuState) open();
+
       if (s.problem) notes.push({ text: s.problem, error: true });
-      if (!locked && data && data.thread_id) notes.push({ text: "运行中修改模型或推理强度，从这个角色的下一次调用起生效。" });
+      if (!locked && roleComboNotice && roleComboNotice.role === role) notes.push({ text: roleComboNotice.text });
+      if (!locked && data && data.thread_id) notes.push({ text: "运行中修改模型、推理强度、上下文或 Fast，从这个角色的下一次调用起生效。" });
       return section;
     }
 
+    let roleMenuState = null;
+    let roleMenuDetach = null;
+
+    function forgetRoleMenu(cell) {
+      if (!cell) roleComboNotice = null;
+      if (!roleMenuState || (cell && isActivityCell(cell) && cell.role === roleMenuState.role)) return;
+      if (roleMenuDetach) roleMenuDetach();
+      roleMenuState = null;
+    }
+
+    function shortEffort(id) {
+      return EFFORT_LABELS[id] || id;
+    }
+
+    function paramValueLabel(param, id) {
+      const item = param && param.values.find((value) => value.id === id);
+      return item ? item.label || item.id : id;
+    }
+
+    /** 摘要依次为模型、推理强度、各开放参数、Fast；每项注明是本轮选择还是沿用默认。 */
+    function roleSummaryParts(s, catalog) {
+      const parts = [];
+      const modelText = s.auto ? "Auto"
+        : (s.model && s.model.label) || (catalog.find((item) => item.id === s.modelId) || {}).label || s.modelId
+          || (s.backend === "codex" ? "Codex 默认" : "后端默认");
+      parts.push({ text: modelText, full: "模型：" + modelText, inherited: !s.chosenModel });
+      if (s.auto) return parts;
+      const explicit = s.effort && s.effort !== "default";
+      const effort = explicit ? s.effort
+        : s.effort === "default" ? (s.model && s.model.default_reasoning_effort) || ""
+          : s.defaults.reasoning_effort || (s.model && s.model.default_reasoning_effort) || "";
+      if (effort) parts.push({ text: shortEffort(effort), full: "推理强度：" + effortLabel(effort), inherited: !explicit });
+      s.params.forEach((param) => {
+        const chosen = s.chosenParams[param.id] || "";
+        const value = chosen || param.default;
+        if (value) {
+          const text = paramValueLabel(param, value);
+          parts.push({ text, full: paramTitle(param.id) + "：" + text, inherited: !chosen });
+        }
+      });
+      const fastOn = s.fast ? s.fast === "on" : !!(s.model && s.model.default_fast === "on");
+      if (s.fastSupported && fastOn) parts.push({ text: "Fast", full: "Fast：开", inherited: !s.fast });
+      return parts;
+    }
+
+    function roleMenuRow(title, value, onClick, opts) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "role-menu-row";
+      row.setAttribute("role", "menuitem");
+      row.disabled = !!(opts && opts.disabled);
+      if (opts && opts.hint) row.title = opts.hint;
+      const name = document.createElement("span");
+      name.className = "role-menu-row-title";
+      name.textContent = title;
+      const val = document.createElement("span");
+      val.className = "role-menu-row-value";
+      val.textContent = value;
+      const more = document.createElement("span");
+      more.className = "role-menu-more";
+      more.setAttribute("aria-hidden", "true");
+      row.append(name, val, more);
+      row.addEventListener("click", onClick);
+      return row;
+    }
+
+    function roleMenuOption(text, suffix, checked, onClick, disabledHint) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "role-menu-option" + (checked ? " is-checked" : "");
+      item.setAttribute("role", "menuitemradio");
+      item.setAttribute("aria-checked", checked ? "true" : "false");
+      item.disabled = !!disabledHint;
+      if (disabledHint) item.title = disabledHint;
+      const label = document.createElement("span");
+      label.className = "role-menu-option-label";
+      label.textContent = text;
+      item.appendChild(label);
+      if (suffix) {
+        const extra = document.createElement("span");
+        extra.className = "role-menu-option-suffix";
+        extra.textContent = suffix;
+        item.appendChild(extra);
+      }
+      const mark = document.createElement("span");
+      mark.className = "role-menu-check";
+      mark.setAttribute("aria-hidden", "true");
+      item.appendChild(mark);
+      item.addEventListener("click", onClick);
+      return item;
+    }
+
+    const COMBO_HINT = "与当前其它设置不能同时使用。";
+
+    /**
+     * 一级菜单列出各项及当前值；鼠标移到或焦点落在有下级的行上时，在一级菜单旁弹出取值列表，
+     * 优先放在右侧，右侧放不下才放左侧，不遮挡一级菜单。选完收起取值列表，一级菜单保持打开。
+     */
+    function renderRoleMenu(wrap, fly, role, s, catalog, data) {
+      const state = roleMenuState || { flyout: "", query: "" };
+      const pick = (kind, value) => {
+        roleMenuState = { ...state, flyout: "", query: "" };
+        setRoleModel(role, kind, value, data);
+      };
+      const tryCombo = (patch) => {
+        if (!s.model) return true;
+        const params = { ...s.chosenParams };
+        let effort = s.effort;
+        let fast = s.fast;
+        Object.entries(patch).forEach(([k, v]) => {
+          if (k === "effort") effort = v;
+          else if (k === "fast") fast = v;
+          else if (v) params[k] = v;
+          else delete params[k];
+        });
+        return comboAllowed(s.model, chosenCombo(s.model, effort, fast, params));
+      };
+
+      const flyoutBody = (page) => {
+        const body = [];
+        const list = document.createElement("div");
+        list.className = "role-menu-list";
+        list.setAttribute("role", "menu");
+        if (page === "model") {
+          const search = document.createElement("input");
+          search.type = "search";
+          search.className = "role-menu-search";
+          search.placeholder = "搜索模型";
+          search.setAttribute("aria-label", "搜索模型");
+          search.value = state.query || "";
+          const inherited = s.defaults.model;
+          const inheritedLabel = inherited
+            ? (catalog.find((item) => item.id === inherited) || {}).label || inherited
+            : s.backend === "cursor" ? "Auto" : "后端默认";
+          const autoRow = !inherited && catalog.some((item) => item.id === "default");
+          const defaultRow = !inherited && !autoRow && catalog.find((item) => item.is_default);
+          const effective = inherited || (autoRow ? "default" : "") || (defaultRow ? defaultRow.id : "");
+          const current = s.chosenModel || effective;
+          const fill = () => {
+            const q = search.value.trim().toLowerCase();
+            const rows = [];
+            if (!q && !effective) rows.push(roleMenuOption(inheritedLabel, "", !s.chosenModel, () => pick("model", "")));
+            catalog
+              .filter((item) => !q || (item.label || "").toLowerCase().includes(q) || item.id.toLowerCase().includes(q))
+              .forEach((item) => {
+                const suffix = item.default_reasoning_effort ? shortEffort(item.default_reasoning_effort) : "";
+                rows.push(roleMenuOption(item.label || item.id, suffix, current === item.id,
+                  () => pick("model", item.id === effective ? "" : item.id)));
+              });
+            if (current && !catalog.some((item) => item.id === current)) {
+              rows.push(roleMenuOption(current, "目录中没有", true, () => pick("model", s.chosenModel)));
+            }
+            if (!rows.length) {
+              const empty = document.createElement("p");
+              empty.className = "role-menu-empty";
+              empty.textContent = catalog.length ? "没有匹配的模型。" : "读不到模型列表。";
+              rows.push(empty);
+            }
+            list.replaceChildren(...rows);
+          };
+          search.addEventListener("input", () => {
+            state.query = search.value;
+            roleMenuState = { ...(roleMenuState || state), query: search.value };
+            fill();
+          });
+          search.addEventListener("keydown", (ev) => {
+            if (ev.key === "ArrowDown") {
+              ev.preventDefault();
+              const first = list.querySelector(".role-menu-option:not([disabled])");
+              if (first) first.focus();
+            }
+          });
+          fill();
+          body.push(search, list);
+        } else if (page === "effort") {
+          const modelDefault = (s.model && s.model.default_reasoning_effort) || "";
+          const configured = s.defaults.reasoning_effort || "";
+          const inherited = configured || modelDefault;
+          const current = s.effort === "default" ? modelDefault : s.effort || inherited;
+          if (!s.efforts.length) {
+            list.appendChild(roleMenuOption(s.auto ? "由 Auto 决定" : "由模型决定", "", !s.effort, () => pick("effort", "")));
+          }
+          s.efforts.forEach((item) => {
+            const value = item.id === inherited ? "" : item.id;
+            const tag = item.id === configured ? "项目配置" : item.id === modelDefault ? "模型默认" : "";
+            list.appendChild(roleMenuOption(effortLabel(item.id), tag, current === item.id,
+              () => pick("effort", value), tryCombo({ effort: value }) ? "" : COMBO_HINT));
+          });
+          if (s.effort && s.effort !== "default" && !s.efforts.some((item) => item.id === s.effort)) {
+            list.appendChild(roleMenuOption(effortLabel(s.effort), "模型不支持", true, () => pick("effort", s.effort)));
+          }
+          body.push(list);
+        } else {
+          const param = s.params.find((item) => "param:" + item.id === page);
+          if (!param) return body;
+          const chosen = s.chosenParams[param.id] || "";
+          const current = chosen || param.default;
+          if (!param.default) list.appendChild(roleMenuOption("模型默认", "", !chosen, () => pick("param:" + param.id, "")));
+          param.values.forEach((item) => {
+            const value = item.id === param.default ? "" : item.id;
+            list.appendChild(roleMenuOption(item.label || item.id, item.id === param.default ? "模型默认" : "",
+              current === item.id, () => pick("param:" + param.id, value),
+              tryCombo({ [param.id]: value }) ? "" : COMBO_HINT));
+          });
+          body.push(list);
+        }
+        return body;
+      };
+
+      const rows = [];
+      const hideFlyout = () => {
+        fly.hidden = true;
+        fly.replaceChildren();
+        rows.forEach((row) => row.classList.remove("is-open"));
+        if (roleMenuState) roleMenuState = { ...roleMenuState, flyout: "" };
+      };
+      const showFlyout = (row, page, focusInside) => {
+        if (!fly.hidden && row.classList.contains("is-open")) {
+          if (focusInside) focusFlyout();
+          return;
+        }
+        const body = flyoutBody(page);
+        if (!body.length) return;
+        rows.forEach((item) => item.classList.toggle("is-open", item === row));
+        state.flyout = page;
+        roleMenuState = { ...state, ...(roleMenuState || {}), flyout: page };
+        fly.replaceChildren(...body);
+        fly.hidden = false;
+        placeFlyout(wrap, row, fly);
+        if (focusInside) focusFlyout();
+      };
+      let returning = false;
+      const backToRow = (row) => {
+        hideFlyout();
+        returning = true;
+        row.focus({ preventScroll: true });
+        returning = false;
+      };
+      const focusFlyout = () => {
+        const target = fly.querySelector(".role-menu-search")
+          || fly.querySelector(".role-menu-option.is-checked:not([disabled])")
+          || fly.querySelector(".role-menu-option:not([disabled])");
+        if (target) target.focus({ preventScroll: true });
+      };
+      const subRow = (title, value, page, opts) => {
+        const row = roleMenuRow(title, value, () => showFlyout(row, page, true), opts);
+        row.setAttribute("aria-haspopup", "menu");
+        if (!(opts && opts.disabled)) {
+          row.addEventListener("mouseenter", () => showFlyout(row, page, false));
+          row.addEventListener("focus", () => {
+            if (!returning) showFlyout(row, page, false);
+          });
+          row.addEventListener("keydown", (ev) => {
+            if (ev.key === "ArrowRight") {
+              ev.preventDefault();
+              showFlyout(row, page, true);
+            }
+          });
+          row.dataset.flyout = page;
+        }
+        rows.push(row);
+        return row;
+      };
+
+      const body = [];
+      if (s.fastSupported || s.fast) {
+        const row = document.createElement("div");
+        row.className = "role-menu-row is-switch";
+        const name = document.createElement("span");
+        name.className = "role-menu-row-title";
+        name.textContent = "Fast";
+        const val = document.createElement("span");
+        val.className = "role-menu-row-value";
+        const fastDefault = (s.model && s.model.default_fast) || "";
+        const toggle = document.createElement("wa-switch");
+        toggle.size = "s";
+        toggle.setAttribute("aria-label", "Fast");
+        const on = s.fast ? s.fast === "on" : fastDefault === "on";
+        toggle.checked = on;
+        const next = on ? "off" : "on";
+        const nextValue = next === fastDefault ? "" : next;
+        const allowed = s.fastSupported && tryCombo({ fast: nextValue });
+        toggle.disabled = !allowed;
+        if (!allowed) row.title = s.fastSupported ? COMBO_HINT : "这个模型没有 Fast 模式。";
+        toggle.addEventListener("change", () => {
+          roleMenuState = { ...state, flyout: "" };
+          const wanted = toggle.checked ? "on" : "off";
+          setRoleModel(role, "fast", wanted === fastDefault ? "" : wanted, data);
+        });
+        row.addEventListener("mouseenter", hideFlyout);
+        toggle.addEventListener("focus", hideFlyout);
+        row.append(name, val, toggle);
+        body.push(row);
+      }
+      s.params.forEach((param) => {
+        const chosen = s.chosenParams[param.id] || "";
+        const value = chosen || param.default;
+        const text = value ? paramValueLabel(param, value) + (chosen ? "" : " · 默认") : "模型默认";
+        body.push(subRow(paramTitle(param.id), text, "param:" + param.id));
+      });
+      if (s.efforts.length || (s.effort && s.effort !== "default")) {
+        const effortPart = roleSummaryParts(s, catalog).find((part) => part.full.startsWith("推理强度"));
+        const text = effortPart ? effortPart.text + (effortPart.inherited ? " · 默认" : "") : "模型默认";
+        body.push(subRow("推理强度", text, "effort"));
+      } else if (s.auto) {
+        body.push(subRow("推理强度", "由 Auto 决定", "effort", { disabled: true }));
+      }
+      if (body.length) {
+        const divider = document.createElement("div");
+        divider.className = "role-menu-divider";
+        divider.setAttribute("role", "separator");
+        body.push(divider);
+      }
+      const modelPart = roleSummaryParts(s, catalog)[0];
+      body.push(subRow("模型", modelPart.text + (modelPart.inherited ? " · 默认" : ""), "model"));
+      wrap.replaceChildren(...body);
+
+      wrap.addEventListener("keydown", (ev) => {
+        if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+        const items = [...wrap.querySelectorAll(".role-menu-row:not([disabled]):not(.is-switch), wa-switch:not([disabled])")];
+        const at = items.indexOf(document.activeElement);
+        if (!items.length) return;
+        ev.preventDefault();
+        const step = ev.key === "ArrowDown" ? 1 : -1;
+        items[(at + step + items.length) % items.length].focus();
+      });
+      fly.onkeydown = (ev) => {
+        if (ev.key === "ArrowLeft" && !(ev.target instanceof HTMLInputElement)) {
+          ev.preventDefault();
+          const row = rows.find((item) => item.classList.contains("is-open"));
+          if (row) backToRow(row);
+          else hideFlyout();
+          return;
+        }
+        if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+        const items = [...fly.querySelectorAll(".role-menu-option:not([disabled])")];
+        const at = items.indexOf(document.activeElement);
+        if (!items.length) return;
+        ev.preventDefault();
+        const step = ev.key === "ArrowDown" ? 1 : -1;
+        items[at < 0 ? 0 : (at + step + items.length) % items.length].focus();
+      };
+
+      // 重绘移除旧搜索框时浏览器会派发 blur，故只在焦点进入菜单内某处时记下是否在搜索框。
+      const noteFocus = (ev) => {
+        const inSearch = ev.target instanceof Element && ev.target.classList.contains("role-menu-search");
+        if (roleMenuState) roleMenuState = { ...roleMenuState, focusInside: inSearch };
+      };
+      wrap.addEventListener("focusin", noteFocus);
+      fly.addEventListener("focusin", noteFocus);
+      fly.hideFlyout = hideFlyout;
+      fly.backToRow = backToRow;
+      fly.openRow = () => rows.find((item) => item.classList.contains("is-open"));
+      fly.hidden = true;
+      const reopen = state.flyout && rows.find((row) => row.dataset.flyout === state.flyout);
+      if (reopen) {
+        const hadFocus = state.focusInside;
+        showFlyout(reopen, state.flyout, false);
+        const search = fly.querySelector(".role-menu-search");
+        if (search && hadFocus) {
+          search.focus({ preventScroll: true });
+          search.setSelectionRange(search.value.length, search.value.length);
+        }
+      }
+    }
+
+    /** 取值列表用固定定位，不受右栏滚动容器裁切：优先放在一级菜单右侧，放不下时放左侧，上下不超出视口。 */
+    function placeFlyout(wrap, row, fly) {
+      const menu = wrap.getBoundingClientRect();
+      const anchor = row.getBoundingClientRect();
+      const width = fly.offsetWidth;
+      const height = fly.offsetHeight;
+      const gap = 4;
+      const margin = 8;
+      let left = menu.right + gap;
+      if (left + width > window.innerWidth - margin) left = Math.max(margin, menu.left - gap - width);
+      let top = anchor.top - 5;
+      if (top + height > window.innerHeight - margin) top = Math.max(margin, window.innerHeight - margin - height);
+      fly.style.left = left + "px";
+      fly.style.top = top + "px";
+      fly.classList.toggle("is-left", left < menu.left);
+    }
+
+    let roleComboNotice = null;
+
+    /** 按 comboFill 把需要变动的默认项写成本轮选择，返回给人看的说明。 */
+    function settleRoleCombo(role) {
+      const s = roleModelSetting(role);
+      const fill = s.model ? comboFill(s) : {};
+      const changed = [];
+      Object.entries(fill).forEach(([k, v]) => {
+        if (k === s.model.reasoning_param) {
+          pendingRoleReasoningEfforts = { ...pendingRoleReasoningEfforts, [role]: v };
+          changed.push("推理强度设为" + shortEffort(v));
+        } else if (k === "fast") {
+          pendingRoleFastModes = { ...pendingRoleFastModes, [role]: v === "true" ? "on" : "off" };
+          changed.push("Fast 设为" + (v === "true" ? "开" : "关"));
+        } else {
+          const param = s.params.find((item) => item.id === k);
+          pendingRoleModelParams = {
+            ...pendingRoleModelParams,
+            [role]: { ...(pendingRoleModelParams[role] || {}), [k]: v },
+          };
+          changed.push(paramTitle(k) + "设为 " + paramValueLabel(param, v));
+        }
+      });
+      if (!changed.length) return null;
+      const name = s.model.label || s.modelId;
+      return { role, text: name + " 不支持这个组合沿用的默认值，已同时把" + changed.join("、") + "。" };
+    }
+
+    const ROLE_SETTING_MAPS = {
+      model: () => pendingRoleModels,
+      effort: () => pendingRoleReasoningEfforts,
+      fast: () => pendingRoleFastModes,
+    };
+
     function setRoleModel(role, kind, value, data) {
-      const current = kind === "model" ? pendingRoleModels[role] || "" : pendingRoleReasoningEfforts[role] || "";
-      if (value === current) return;
-      const next = { ...(kind === "model" ? pendingRoleModels : pendingRoleReasoningEfforts) };
-      if (value) next[role] = value;
-      else delete next[role];
-      if (kind === "model") pendingRoleModels = next;
-      else pendingRoleReasoningEfforts = next;
+      if (kind.startsWith("param:")) {
+        const id = kind.slice("param:".length);
+        const current = (pendingRoleModelParams[role] || {})[id] || "";
+        if (value === current) {
+          renderInspect(lastStatus);
+          return;
+        }
+        const params = { ...(pendingRoleModelParams[role] || {}) };
+        if (value) params[id] = value;
+        else delete params[id];
+        const next = { ...pendingRoleModelParams };
+        if (Object.keys(params).length) next[role] = params;
+        else delete next[role];
+        pendingRoleModelParams = next;
+      } else if (kind === "model") {
+        if (value === (pendingRoleModels[role] || "")) {
+          renderInspect(lastStatus);
+          return;
+        }
+        switchRoleModel(role, value);
+      } else {
+        const current = ROLE_SETTING_MAPS[kind]()[role] || "";
+        if (value === current) {
+          renderInspect(lastStatus);
+          return;
+        }
+        const next = { ...ROLE_SETTING_MAPS[kind]() };
+        if (value) next[role] = value;
+        else delete next[role];
+        if (kind === "effort") pendingRoleReasoningEfforts = next;
+        else pendingRoleFastModes = next;
+      }
+      roleComboNotice = settleRoleCombo(role);
+      rememberRolePrefs(role);
       const tid = data && data.thread_id;
-      if (!tid || runReasoningError()) {
-        renderInspect(lastStatus);
+      renderInspect(lastStatus);
+      if (!tid) {
+        scheduleDraftAutosave();
         return;
       }
+      if (runReasoningError()) return;
       fetch("/api/runs/" + encodeURIComponent(tid) + "/role-models", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role_models: pendingRoleModels, role_reasoning_efforts: pendingRoleReasoningEfforts }),
+        body: JSON.stringify({
+          role_models: pendingRoleModels,
+          role_reasoning_efforts: pendingRoleReasoningEfforts,
+          role_fast_modes: pendingRoleFastModes,
+          role_model_params: pendingRoleModelParams,
+        }),
       }).then(async (response) => {
         const payload = await response.json();
         if (!response.ok) throw new Error(apiErrorMessage(payload, "角色设置没有保存。"));
         lastStatus = payload;
         pendingRoleModels = (payload.values && payload.values.role_models) || {};
         pendingRoleReasoningEfforts = (payload.values && payload.values.role_reasoning_efforts) || {};
+        pendingRoleFastModes = (payload.values && payload.values.role_fast_modes) || {};
+        pendingRoleModelParams = (payload.values && payload.values.role_model_params) || {};
         renderInspect(lastStatus);
       }).catch((error) => showError($("startError"), error.message || "角色设置没有保存。"));
     }
@@ -562,6 +1382,7 @@
         if (!response.ok) throw new Error(apiErrorMessage(data, "无法读取角色设置。"));
         return data;
       };
+      void loadRolePrefs();
       try {
         if (typeof window.syncRunBackendModels === "function") await window.syncRunBackendModels();
         if (!current()) return;
@@ -606,12 +1427,8 @@
       }
     }
 
-    document.addEventListener("geni-run-backend-models", () => {
-      roleModelStamp = "";
-      refreshRunRoleModels();
-    });
-
     function clearCurrentRun() {
+      leaveDraftForm();
       stopPoll();
       $("thread").value = "";
       clearDraftBinding();
@@ -626,7 +1443,10 @@
       pendingNodeTools = {};
       pendingRoleModels = {};
       pendingRoleReasoningEfforts = {};
+      pendingRoleFastModes = {};
+      pendingRoleModelParams = {};
       roleModelStamp = "";
+      forgetRoleMenu(null);
       clearAttachments();
       refreshRunRoleModels();
       renderInspect(null);
@@ -635,6 +1455,7 @@
     }
 
     async function applyRunStartTemplate(data) {
+      leaveDraftForm();
       showError($("startError"), "");
       showRunSaved("");
       stopPoll();
@@ -659,6 +1480,8 @@
       pendingNodeTools = data.node_tools || {};
       pendingRoleModels = data.role_models || {};
       pendingRoleReasoningEfforts = data.role_reasoning_efforts || {};
+      pendingRoleFastModes = data.role_fast_modes || {};
+      pendingRoleModelParams = data.role_model_params || {};
       roleModelStamp = "";
       syncUrlDraft("");
       syncUrlThread("");
@@ -701,6 +1524,8 @@
     }
 
     async function openDraft(id) {
+      leaveDraftForm();
+      await draftQueue;
       showError($("startError"), "");
       showRunSaved("");
       stopPoll();
@@ -731,6 +1556,8 @@
         pendingNodeTools = data.node_tools || {};
         pendingRoleModels = data.role_models || {};
         pendingRoleReasoningEfforts = data.role_reasoning_efforts || {};
+        pendingRoleFastModes = data.role_fast_modes || {};
+        pendingRoleModelParams = data.role_model_params || {};
         roleModelStamp = "";
         syncUrlDraft(draftId);
         syncThreadChrome("");
@@ -769,6 +1596,7 @@
       ok.addEventListener("click", async () => {
         ok.disabled = true;
         const draft = item.kind === "draft";
+        if (draft && draftId === item.draft_id) await settleDraftSaves();
         const url = draft
           ? "/api/runs/drafts/" + encodeURIComponent(item.draft_id) + "/delete"
           : "/api/runs/" + encodeURIComponent(item.thread_id) + "/delete";
@@ -791,8 +1619,19 @@
       row.after(panel);
     }
 
+    /** 列表次行的更新时间：当天只写时分，其余写月日与时分。 */
+    function runWhen(seconds) {
+      const value = Number(seconds);
+      if (!value) return "";
+      const at = new Date(value * 1000);
+      const pad = (n) => String(n).padStart(2, "0");
+      const time = pad(at.getHours()) + ":" + pad(at.getMinutes());
+      if (at.toDateString() === new Date().toDateString()) return time;
+      return pad(at.getMonth() + 1) + "-" + pad(at.getDate()) + " " + time;
+    }
+
     const RUN_PHASE_FILTERS = new Set([
-      "running", "paused", "awaiting_human", "completed", "rejected", "stopped",
+      "running", "paused", "interrupted", "awaiting_human", "completed", "rejected", "stopped",
     ]);
     let runListSeq = 0;
 
@@ -826,22 +1665,34 @@
           btn.type = "button";
           btn.className = "run-open" + (item.thread_id === current ? " is-current" : "");
           const phaseLabel = PHASE_LABELS[item.phase] || item.phase;
+          const text = document.createElement("span");
+          text.className = "run-text";
           const name = document.createElement("span");
           name.className = "run-name";
           name.textContent = label;
+          text.append(name);
+          const when = runWhen(item.updated_at);
+          if (when) {
+            const sub = document.createElement("span");
+            sub.className = "run-when";
+            sub.textContent = when;
+            text.append(sub);
+          }
           const meta = phaseMark(item.phase);
           const phaseText = document.createElement("span");
           phaseText.className = "run-phase-label";
           phaseText.textContent = phaseLabel;
-          btn.title = label + " · " + phaseLabel;
-          btn.append(name, meta, phaseText);
+          btn.title = label + " · " + phaseLabel + (when ? " · 更新于 " + when : "");
+          btn.append(text, meta, phaseText);
           btn.addEventListener("click", () => {
             if (item.kind === "draft") {
               openDraft(item.draft_id);
               return;
             }
+            leaveDraftForm();
             clearDraftBinding();
             clearAttachments();
+            if ($("thread").value.trim() !== item.thread_id) stopPoll();
             $("thread").value = item.thread_id;
             syncUrlThread(item.thread_id);
             lastRailCurrent = "";
@@ -908,16 +1759,19 @@
     let pendingNodeTools = {};
     let pendingRoleModels = {};
     let pendingRoleReasoningEfforts = {};
+    let pendingRoleFastModes = {};
+    let pendingRoleModelParams = {};
     let runRoleDefaults = {};
     let runModelCatalogs = {};
     let runModelDetails = {};
     let runRoleDefaultsError = "";
     let runRoleRefreshVersion = 0;
     let roleModelStamp = "";
-    let runToolCatalog = { skills: [], mcp: [], detail: "" };
+    let runToolCatalog = { skills: [], detail: "" };
     let statusKey = "";
     let pollTimer = null;
     let refreshing = false;
+    let refreshQueued = null;
     let startInFlight = false;
 
     function stopPoll() {
@@ -929,6 +1783,9 @@
         pushThread = "";
       }
     }
+
+    let restingCellId = "";
+    let nodeToolError = null;
 
     function currentCell(rail) {
       if (!rail || !rail.cells) return null;
@@ -946,7 +1803,16 @@
         const found = rail.cells.find((cell) => cell.id === want);
         if (found) return found;
       }
-      return currentCell(rail);
+      return restingCell(rail);
+    }
+
+    function restingCell(rail) {
+      const current = currentCell(rail);
+      if (current && current.kind === "end") {
+        const done = rail.cells.filter((cell) => cell.state === "done" && cell.kind !== "start");
+        if (done.length) return done[done.length - 1];
+      }
+      return current;
     }
 
     function nodeParam() {
@@ -1071,6 +1937,17 @@
       return "node";
     }
 
+    const STATE_MARK = { done: "✓", active: "●", waiting: "!", interrupted: "!", paused: "‖", stopped: "■", skipped: "–" };
+
+    function railMark(state) {
+      if (!STATE_MARK[state]) return null;
+      const mark = document.createElement("b");
+      mark.className = "rail-mark";
+      mark.setAttribute("aria-hidden", "true");
+      mark.textContent = STATE_MARK[state];
+      return mark;
+    }
+
     function makeRailButton(cell, current) {
       const pointed = current && current.id === cell.id;
       const stateLabel = STATE_LABEL[cell.state] || cell.state;
@@ -1082,13 +1959,12 @@
       button.title = stateLabel;
       button.setAttribute("aria-label", cell.label + "，" + stateLabel);
       if (pointed) button.setAttribute("aria-current", "step");
-      const viewing = nodeParam() || (current && current.id) || "";
+      const viewing = nodeParam() || restingCellId;
       button.classList.toggle("is-viewed", cell.id === viewing);
       button.setAttribute("aria-pressed", cell.id === viewing ? "true" : "false");
       button.addEventListener("click", () => {
-        const liveId = current && current.id;
-        setNodeParam(cell.id === liveId ? "" : cell.id);
-        const nextView = nodeParam() || liveId || "";
+        setNodeParam(cell.id === restingCellId ? "" : cell.id);
+        const nextView = nodeParam() || restingCellId;
         document.querySelectorAll("#region-rail .rail-cell").forEach((el) => {
           const on = el.dataset.id === nextView;
           el.classList.toggle("is-viewed", on);
@@ -1111,7 +1987,9 @@
           li.appendChild(railWire(kind));
         }
         const button = makeRailButton(cell, current);
-        button.textContent = cell.label;
+        const mark = railMark(cell.state);
+        if (mark) button.append(mark);
+        button.append(cell.label);
         li.appendChild(button);
         list.appendChild(li);
       });
@@ -1146,7 +2024,9 @@
           button.title = cell.label + "，" + (STATE_LABEL[cell.state] || cell.state);
           const name = document.createElement("span");
           name.className = "swim-name";
-          name.textContent = cell.label;
+          const mark = railMark(cell.state);
+          if (mark) name.append(mark);
+          name.append(cell.label);
           if (kind === "gate") {
             const mark = document.createElement("img");
             mark.className = "swim-decision";
@@ -1172,6 +2052,7 @@
     }
 
     let swimLaying = false;
+    const SWIM_MIN_LINK = 16;
 
     function swimMarker(id, color) {
       const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
@@ -1205,7 +2086,8 @@
       fitSwimLabels(grid);
       const track = grid.querySelector(".swim-track");
       if (!track) return;
-      const width = track.clientWidth;
+      grid.style.minWidth = "";
+      let width = track.clientWidth;
       if (width < 2) return;
       const buttons = [...grid.querySelectorAll(".swim-cell")].sort(
         (a, b) => Number(a.dataset.seq) - Number(b.dataset.seq)
@@ -1213,6 +2095,12 @@
       const n = buttons.length;
       if (!n) return;
       const widths = buttons.map((el) => el.offsetWidth);
+      // 主路径上相邻两格须左右分开、留出箭头，否则连线只能折回去；放不下就加宽泳道、横向滚动，不丢掉角色分道。
+      const need = widths.reduce((sum, w) => sum + w, 0) + SWIM_MIN_LINK * (n - 1);
+      if (need > width) {
+        grid.style.minWidth = Math.ceil(grid.clientWidth + need - width) + "px";
+        width = track.clientWidth;
+      }
       const gap = 6;
       const left = new Array(n).fill(0);
       if (n > 1) {
@@ -1413,6 +2301,10 @@
       count.hidden = true;
       const cells = (rail && rail.cells) || [];
       const current = currentCell(rail);
+      const resting = restingCell(rail);
+      restingCellId = (resting && resting.id) || "";
+      $("railEmpty").hidden = cells.length > 0;
+      $("railLegend").hidden = !cells.length;
       if (!cells.length) {
         $("nodeRail").replaceChildren();
         $("swimRail").replaceChildren();
@@ -1426,6 +2318,7 @@
       const box = $("statusHuman");
       const rail = data && data.rail;
       const cell = viewedCell(rail);
+      forgetRoleMenu(cell);
       $("inspectTitle").textContent = cell ? cell.label : "运行检视";
       if (!data || !data.thread_id) {
         box.replaceChildren();
@@ -1468,27 +2361,60 @@
         row.append(dt, dd);
         dl.appendChild(row);
       }
+      syncConversationThread($("thread").value.trim());
       const convPayload = conversations[cell.id];
-      const convLive = data.phase === "running" && rail && cell.id === rail.current;
       const convTurns = (convPayload && convPayload.turns) || [];
-      const showConversation = convLive || convTurns.length > 0;
+      const showConversation = cellRunning(data, cell.id) || convTurns.length > 0;
       const session = showConversation
-        ? formatConversation(convPayload, {
-            live: convLive && (conversationTurnInFlight(convTurns.slice(-1)[0]) || !convTurns.length),
-          })
+        ? formatConversation(convPayload, { live: conversationLive(data, cell.id, convPayload) })
         : "";
+      const decisions = (convPayload && convPayload.decisions) || [];
       const inspectParts = [];
       if (isActivityCell(cell)) inspectParts.push(inspectSettings(cell, data));
       if (rows.length) inspectParts.push(dl);
+      if (decisions.length) inspectParts.push(decisionSection(cell.id, decisions));
       if (showConversation) inspectParts.push(conversationSection(cell.id, session));
-      box.replaceChildren(...inspectParts);
-      if (cell.role) loadCellConversation(data.thread_id, cell.id);
+      followBottom(box, () => box.replaceChildren(...inspectParts));
+      if (cell.role || isGateCell(cell)) loadCellConversation(data.thread_id, cell.id);
+    }
+
+    function isGateCell(cell) {
+      return !!cell && (cell.kind === "gate" || String(cell.id).startsWith("gate_"));
+    }
+
+    function cellRunning(data, cellId) {
+      const rail = data && data.rail;
+      return !!(data && data.phase === "running" && rail && cellId === rail.current);
+    }
+
+    /** 两处渲染共用：只有正在执行的那一步、且最后一次调用还没有结果时，按进行中展开并显示「思考中…」。 */
+    function conversationLive(data, cellId, payload) {
+      if (!cellRunning(data, cellId)) return false;
+      const turns = (payload && payload.turns) || [];
+      return !turns.length || conversationTurnInFlight(turns[turns.length - 1]);
+    }
+
+    function scrollHost(el) {
+      for (let node = el && el.parentElement; node; node = node.parentElement) {
+        const overflow = getComputedStyle(node).overflowY;
+        if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight) return node;
+      }
+      return document.scrollingElement;
+    }
+
+    /** 重绘前停在底部的，重绘后仍贴着底部看最新输出；已向上翻看的保持原位，不交给浏览器的滚动锚定。 */
+    function followBottom(el, update) {
+      const host = scrollHost(el);
+      const top = host ? host.scrollTop : 0;
+      const atBottom = !!host && host.scrollHeight - host.clientHeight - top < 48;
+      update();
+      if (host) host.scrollTop = atBottom ? host.scrollHeight : top;
     }
 
     function isActivityCell(cell) {
       if (!cell) return false;
       if (cell.kind === "activity") return true;
-      if (cell.kind === "gate" || cell.kind === "start" || cell.kind === "end" || cell.kind === "parallel" || cell.kind === "subgraph") return false;
+      if (cell.kind === "gate" || cell.kind === "system" || cell.kind === "start" || cell.kind === "end" || cell.kind === "parallel" || cell.kind === "subgraph") return false;
       if (cell.id === "run_start" || cell.id === "run_end") return false;
       if (String(cell.id).indexOf("gate_") === 0) return false;
       return Boolean(cell.role && cell.role !== "human");
@@ -1504,37 +2430,31 @@
       if (data && data.thread_id) {
         const all = (data.values && data.values.node_tools) || {};
         const item = all[cell.id] || {};
-        return { skills: item.skills || [], mcp: item.mcp || [] };
+        return { skills: item.skills || [] };
       }
-      return pendingNodeTools[cell.id] || { skills: [], mcp: [] };
+      return pendingNodeTools[cell.id] || { skills: [] };
     }
 
     function loadRunToolCatalog() {
       fetch("/api/config/tools")
         .then((response) => response.json())
         .then((payload) => {
-          runToolCatalog = {
-            skills: payload.skills || [],
-            mcp: payload.mcp || [],
-            detail: payload.detail || "",
-          };
+          runToolCatalog = { skills: payload.skills || [], detail: payload.detail || "" };
           if (lastStatus) renderInspect(lastStatus.thread_id ? lastStatus : lastStatus);
         })
         .catch(() => {
-          runToolCatalog = { skills: [], mcp: [], detail: "读不到 Skill 和 MCP。" };
+          runToolCatalog = { skills: [], detail: "读不到 Skill。" };
         });
     }
 
-    /** 本步骤的 Skill 与 MCP 两栏；目录读取失败和适用说明写入 notes，由上层统一放在各栏下方。 */
-    function nodeToolColumns(cell, data, notes) {
+    /** 本步骤的 Skill；目录读取失败和适用说明写入 notes，由上层统一放在下方。 */
+    function nodeToolColumn(cell, data, notes) {
       const locked = toolsLocked(cell, data);
       const chosen = chosenNodeTools(cell, data);
       if (runToolCatalog.detail) notes.push({ text: runToolCatalog.detail });
-      if (!locked) notes.push({ text: "不添加时，这一步沿用后端已有的 Skill 和 MCP。" });
-      return [
-        runToolGroup(cell, data, "skills", "Skill", chosen.skills, runToolCatalog.skills, locked),
-        runToolGroup(cell, data, "mcp", "MCP", chosen.mcp, runToolCatalog.mcp, locked),
-      ];
+      if (nodeToolError && nodeToolError.node === cell.id) notes.push({ text: nodeToolError.text, error: true });
+      if (!locked) notes.push({ text: "添加的 Skill 会提示这一步优先使用；不添加时由 Agent 按需选用。" });
+      return runToolGroup(cell, data, "skills", "Skill", chosen.skills, runToolCatalog.skills, locked);
     }
 
     function runToolGroup(cell, data, key, title, selected, catalog, locked) {
@@ -1694,24 +2614,35 @@
 
     function saveNodeTools(cell, data, choice) {
       const skills = (choice.skills || []).slice();
-      const mcp = (choice.mcp || []).slice();
       const tid = data && data.thread_id;
       if (!tid) {
-        if (skills.length || mcp.length) pendingNodeTools[cell.id] = { skills: skills, mcp: mcp };
+        if (skills.length) pendingNodeTools[cell.id] = { skills: skills };
         else delete pendingNodeTools[cell.id];
         renderInspect(lastStatus);
+        scheduleDraftAutosave();
         return;
       }
+      const fail = (text) => {
+        if ($("thread").value.trim() !== tid) return;
+        nodeToolError = { node: cell.id, text: text };
+        renderInspect(lastStatus);
+      };
       fetch("/api/runs/" + encodeURIComponent(tid) + "/nodes/" + encodeURIComponent(cell.id) + "/tools", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skills: skills, mcp: mcp }),
-      }).then((response) => response.json().then((payload) => ({ ok: response.ok, payload: payload })))
-        .then((result) => {
-          if (!result.ok) return;
-          lastStatus = result.payload;
+        body: JSON.stringify({ skills: skills }),
+      }).then(readFetchResponse)
+        .then(({ ok, data: payload }) => {
+          if (!ok) {
+            fail(apiErrorMessage(payload, "Skill 没有保存。"));
+            return;
+          }
+          nodeToolError = null;
+          if ($("thread").value.trim() !== tid) return;
+          lastStatus = payload;
           renderInspect(lastStatus);
-        });
+        })
+        .catch(() => fail("Skill 没有保存。检查服务是否还在，然后重试。"));
     }
 
     function escapeHtml(text) {
@@ -1733,6 +2664,42 @@
       return html;
     }
 
+    const VERDICT_STATES = {
+      pass: ["通过", "is-pass"],
+      fail: ["未通过", "is-fail"],
+      untested: ["未验证", "is-untested"],
+    };
+
+    /** 判定类活动的结论块（verdict）改为结论卡片；不是合法结论时返回空串，按原文显示。 */
+    function verdictCard(text) {
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (_) {
+        return "";
+      }
+      if (!data || typeof data !== "object" || Array.isArray(data)) return "";
+      const status = String(data.status || "").trim().toLowerCase();
+      if (status !== "pass" && status !== "fail") return "";
+      const ac = data.ac && typeof data.ac === "object" && !Array.isArray(data.ac) ? data.ac : {};
+      const [statusText, statusClass] = VERDICT_STATES[status];
+      let html = "<div class=\"verdict-card " + statusClass + "\" role=\"group\" aria-label=\"结论\">";
+      html += "<p class=\"verdict-head\"><span class=\"verdict-badge " + statusClass + "\">" + statusText + "</span>";
+      if (data.summary) html += "<span class=\"verdict-summary\">" + inlineMarkdown(String(data.summary)) + "</span>";
+      html += "</p>";
+      const items = Object.entries(ac);
+      if (items.length) {
+        html += "<ul class=\"verdict-ac\" aria-label=\"验收项\">";
+        items.forEach(([key, value]) => {
+          const state = VERDICT_STATES[String(value || "").trim().toLowerCase()] || VERDICT_STATES.untested;
+          html += "<li class=\"" + state[1] + "\"><span class=\"verdict-ac-id\">" + escapeHtml(key)
+            + "</span><span class=\"verdict-ac-state\">" + state[0] + "</span></li>";
+        });
+        html += "</ul>";
+      }
+      return html + "</div>";
+    }
+
     function renderMarkdown(src) {
       const lines = String(src || "").replace(/\r\n/g, "\n").split("\n");
       const blocks = [];
@@ -1744,6 +2711,7 @@
       const isTable = (index) => /^\s*\|/.test(lines[index] || "") && /^\s*\|?\s*:?-{3,}/.test(lines[index + 1] || "");
       while (i < lines.length) {
         if (isFence(lines[i])) {
+          const tag = lines[i].slice(3).trim().split(/\s+/)[0];
           const buf = [];
           i += 1;
           while (i < lines.length && !isFence(lines[i])) {
@@ -1751,7 +2719,8 @@
             i += 1;
           }
           if (i < lines.length) i += 1;
-          blocks.push("<pre class=\"artifact-code\"><code>" + escapeHtml(buf.join("\n")) + "</code></pre>");
+          const card = tag === "verdict" ? verdictCard(buf.join("\n")) : "";
+          blocks.push(card || "<pre class=\"artifact-code\"><code>" + escapeHtml(buf.join("\n")) + "</code></pre>");
           continue;
         }
         if (isTable(i)) {
@@ -1822,6 +2791,7 @@
     }
 
     const conversations = {};
+    let conversationsThread = "";
 
     function conversationTurnInFlight(turn) {
       if (!turn || !turn.events || !turn.events.length) return true;
@@ -1840,18 +2810,63 @@
       return text.length > limit ? text.slice(0, limit - 1) + "…" : text;
     }
 
+    /** Shell 步骤不记录 block_until_ms 等参数，只能从命令写法判断脱离会话的后台命令；其余靠进程列表比对。 */
+    const BACKGROUND_COMMAND = /(^|[;&|]\s*|\s)(nohup|setsid|disown)\b|[^&]&\s*$/;
+
+    /** 命令去掉 nohup、重定向与结尾的 &，用来与这一轮仍在运行的进程比对。 */
+    function commandCore(command) {
+      return String(command || "")
+        .replace(/^\s*(nohup|setsid)\s+/, "")
+        .replace(/\s*\d?&?>>?\s*&?\S+/g, "")
+        .replace(/\s*&\s*$/, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function liveProcessFor(command, processes) {
+      const core = commandCore(command);
+      if (!core || !Array.isArray(processes)) return null;
+      return processes.find((p) => {
+        const cmd = String(p.command || "");
+        return cmd.includes(core) || (cmd.length >= 8 && core.includes(cmd));
+      }) || null;
+    }
+
+    function taskSummary(args, result, status) {
+      const a = args && typeof args === "object" ? args : {};
+      const v = result && typeof result.value === "object" && result.value ? result.value : {};
+      const kind = a.subagentType && typeof a.subagentType === "object" ? a.subagentType.kind : a.subagentType;
+      const error = result && result.error ? (result.error.message || String(result.error)) : "";
+      return {
+        agentId: String(a.agentId || v.agentId || ""),
+        description: oneLine(a.description || "子代理", 80),
+        type: String(kind || ""),
+        model: String(a.model || ""),
+        status: status,
+        background: !!v.isBackground,
+        ms: Number(v.durationMs) || 0,
+        tools: Number(v.toolCount) || 0,
+        reply: String(v.reply || error || ""),
+      };
+    }
+
     function toolSummary(name, args, failed) {
       const a = args && typeof args === "object" ? args : {};
       const where = shortPath(a.path || a.targetDirectory || a.cwd || a.workingDirectory || "");
       let verb = "";
       let target = "";
+      if (name === "shell" || name === "commandExecution") {
+        const command = String(a.command || "");
+        return {
+          verb: "执行", target: oneLine(command, 80), failed: !!failed,
+          command: command, background: BACKGROUND_COMMAND.test(command),
+        };
+      }
       switch (name) {
         case "read": verb = "读取"; target = shortPath(a.path); break;
         case "edit":
         case "write": verb = "编辑"; target = shortPath(a.path); break;
         case "delete": verb = "删除"; target = shortPath(a.path); break;
-        case "shell":
-        case "commandExecution": verb = "执行"; target = oneLine(a.command, 80); break;
         case "glob": verb = "查找文件"; target = [a.globPattern, where].filter(Boolean).join(" · "); break;
         case "grep": verb = "搜索"; target = [oneLine(a.pattern, 60), where || a.glob].filter(Boolean).join(" · "); break;
         case "ls": verb = "列出目录"; target = where; break;
@@ -1917,18 +2932,65 @@
         const m = message && typeof message === "object" ? message : {};
         const result = m.result && typeof m.result === "object" ? m.result : {};
         const failed = !!result.status && result.status !== "success";
+        if (m.type === "task") return { kind: "task", task: taskSummary(m.args, result, failed ? "failed" : "done") };
         return { kind: "tool", tool: toolSummary(String(m.type || ""), m.args, failed) };
       }
+      if (type === "taskStarted") return { kind: "task", task: taskSummary(message && message.args, null, "running") };
       if (type === "item/completed" && message && message.item) return codexItemStep(message.item);
       if (type === "error") return { kind: "error", text: stepText(message) || "调用出错" };
       return null;
     }
 
-    function toolLine(tool) {
+    function toolLine(tool, processes) {
+      const live = tool.command ? liveProcessFor(tool.command, processes) : null;
+      let tag = "";
+      if (live) tag = "<span class=\"conv-tag is-live\" title=\"pid " + attrText(live.pid) + "\">后台 · 运行中</span>";
+      else if (tool.background) tag = "<span class=\"conv-tag\">" + (Array.isArray(processes) ? "后台 · 已结束" : "后台") + "</span>";
       return "<li class=\"conv-tool" + (tool.failed ? " is-failed" : "") + "\"><span class=\"conv-tool-verb\">"
         + escapeHtml(tool.verb) + "</span>"
         + (tool.target ? " <span class=\"conv-tool-target\">" + escapeHtml(tool.target) + "</span>" : "")
+        + tag
         + (tool.failed ? " <span class=\"conv-tool-failed\">失败</span>" : "") + "</li>";
+    }
+
+    const TASK_STATUS = { running: "运行中", done: "完成", failed: "失败" };
+
+    function taskBlock(task, key) {
+      const meta = [task.type, task.model, task.tools ? "工具调用 " + task.tools + " 次" : "",
+        task.ms >= 1000 ? Math.round(task.ms / 1000) + " 秒" : ""].filter(Boolean).join(" · ");
+      const status = task.status === "done" && task.background ? "已转入后台" : TASK_STATUS[task.status] || "";
+      return "<div class=\"conv-task is-" + escapeHtml(task.status) + "\"><p class=\"conv-task-head\">"
+        + (task.status === "running" ? "<span class=\"conv-live-dot\" aria-hidden=\"true\"></span>" : "")
+        + "<span class=\"conv-task-label\">子代理</span> <span class=\"conv-task-desc\">" + escapeHtml(task.description)
+        + "</span><span class=\"conv-tag" + (task.status === "failed" ? " is-failed" : "") + "\">" + escapeHtml(status) + "</span>"
+        + (task.background ? "<span class=\"conv-tag\">后台</span>" : "") + "</p>"
+        + (meta ? "<p class=\"conv-task-meta\">" + escapeHtml(meta) + "</p>" : "")
+        + (task.reply ? "<details data-key=\"" + attrText(key) + "\"><summary>"
+          + (task.status === "failed" ? "错误" : "结果") + "</summary><div class=\"conv-task-reply\">"
+          + renderMarkdown(task.reply) + "</div></details>" : "")
+        + "</div>";
+    }
+
+    function elapsedText(startedAt) {
+      const seconds = startedAt ? Math.max(0, Math.round(Date.now() / 1000 - startedAt)) : 0;
+      if (!seconds) return "";
+      if (seconds < 60) return seconds + " 秒";
+      if (seconds < 3600) return Math.floor(seconds / 60) + " 分钟";
+      return (seconds / 3600).toFixed(1) + " 小时";
+    }
+
+    /** 这一轮仍在运行的进程按 Run 统计；本轮结束时由服务端一并回收。 */
+    function processPanel(processes) {
+      if (!Array.isArray(processes) || !processes.length) return "";
+      const rows = processes.map((p) => {
+        const age = elapsedText(Number(p.started_at));
+        return "<li class=\"conv-tool\"><span class=\"conv-tool-target\" title=\"" + attrText(p.command) + "\">"
+          + escapeHtml(oneLine(p.command, 100)) + "</span><span class=\"conv-tag is-live\">pid " + escapeHtml(String(p.pid))
+          + (age ? " · " + escapeHtml(age) : "") + "</span></li>";
+      }).join("");
+      return "<details class=\"conv-procs\" data-key=\"procs\" open><summary>本轮仍在运行的进程 "
+        + processes.length + " 个</summary><p class=\"conv-procs-hint\">本轮完成、驳回或停止时一并结束。</p><ul class=\"conv-tools\">"
+        + rows + "</ul></details>";
     }
 
     function attrText(value) {
@@ -1973,14 +3035,19 @@
     function formatConversation(payload, options) {
       const turns = (payload && payload.turns) || [];
       const live = !!(options && options.live);
+      const processes = payload ? payload.processes : undefined;
       if (!turns.length) {
         return live
           ? "<p class=\"conv-live-status\"><span class=\"conv-live-dot\" aria-hidden=\"true\"></span>思考中…</p>"
           : "";
       }
-      return turns.map((turn, turnIndex) => {
+      return processPanel(processes) + turns.map((turn, turnIndex) => {
         const turnLive = live && turnIndex === turns.length - 1 && conversationTurnInFlight(turn);
         const events = turn.events || [];
+        const finishedTasks = new Set(events
+          .filter((e) => e.kind === "step" && e.step && e.step.type === "toolCall" && e.step.message && e.step.message.type === "task")
+          .map((e) => String((e.step.message.args || {}).agentId || "")).filter(Boolean));
+        let taskIndex = 0;
         const results = new Set(events.filter((e) => e.kind === "result").map((e) => String(e.text || "").trim()));
         const seq = String(turn.seq);
         const open = turnLive || turnIndex === turns.length - 1;
@@ -1992,7 +3059,7 @@
           let out = "";
           let tools = [];
           const flushTools = () => {
-            if (tools.length) out += "<ul class=\"conv-tools\">" + tools.map(toolLine).join("") + "</ul>";
+            if (tools.length) out += "<ul class=\"conv-tools\">" + tools.map((t) => toolLine(t, processes)).join("") + "</ul>";
             tools = [];
           };
           for (const item of work.items) {
@@ -2044,6 +3111,13 @@
           if (event.kind !== "step") continue;
           const step = conversationStep(event.step);
           if (!step) continue;
+          if (step.kind === "task") {
+            if (step.task.status === "running" && finishedTasks.has(step.task.agentId)) continue;
+            flushWork(false);
+            html += taskBlock(step.task, "task-" + seq + "-" + (step.task.agentId || taskIndex));
+            taskIndex += 1;
+            continue;
+          }
           if (step.kind === "thinking" || step.kind === "tool") {
             work = work || { items: [], thinking: 0, tools: 0, ms: 0 };
             if (step.kind === "tool") {
@@ -2071,26 +3145,86 @@
     }
 
     const conversationOpen = {};
+    /** 会话内可滚动块（提示、工具输出、表格等）的滚动位置：节点 → 位置 → [横向, 纵向]。 */
+    const conversationScroll = {};
 
-    /** 折叠状态按节点记住；状态刷新或新步骤到达时重绘会话，不打乱人已展开或收起的块。 */
+    /** 位置以最近的带 data-key 的折叠块为锚，再记从锚到元素的子节点序号；重绘生成同样的结构即可找回。 */
+    function scrollSpot(body, el) {
+      const anchor = el.closest("details[data-key]");
+      const root = anchor && body.contains(anchor) ? anchor : body;
+      const path = [];
+      for (let node = el; node && node !== root; node = node.parentElement) {
+        path.push(Array.prototype.indexOf.call(node.parentElement.children, node));
+      }
+      return (root === body ? "" : root.dataset.key) + "/" + path.reverse().join(".");
+    }
+
+    function findSpot(body, spot) {
+      const cut = spot.lastIndexOf("/");
+      const key = spot.slice(0, cut);
+      let node = key ? [...body.querySelectorAll("details[data-key]")].find((d) => d.dataset.key === key) : body;
+      for (const part of spot.slice(cut + 1).split(".").filter(Boolean)) node = node && node.children[Number(part)];
+      return node || null;
+    }
+
+    function restoreConversationScroll(body, nodeId) {
+      const saved = conversationScroll[nodeId];
+      if (!saved) return;
+      const apply = () => {
+        if (!body.isConnected) return;
+        Object.entries(saved).forEach(([spot, [left, top]]) => {
+          const el = findSpot(body, spot);
+          if (!el) return;
+          el.scrollLeft = left;
+          el.scrollTop = top;
+        });
+      };
+      // 右栏整节重绘时会话先建在脱离文档的节点上，没有布局，滚动位置要等插入文档后再设；微任务在绘制前执行，不会闪回最左。
+      if (body.isConnected) apply();
+      else queueMicrotask(apply);
+    }
+
+    /** 折叠状态与块内滚动位置按节点记住；状态刷新或新步骤到达时重绘会话，不打乱人已展开、收起或拖动过的块。 */
+    const renderedConversation = new WeakMap();
+
     function fillConversation(body, nodeId, html) {
+      if (renderedConversation.get(body) === html) return;
+      renderedConversation.set(body, html);
       body.innerHTML = html;
       const saved = conversationOpen[nodeId] || {};
       body.querySelectorAll("details[data-key]").forEach((d) => {
         if (Object.prototype.hasOwnProperty.call(saved, d.dataset.key)) d.open = saved[d.dataset.key];
       });
       syncAskCards(body);
+      restoreConversationScroll(body, nodeId);
       if (body.dataset.trackOpen) return;
       body.dataset.trackOpen = "1";
+      // scroll 不冒泡，捕获阶段才能在会话容器上收到块内的滚动。
+      body.addEventListener("scroll", (ev) => {
+        const el = ev.target;
+        if (!(el instanceof Element) || el === body || !body.contains(el)) return;
+        const spots = (conversationScroll[nodeId] = conversationScroll[nodeId] || {});
+        const spot = scrollSpot(body, el);
+        if (el.scrollLeft || el.scrollTop) spots[spot] = [el.scrollLeft, el.scrollTop];
+        else delete spots[spot];
+      }, true);
       body.addEventListener("change", (ev) => {
         const box = ev.target;
         const card = box instanceof HTMLInputElement ? box.closest(".conv-ask") : null;
         if (card) pickChoice(card.dataset.signature, box.value, box.checked);
       });
+      const remember = (d, open) => {
+        (conversationOpen[nodeId] = conversationOpen[nodeId] || {})[d.dataset.key] = open;
+      };
+      // toggle 事件异步派发；点击后、派发前若推送重绘了会话，旧元素已脱离文档，只靠它会丢掉这次展开。
+      body.addEventListener("click", (ev) => {
+        const summary = ev.target instanceof Element ? ev.target.closest("summary") : null;
+        const d = summary && summary.parentElement;
+        if (d instanceof HTMLDetailsElement && d.dataset.key && body.contains(d)) remember(d, !d.open);
+      }, true);
       body.addEventListener("toggle", (ev) => {
         const d = ev.target;
-        if (!(d instanceof HTMLDetailsElement) || !d.dataset.key) return;
-        (conversationOpen[nodeId] = conversationOpen[nodeId] || {})[d.dataset.key] = d.open;
+        if (d instanceof HTMLDetailsElement && d.dataset.key && d.isConnected) remember(d, d.open);
       }, true);
     }
 
@@ -2122,8 +3256,22 @@
       return section;
     }
 
-    function rememberConversation(payload) {
-      if (payload && payload.node) conversations[payload.node] = payload;
+    function syncConversationThread(tid) {
+      if (tid === conversationsThread) return;
+      conversationsThread = tid;
+      nodeToolError = null;
+      for (const key of Object.keys(conversations)) delete conversations[key];
+      for (const key of Object.keys(conversationScroll)) delete conversationScroll[key];
+    }
+
+    function rememberConversation(payload, tid) {
+      if (!payload || !payload.node || tid !== $("thread").value.trim()) return false;
+      syncConversationThread(tid);
+      const prior = conversations[payload.node];
+      // 推送来的会话帧不带决策记录，沿用上一次读到的。
+      if (!("decisions" in payload) && prior && prior.decisions) payload = { ...payload, decisions: prior.decisions };
+      conversations[payload.node] = payload;
+      return true;
     }
 
     async function loadCellConversation(tid, nodeId) {
@@ -2131,14 +3279,28 @@
         const r = await fetch("/api/runs/" + encodeURIComponent(tid) + "/conversations/" + encodeURIComponent(nodeId));
         if (!r.ok) return;
         const payload = await r.json();
-        rememberConversation(payload);
-        const section = document.querySelector('.inspect-block[data-node="' + nodeId + '"] .conversation-body');
-        if (section) {
-          fillConversation(section, nodeId, formatConversation(payload));
-        } else if ((payload.turns || []).length && lastStatus) {
-          renderInspect(lastStatus);
-        }
+        if (rememberConversation(payload, tid)) refreshConversation(nodeId);
       } catch (_) { /* 会话读不到时保留上一帧 */ }
+    }
+
+    /** 新步骤到达时只重绘会话这一节，不重建右栏其余部分。 */
+    function refreshConversation(nodeId) {
+      const payload = conversations[nodeId];
+      if (!payload || !lastStatus) return;
+      const cell = viewedCell(lastStatus.rail);
+      const viewing = !!cell && cell.id === nodeId;
+      const shown = document.querySelector('.decision-log[data-node="' + CSS.escape(nodeId) + '"]');
+      if (viewing && JSON.stringify(payload.decisions || []) !== (shown ? shown.dataset.key : "[]")) {
+        renderInspect(lastStatus);
+        return;
+      }
+      const body = document.querySelector('.inspect-block[data-node="' + nodeId + '"] .conversation-body');
+      if (body) {
+        const html = formatConversation(payload, { live: conversationLive(lastStatus, nodeId, payload) });
+        followBottom(body, () => fillConversation(body, nodeId, html));
+        return;
+      }
+      if (viewing && (payload.turns || []).length) renderInspect(lastStatus);
     }
 
     function shouldFollowRailPhase(phase) {
@@ -2181,19 +3343,30 @@
     async function syncRunScenarioHint() {
       const el = $("runScenarioHint");
       const pid = String($("project").value || "").trim();
+      el.classList.remove("is-warn");
       if (!pid) {
         el.textContent = "命名默认是项目标识加递增序号，可改。";
         return;
       }
       try {
-        const r = await fetch("/api/config/projects/" + encodeURIComponent(pid) + "/form");
-        const data = await r.json();
-        const key = String((data && data.scenario_key) || "").trim();
-        el.textContent = key
-          ? "项目类型：" + key + "。"
-          : "该项目尚未设置项目类型。请先到项目配置里设置。";
+        const [form, flows] = await Promise.all([
+          fetch("/api/config/projects/" + encodeURIComponent(pid) + "/form").then((r) => r.json()),
+          fetch("/api/workflows").then((r) => r.json()).catch(() => ({})),
+        ]);
+        if (String($("project").value || "").trim() !== pid) return;
+        const flowId = String((form && form.profile_id) || "").trim();
+        if (flowId) {
+          const flow = ((flows && flows.workflows) || []).find((item) => item.workflow_id === flowId);
+          el.textContent = "流程：" + ((flow && flow.title) || flowId) + "。命名默认是项目标识加递增序号，可改。";
+          return;
+        }
+        el.classList.add("is-warn");
+        const link = document.createElement("a");
+        link.href = "/project?project=" + encodeURIComponent(pid);
+        link.textContent = "去项目页选择";
+        el.replaceChildren("这个项目还没有流程。", link);
       } catch (_) {
-        el.textContent = "项目类型在项目配置里设置，本轮沿用所选项目。";
+        el.textContent = "命名默认是项目标识加递增序号，可改。";
       }
     }
 
@@ -2362,23 +3535,178 @@
       box.appendChild(list);
     }
 
-    function renderReading(sections) {
+    function railCellButton(nodeId) {
+      return nodeId ? document.querySelector('#region-rail .rail-cell[data-id="' + CSS.escape(nodeId) + '"]') : null;
+    }
+
+    /** 待审阅的产物只列名称、产出节点、字数与结论；正文点开后在上方检视区按节点阅读。 */
+    function renderReview(items) {
       const box = $("hitlReading");
       box.replaceChildren();
-      if (!sections || !sections.length) {
-        box.hidden = true;
-        return;
+      const list = (items || []).filter((item) => item && item.key);
+      box.hidden = !list.length;
+      if (!list.length) return;
+      const heading = document.createElement("p");
+      heading.className = "hitl-review-title";
+      heading.textContent = "待审阅";
+      box.append(heading, reviewList(list));
+    }
+
+    function reviewList(list) {
+      const ul = document.createElement("ul");
+      ul.className = "hitl-review-list";
+      for (const item of list) {
+        const li = document.createElement("li");
+        const linked = !!railCellButton(item.node);
+        const name = document.createElement(linked ? "button" : "span");
+        name.className = "hitl-review-name";
+        name.textContent = item.title || item.key;
+        if (linked) {
+          name.type = "button";
+          name.title = "查看「" + (item.node_label || item.node) + "」的输出";
+          name.addEventListener("click", () => {
+            const cell = railCellButton(item.node);
+            if (cell) cell.click();
+          });
+        }
+        const meta = document.createElement("span");
+        meta.className = "hitl-review-meta";
+        const parts = [];
+        if (item.node_label && item.node_label !== item.title) parts.push(item.node_label);
+        if (item.chars) parts.push(Number(item.chars).toLocaleString("zh-CN") + " 字");
+        meta.textContent = parts.join(" · ");
+        li.append(name, meta);
+        const verdict = item.verdict;
+        if (verdict && (verdict.status === "pass" || verdict.status === "fail")) {
+          const [statusText, statusClass] = VERDICT_STATES[verdict.status];
+          const row = document.createElement("p");
+          row.className = "hitl-review-verdict";
+          const badge = document.createElement("span");
+          badge.className = "verdict-badge " + statusClass;
+          badge.textContent = statusText;
+          row.appendChild(badge);
+          const ac = Object.values(verdict.ac || {});
+          const text = [verdict.summary || ""];
+          if (ac.length) text.push("验收 " + ac.filter((v) => v === "pass").length + "/" + ac.length + " 通过");
+          row.append(" " + text.filter(Boolean).join("；"));
+          li.appendChild(row);
+        }
+        ul.appendChild(li);
       }
-      box.hidden = false;
-      for (const section of sections) {
-        if (section.title === "待澄清") continue;
-        const heading = document.createElement("h4");
-        heading.textContent = section.title;
-        const body = document.createElement("p");
-        body.textContent = section.body;
-        box.append(heading, body);
-      }
-      if (!box.childElementCount) box.hidden = true;
+      return ul;
+    }
+
+    const DECISION_CHANNELS = { web: "网页", feishu: "飞书", cli: "命令行" };
+
+    const DECISION_KINDS = { pm_clarification: "需求澄清", escalation: "回退升级" };
+    const ESCALATION_CHOICES = {
+      continue: ["继续重试", "is-approved"],
+      pause: ["暂停", "is-paused"],
+      abort: ["终止本轮", "is-rejected"],
+    };
+
+    function decisionLabel(entry) {
+      if (entry.kind === "pm_clarification") return "已答复";
+      if (entry.kind === "escalation") return (ESCALATION_CHOICES[entry.decision] || [entry.decision])[0];
+      if (entry.decision === "approved") return "批准";
+      return entry.reject_label ? "不通过 — 退回「" + entry.reject_label + "」" : "驳回 — 结束本轮";
+    }
+
+    function decisionTone(entry) {
+      if (entry.kind === "pm_clarification") return "is-approved";
+      if (entry.kind === "escalation") return (ESCALATION_CHOICES[entry.decision] || [])[1] || "is-paused";
+      return entry.decision === "approved" ? "is-approved" : "is-rejected";
+    }
+
+    function decisionTime(at) {
+      const when = new Date(at);
+      if (Number.isNaN(when.getTime())) return "";
+      return when.toLocaleString("zh-CN", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    }
+
+    /** 人工停点历次的决定：当时的待决内容、问题、待审阅产物与结论，以及人的选择和意见。 */
+    function decisionSection(nodeId, entries) {
+      const section = document.createElement("section");
+      section.className = "inspect-block decision-log";
+      section.dataset.node = nodeId;
+      section.dataset.key = JSON.stringify(entries);
+      section.setAttribute("aria-label", "决策记录");
+      const heading = document.createElement("p");
+      heading.className = "hitl-review-title";
+      heading.textContent = "决策记录";
+      const ol = document.createElement("ol");
+      ol.className = "decision-log-list";
+      entries.forEach((entry, index) => {
+        const li = document.createElement("li");
+        li.className = "decision-entry";
+        const head = document.createElement("p");
+        head.className = "decision-entry-head";
+        const badge = document.createElement("span");
+        badge.className = "decision-badge " + decisionTone(entry);
+        badge.textContent = decisionLabel(entry);
+        const meta = document.createElement("span");
+        meta.className = "hitl-review-meta";
+        const parts = [];
+        if (DECISION_KINDS[entry.kind]) parts.push(DECISION_KINDS[entry.kind]);
+        if (entries.length > 1) parts.push("第 " + (index + 1) + " 次");
+        const when = decisionTime(entry.at);
+        if (when) parts.push(when);
+        const channel = DECISION_CHANNELS[entry.channel] || entry.channel;
+        if (channel) parts.push(channel);
+        if (entry.actor && entry.actor !== entry.channel) parts.push(entry.actor);
+        meta.textContent = parts.join(" · ");
+        head.append(badge, meta);
+        li.appendChild(head);
+        if (entry.summary) {
+          const summary = document.createElement("p");
+          summary.className = "decision-entry-text";
+          summary.textContent = entry.summary;
+          li.appendChild(summary);
+        }
+        const questions = (entry.questions || []).filter(Boolean);
+        if (questions.length) {
+          const label = document.createElement("p");
+          label.className = "decision-entry-label";
+          label.textContent = "当时的问题";
+          const ul = document.createElement("ul");
+          ul.className = "decision-entry-questions";
+          for (const text of questions) {
+            const item = document.createElement("li");
+            item.textContent = text;
+            ul.appendChild(item);
+          }
+          li.append(label, ul);
+        }
+        const review = (entry.review || []).filter((item) => item && item.key);
+        if (review.length) {
+          const label = document.createElement("p");
+          label.className = "decision-entry-label";
+          label.textContent = "当时待审阅";
+          li.append(label, reviewList(review));
+        }
+        if (entry.reply && entry.reply !== entry.decision) {
+          const reply = document.createElement("p");
+          reply.className = "decision-entry-text";
+          reply.textContent = (entry.kind === "pm_clarification" ? "答复：" : "意见：") + entry.reply;
+          li.appendChild(reply);
+        }
+        if (entry.legacy) {
+          const note = document.createElement("p");
+          note.className = "hint-block";
+          note.textContent = "这次决定早于决策记录，只保留了决定、时间与意见。";
+          li.appendChild(note);
+        }
+        ol.appendChild(li);
+      });
+      section.append(heading, ol);
+      return section;
+    }
+
+    function syncGateDecision(ah) {
+      const reject = document.querySelector('#decision wa-option[value="rejected"]');
+      if (!reject) return;
+      const target = ah && ah.kind === "gate" ? ah.reject_label : "";
+      reject.textContent = target ? "不通过 — 退回「" + target + "」" : "驳回 — 结束本轮";
     }
 
     function syncAgentLiveBanner(data) {
@@ -2509,6 +3837,7 @@
       btn.hidden = !show;
       btn.disabled = !show || stopping;
       btn.textContent = stopping ? "正在停止" : "停止";
+      if (!show || stopping) closeStopConfirm(false);
       syncPauseButton(phase);
       syncContinueButton(phase);
     }
@@ -2536,7 +3865,37 @@
       }, 1200);
     }
 
+    /** 待办表单在右下角，离中栏视线远；有待办时在泳道上方提示，并可一键把焦点送到表单。 */
+    function showPendingAlert(stepLabel) {
+      const box = $("pendingAlert");
+      if (stepLabel === null) {
+        box.hidden = true;
+        return;
+      }
+      $("pendingAlertText").textContent = (stepLabel ? "「" + stepLabel + "」" : "本轮") + "等待你处理，表单在右侧「人工待办」。";
+      box.hidden = false;
+    }
+
+    function goPending() {
+      const dock = $("region-todo");
+      const visible = (el) => !el.closest("[hidden]") && !el.disabled && el.getClientRects().length > 0;
+      const target = [...dock.querySelectorAll("wa-select, wa-radio-group, wa-textarea")].find(visible)
+        || [...dock.querySelectorAll("wa-button, button")].find(visible);
+      dock.classList.remove("is-attention");
+      void dock.offsetWidth;
+      dock.classList.add("is-attention");
+      const submit = $("btnSubmit");
+      if (visible(submit)) submit.scrollIntoView({ block: "nearest" });
+      if (target) {
+        target.scrollIntoView({ block: "nearest" });
+        target.focus();
+      }
+    }
+
+    $("btnGoPending").addEventListener("click", goPending);
+
     function ingestStatus(data) {
+      if (data && data.thread_id && data.thread_id !== $("thread").value.trim()) return;
       showError($("startError"), "");
       applyStatus(data);
       applyBoundRunName(data);
@@ -2551,12 +3910,17 @@
         $("gateIdleHint").hidden = true;
         $("bannerText").textContent = ah.summary || "等待人工处理";
         const current = data.rail && data.rail.cells.find((cell) => cell.id === data.rail.current);
-        $("bannerGate").textContent = current ? current.label : "";
+        showPendingAlert((current && current.label) || "");
+        const gateLabel = current && !String(ah.summary || "").startsWith(current.label) ? current.label : "";
+        $("bannerGate").textContent = gateLabel;
+        $("bannerGate").hidden = !gateLabel;
         applyHitlFormMode(ah);
-        renderReading(data.reading);
+        syncGateDecision(ah);
+        renderReview(data.review);
         syncHumanChoices(data);
       } else {
         $("banner").hidden = true;
+        showPendingAlert(null);
         $("gateIdleHint").hidden = data.phase === "awaiting_human";
         if (data.phase === "completed") {
           $("gateIdleHint").hidden = false;
@@ -2571,7 +3935,7 @@
           $("gateIdleHint").textContent = "暂无待办；需批复或澄清时表单会出现在此。";
         }
         applyHitlFormMode(null);
-        renderReading([]);
+        renderReview([]);
         syncHumanChoices(null);
       }
       armPoll(data.phase);
@@ -2579,9 +3943,14 @@
       syncRunBoardLayout();
     }
 
+    function onRunRoute() {
+      return document.documentElement.dataset.route === "hitl";
+    }
+
     function armPoll(phase) {
       const tid = $("thread").value.trim();
-      const live = (phase === "running" || phase === "awaiting_human") && !document.hidden && !!tid;
+      const live = (phase === "running" || phase === "awaiting_human")
+        && !document.hidden && !!tid && onRunRoute();
       if (!live) {
         stopPoll();
         return;
@@ -2592,24 +3961,56 @@
         pollTimer = setInterval(() => { refresh({ quiet: true }); }, 2000);
         return;
       }
+      const source = new EventSource("/api/runs/" + encodeURIComponent(tid) + "/events");
       pushThread = tid;
-      pushSource = new EventSource("/api/runs/" + encodeURIComponent(tid) + "/events");
-      pushSource.addEventListener("status", (ev) => {
+      pushSource = source;
+      const stale = () => {
+        if (pushSource === source && $("thread").value.trim() === tid) return false;
+        source.close();
+        return true;
+      };
+      source.addEventListener("status", (ev) => {
+        if (stale()) return;
         try { ingestStatus(JSON.parse(ev.data)); } catch (_) { /* 忽略坏帧 */ }
       });
-      pushSource.addEventListener("conversation", (ev) => {
+      source.addEventListener("conversation", (ev) => {
+        if (stale()) return;
         try {
-          rememberConversation(JSON.parse(ev.data));
-          if (lastStatus) renderInspect(lastStatus);
+          const payload = JSON.parse(ev.data);
+          if (rememberConversation(payload, tid)) refreshConversation(payload.node);
         } catch (_) { /* 忽略坏帧 */ }
       });
-      pushSource.addEventListener("end", () => { stopPoll(); });
-      pushSource.onerror = () => { stopPoll(); };
+      source.addEventListener("end", () => { if (!stale()) stopPoll(); });
+      source.onerror = () => {
+        if (stale()) return;
+        stopPoll();
+        // 断流后重读一次：服务还在就重新接上推送，不在就写出读取失败。
+        setTimeout(() => {
+          if ($("thread").value.trim() === tid && onRunRoute() && !document.hidden) refresh({ quiet: true });
+        }, 3000);
+      };
     }
 
     async function refresh(opts) {
-      if (refreshing) return;
+      if (refreshing) {
+        const quiet = !!(opts && opts.quiet);
+        refreshQueued = { quiet: refreshQueued ? refreshQueued.quiet && quiet : quiet };
+        return;
+      }
       refreshing = true;
+      try {
+        await refreshOnce(opts);
+      } finally {
+        refreshing = false;
+        if (refreshQueued) {
+          const next = refreshQueued;
+          refreshQueued = null;
+          void refresh(next);
+        }
+      }
+    }
+
+    async function refreshOnce(opts) {
       const quiet = !!(opts && opts.quiet);
       const tid = $("thread").value.trim();
       showError($("hitlError"), "");
@@ -2621,12 +4022,12 @@
         applyBoundRunName(null);
         $("btnSubmit").disabled = true;
         $("banner").hidden = true;
+        showPendingAlert(null);
         $("gateIdleHint").hidden = false;
         syncStartButton("idle");
         syncStopButton("idle");
         await loadIdleRail();
         await loadRunList();
-        refreshing = false;
         return;
       }
       syncThreadChrome(tid, lastStatus && lastStatus.values && lastStatus.values.run_name);
@@ -2634,10 +4035,12 @@
       try {
         const r = await fetch("/api/runs/" + encodeURIComponent(tid));
         const { ok, status, data } = await readFetchResponse(r);
+        if ($("thread").value.trim() !== tid) return;
         if (!ok) {
           if (startInFlight && (status === 404 || status === 503)) {
             return;
           }
+          void loadRunList();
           showError(
             $("startError"),
             status === 404
@@ -2657,13 +4060,16 @@
         const models = (data.values && data.values.role_models) || {};
         pendingRoleModels = models;
         pendingRoleReasoningEfforts = (data.values && data.values.role_reasoning_efforts) || {};
+        pendingRoleFastModes = (data.values && data.values.role_fast_modes) || {};
+        pendingRoleModelParams = (data.values && data.values.role_model_params) || {};
         ingestStatus(data);
         refreshRunRoleModels();
       } catch (err) {
+        if ($("thread").value.trim() !== tid) return;
         showError($("startError"), "读不到这一轮的状态。检查服务是否还在，然后刷新。");
+        void loadRunList();
       } finally {
         if (!quiet) setLoading($("btnRefresh"), false);
-        refreshing = false;
       }
     }
 
@@ -2671,6 +4077,7 @@
       showError($("startError"), "");
       const reasoningError = runReasoningError();
       if (reasoningError) { showError($("startError"), reasoningError); return; }
+      await settleDraftSaves();
       const body = {
         human_request: $("req").value.trim(),
         scenario_key: "",
@@ -2680,6 +4087,8 @@
         attachments: runAttachments.map((item) => ({ id: item.id, name: item.name, size: item.size })),
         role_models: pendingRoleModels,
         role_reasoning_efforts: pendingRoleReasoningEfforts,
+        role_fast_modes: pendingRoleFastModes,
+        role_model_params: pendingRoleModelParams,
       };
       if (!body.project_id) {
         showError($("startError"), "先选择项目。");
@@ -2726,13 +4135,14 @@
           syncUrlThread(previousThread);
           syncThreadChrome(previousThread, "");
           if (!previousThread && draftId) syncUrlDraft(draftId);
-          showError($("startError"), apiErrorMessage(data, "启动失败，请检查项目类型或项目配置。"));
+          showError($("startError"), apiErrorMessage(data, "启动失败，请检查项目配置与所选流程。"));
           syncStartButton(lastStatus && lastStatus.phase);
           syncStopButton(lastStatus && lastStatus.phase);
           return;
         }
         $("thread").value = data.thread_id;
         syncUrlThread(data.thread_id);
+        draftEpoch += 1;
         if (draftId) {
           const savedId = draftId;
           const savedName = draftName;
@@ -2771,7 +4181,25 @@
       }
     };
 
-    $("btnStop").onclick = async () => {
+    function closeStopConfirm(refocus) {
+      const box = $("stopConfirm");
+      if (box.hidden) return;
+      box.hidden = true;
+      if (refocus) $("btnStop").focus();
+    }
+
+    $("btnStop").onclick = () => {
+      if (!$("thread").value.trim()) return;
+      $("stopConfirm").hidden = false;
+      $("btnStopCancel").focus();
+    };
+    $("btnStopCancel").onclick = () => closeStopConfirm(true);
+    $("stopConfirm").addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeStopConfirm(true);
+    });
+
+    $("btnStopConfirm").onclick = async () => {
+      closeStopConfirm(false);
       const tid = $("thread").value.trim();
       if (!tid) return;
       showError($("startError"), "");
@@ -2938,19 +4366,11 @@
       const btn = $("btnSaveRun");
       setLoading(btn, true);
       try {
+        await settleDraftSaves();
         const r = await fetch("/api/runs/drafts", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            draft_id: draftId,
-            project_id: projectId,
-            run_name: String($("runName").value || "").trim(),
-            human_request: $("req").value.trim(),
-            node_tools: pendingNodeTools,
-            attachments: runAttachments.map((item) => ({ id: item.id, name: item.name, size: item.size })),
-            role_models: pendingRoleModels,
-        role_reasoning_efforts: pendingRoleReasoningEfforts,
-          }),
+          body: JSON.stringify({ ...draftBody(projectId), draft_id: draftId }),
         });
         const { ok, data } = await readFetchResponse(r);
         if (!ok) {
@@ -2965,6 +4385,8 @@
         pendingNodeTools = data.node_tools || {};
         pendingRoleModels = data.role_models || pendingRoleModels;
         pendingRoleReasoningEfforts = data.role_reasoning_efforts || pendingRoleReasoningEfforts;
+        pendingRoleFastModes = data.role_fast_modes || pendingRoleFastModes;
+        pendingRoleModelParams = data.role_model_params || pendingRoleModelParams;
         roleModelStamp = "";
         if (data.attachments) {
           runAttachments = data.attachments.map((item) => ({
@@ -2988,6 +4410,7 @@
 
     $("btnSidebarNew").addEventListener("click", (event) => {
       event.preventDefault();
+      leaveDraftForm();
       const here = document.documentElement.dataset.route === "hitl";
       applyRoute("/", "#region-new", {
         historyMode: here && location.hash === "#region-new" ? undefined : "push",
@@ -3001,7 +4424,10 @@
       pendingNodeTools = {};
       pendingRoleModels = {};
       pendingRoleReasoningEfforts = {};
+      pendingRoleFastModes = {};
+      pendingRoleModelParams = {};
       roleModelStamp = "";
+      forgetRoleMenu(null);
       clearAttachments();
       refreshRunRoleModels();
       syncThreadChrome("");
@@ -3066,9 +4492,12 @@
       pendingNodeTools = {};
       pendingRoleModels = {};
       pendingRoleReasoningEfforts = {};
+      pendingRoleFastModes = {};
+      pendingRoleModelParams = {};
       roleModelStamp = "";
       loadedDraftProject = "";
       syncRunScenarioHint();
+      scheduleDraftAutosave();
       await refreshRunRoleModels();
       if (!$("thread").value.trim()) {
         runNameTouched = false;
@@ -3079,7 +4508,9 @@
     });
     $("runName").addEventListener("input", () => {
       if (!$("thread").value.trim()) runNameTouched = true;
+      scheduleDraftAutosave();
     });
+    $("req").addEventListener("input", scheduleDraftAutosave);
 
     (function initFromUrl() {
       loadRunToolCatalog();
@@ -3271,25 +4702,68 @@
       });
     })();
 
+    /**
+     * 主题存在服务端用户配置，多台机器共用。浏览器里的同名键只作首屏缓存，避免读取返回前闪一下另一种主题；
+     * 服务端还没有主题而本浏览器早先切换过时，把本地的选择补写上去。
+     */
     (function initThemeToggle() {
       const key = "geni_studio_hitl_theme";
       const btn = $("themeToggle");
+      const url = "/api/config/user/ui";
 
       function syncToggleLabel() {
         const dark = document.documentElement.getAttribute("data-theme") === "dark";
-        btn.textContent = dark ? "白天" : "夜晚";
+        $("themeToggleLabel").textContent = dark ? "浅色" : "深色";
+        btn.title = dark ? "切换到浅色主题" : "切换到深色主题";
       }
 
-      btn.addEventListener("click", function () {
-        const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
-        document.documentElement.setAttribute("data-theme", next);
-        document.documentElement.classList.toggle("wa-dark", next === "dark");
-        document.documentElement.classList.toggle("wa-light", next !== "dark");
-        localStorage.setItem(key, next);
+      function applyTheme(theme) {
+        document.documentElement.setAttribute("data-theme", theme);
+        document.documentElement.classList.toggle("wa-dark", theme === "dark");
+        document.documentElement.classList.toggle("wa-light", theme !== "dark");
+        try {
+          localStorage.setItem(key, theme);
+        } catch (_) {
+          // 浏览器禁用存储时只是首屏按系统设置显示。
+        }
         syncToggleLabel();
+      }
+
+      function saveTheme(theme) {
+        return fetch(url, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "theme", value: theme }),
+        }).catch(() => {});
+      }
+
+      let toggled = false;
+      btn.addEventListener("click", function () {
+        toggled = true;
+        const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+        applyTheme(next);
+        void saveTheme(next);
       });
 
       syncToggleLabel();
+      let cached = "";
+      try {
+        cached = localStorage.getItem(key) || "";
+      } catch (_) {
+        cached = "";
+      }
+      fetch(url)
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload) => {
+          if (!payload || toggled) return;
+          const theme = (payload.ui && payload.ui.theme) || "";
+          if (theme) {
+            if (theme !== document.documentElement.getAttribute("data-theme")) applyTheme(theme);
+          } else if (cached === "light" || cached === "dark") {
+            void saveTheme(cached);
+          }
+        })
+        .catch(() => {});
     })();
 
     function scrollBehavior(options) {
@@ -3332,8 +4806,10 @@
         config: "GeniStudio · 配置",
         help: "GeniStudio · 帮助",
       };
+      const leavingRun = document.documentElement.dataset.route === "hitl" && route !== "hitl";
       document.documentElement.dataset.route = route;
       document.title = titles[route];
+      if (leavingRun) stopPoll();
       document.querySelectorAll(".side-group").forEach((group) => {
         const on = group.dataset.route === route;
         group.classList.toggle("is-current", on);
@@ -3376,7 +4852,10 @@
       }
       if (route === "hitl") {
         if (typeof window.loadRunConfigOptions === "function") void window.loadRunConfigOptions();
-        if (typeof window.syncRunBackendModels === "function") void window.syncRunBackendModels();
+        // 配置页可能改了后端或默认模型，回到运行页时重读角色默认值。
+        roleModelStamp = "";
+        void refreshRunRoleModels();
+        if (!pushSource && !pollTimer && $("thread").value.trim()) void refresh({ quiet: true });
       }
       if (!hash || route === "project" || route === "workflow" || route === "role") return;
       const target = document.getElementById(decodeURIComponent(hash.slice(1)));

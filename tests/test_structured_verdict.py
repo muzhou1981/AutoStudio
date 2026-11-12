@@ -86,14 +86,14 @@ def test_change_request_and_output_split() -> None:
 
 
 def test_reviewer_without_verdict_fails_and_feeds_developer(real_backend) -> None:
-    from geni_studio.workflows.default import code_reviewer, developer
+    from geni_studio.workflows.default import run_builtin_node
 
     real_backend(lambda role, prompt: "看起来不错，AC-1 已实现。")
-    out = code_reviewer({"code_change": "改动"})
+    out = run_builtin_node("code_reviewer", {"code_change": "改动"})
     assert out["review_status"] == "fail"
     assert "缺少结构化结论块" in out["review_report"]
     backend = real_backend(lambda role, prompt: "修好了")
-    developer({"task_plan": "t", "return_feedback": out["return_feedback"], "dev_retry_count": 1})
+    run_builtin_node("developer", {"task_plan": "t", "return_feedback": out["return_feedback"], "dev_retry_count": 1})
     role, prompt = backend.prompts[-1]
     assert role == "developer"
     assert "需要修复的问题" in prompt and "AC-1 已实现" in prompt
@@ -155,10 +155,10 @@ def test_developer_change_request_returns_to_requirement_gate(real_backend) -> N
 
 
 def test_qa_mentions_without_verdict_do_not_pass(real_backend) -> None:
-    from geni_studio.workflows.default import qa
+    from geni_studio.workflows.default import run_builtin_node
 
     real_backend(lambda role, prompt: "AC-1 已验证通过。\n" + _verdict("pass"))
-    out = qa({"requirement_spec": "AC-1", "test_report": "AC-1 提到了", "test_status": "pass"})
+    out = run_builtin_node("qa", {"requirement_spec": "AC-1", "test_report": "AC-1 提到了", "test_status": "pass"})
     assert out["qa_status"] == "fail"
     assert "AC-1" in out["return_feedback"]
 

@@ -180,6 +180,17 @@ def test_run_effort_overrides_role_and_resets_context(fake_client, monkeypatch, 
     assert fake_client.turn_options[-1].get("effort") == "low"
 
 
+@pytest.mark.parametrize("selected,expected", [("on", "fast"), ("off", "default"), ("", None)])
+def test_run_fast_mode_sets_the_turn_service_tier(fake_client, monkeypatch, selected, expected):
+    from geni_studio.backends.reasoning import use_role_fast_modes
+    from geni_studio.backends.runner import backend_for_role
+
+    monkeypatch.setenv("GENI_STUDIO_BACKEND", "codex")
+    with use_role_fast_modes({"compliance": selected}):
+        backend_for_role("compliance").complete(role_name="compliance", system_prompt="s", user_prompt="u")
+    assert fake_client.turn_options[-1].get("service_tier") == expected
+
+
 def test_reasoning_values_match_pinned_sdk_and_reject_invalid(fake_client, monkeypatch):
     from openai_codex.generated.v2_all import ReasoningEffort
 

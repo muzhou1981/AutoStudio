@@ -66,10 +66,12 @@ def list_drafts(*, project_id: str = "") -> list[dict]:
         if want and pid != want:
             continue
         name = str(data.get("run_name") or draft_id)
+        mtime = path.stat().st_mtime
         rows.append(
             (
-                path.stat().st_mtime,
+                mtime,
                 {
+                    "updated_at": mtime,
                     "thread_id": draft_id,
                     "draft_id": draft_id,
                     "run_name": name,
@@ -105,10 +107,18 @@ def save_draft(
     attachments: list[str] | None = None,
     role_models: dict[str, str] | None = None,
     role_reasoning_efforts: dict[str, str] | None = None,
+    role_fast_modes: dict[str, str] | None = None,
+    role_model_params: dict[str, dict[str, str]] | None = None,
 ) -> dict:
-    from geni_studio.backends.reasoning import clean_role_reasoning_efforts
+    from geni_studio.backends.reasoning import (
+        clean_role_fast_modes,
+        clean_role_model_params,
+        clean_role_reasoning_efforts,
+    )
 
     efforts = clean_role_reasoning_efforts(role_reasoning_efforts)
+    fast_modes = clean_role_fast_modes(role_fast_modes)
+    model_params = clean_role_model_params(role_model_params)
     pid = project_id.strip()
     if not pid:
         raise HitlError("先选择项目。")
@@ -140,6 +150,8 @@ def save_draft(
         "attachments": files,
         "role_models": role_models or {},
         "role_reasoning_efforts": efforts,
+        "role_fast_modes": fast_modes,
+        "role_model_params": model_params,
     }
     _path(existing_id).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",

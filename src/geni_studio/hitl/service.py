@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from langgraph.graph import START
 from langgraph.graph.state import CompiledStateGraph
 
 from geni_studio.backends.cost import (
@@ -263,6 +264,32 @@ class GraphRunService:
             return
         self._index(thread_id)
 
+    def _write_values(self, thread_id: str, values: dict[str, Any]) -> None:
+        """只写状态值，不改变流程停在哪里。
+
+        不指定来源节点时，LangGraph 把这次写入记在最后执行过的节点名下并重算它的出边。
+        停点若是服务端改写过走向得来的（例如升级后选择继续），那个节点并不通向停点，
+        停点会丢失，流程随即被当作已结束。此时从写入前的检查点重写，改记在停点的前驱名下。
+        """
+        graph = self._bound(thread_id)
+        cfg = self._config(thread_id)
+        before = graph.get_state(cfg)
+        stop = set(before.next or ())
+        written = graph.update_state(cfg, values)
+        if not stop or set(graph.get_state(written).next or ()) == stop:
+            return
+        from geni_studio.hitl.control import is_inflight
+
+        latest = graph.get_state(cfg).config
+        if is_inflight(thread_id) or _checkpoint_id(latest) != _checkpoint_id(written):
+            return
+        for node in _predecessors(graph, stop):
+            written = graph.update_state(before.config, values, as_node=node)
+            if set(graph.get_state(written).next or ()) == stop:
+                return
+        graph.update_state(before.config, None, as_node="__copy__")
+        raise HitlError("写入后无法保持当前停点，已恢复到写入前的状态。")
+
     def _bound(self, thread_id: str) -> CompiledStateGraph:
         """未选流程时用默认图。选定流程的轮次用那张编译图。"""
         with self._graphs_lock:
@@ -436,7 +463,11 @@ class GraphRunService:
         project_token = set_project_id(project_id)
         role_token = set_role_models(models)
         cost_token = begin_cost_log()
-        from geni_studio.backends.reasoning import use_role_reasoning_efforts
+        from geni_studio.backends.reasoning import (
+            use_role_fast_modes,
+            use_role_model_params,
+            use_role_reasoning_efforts,
+        )
         from geni_studio.backends.runtime import use_config
 
         state = payload if payload is not None else self.status(thread_id).values
@@ -444,6 +475,8 @@ class GraphRunService:
             with (
                 write_lock, ctx, use_config(state.get("config_snapshot_effective")),
                 use_role_reasoning_efforts(state.get("role_reasoning_efforts")),
+                use_role_fast_modes(state.get("role_fast_modes")),
+                use_role_model_params(state.get("role_model_params")),
             ):
                 self._bound(thread_id).invoke(payload, self._config(thread_id))
         finally:
@@ -462,12 +495,16 @@ class GraphRunService:
             return
         # 相同 token 用量可能来自不同调用，不能用整行相等来去重。
         merged = (prior + "\n" + "\n".join(lines)).strip()
-        self._bound(thread_id).update_state(self._config(thread_id), {"cost_ledger": merged})
+        self._write_values(thread_id, {"cost_ledger": merged})
 
     def _done(self, thread_id: str) -> RunStatus:
         st = self.status(thread_id)
         self._index(thread_id, st)
         self.notify_change(thread_id)
+        if st.phase in ("completed", "rejected", "stopped"):
+            from geni_studio.backends.lifecycle import release_run
+
+            release_run(thread_id)
         if workspace_enabled():
             run_dir = _run_dir_for(st.values, thread_id)
             if run_dir is not None:
@@ -555,7 +592,11 @@ class GraphRunService:
         if phase == "running" and not self._is_active(thread_id):
             phase = "interrupted"
             values.setdefault("interrupted_at", next_nodes[0] if next_nodes else "")
-        elif phase in ("awaiting_human", "interrupted", "paused") and self._job_active(thread_id) is not None:
+        elif (
+            phase in ("awaiting_human", "interrupted", "paused", "completed", "rejected")
+            and self._job_active(thread_id) is not None
+        ):
+            # 启动后第一个检查点还没有下一节点，任务仍在执行时不能当作已结束，否则推送随之关闭。
             phase = "running"
             awaiting = None
         return RunStatus(
@@ -578,14 +619,22 @@ class GraphRunService:
         attachment_ids: list[str] | None = None,
         role_models: dict[str, str] | None = None,
         role_reasoning_efforts: dict[str, str] | None = None,
+        role_fast_modes: dict[str, str] | None = None,
+        role_model_params: dict[str, dict[str, str]] | None = None,
     ) -> tuple[str, dict[str, Any]]:
-        from geni_studio.backends.reasoning import clean_role_reasoning_efforts
+        from geni_studio.backends.reasoning import (
+            clean_role_fast_modes,
+            clean_role_model_params,
+            clean_role_reasoning_efforts,
+        )
         from geni_studio.config.context import build_run_context, factory_root
         from geni_studio.config.precheck import precheck_scenario_materials
         from geni_studio.config.snapshot import capture_config_snapshot
         from geni_studio.hitl.run_name import assign_run_name
 
         efforts = clean_role_reasoning_efforts(role_reasoning_efforts)
+        fast_modes = clean_role_fast_modes(role_fast_modes)
+        model_params = clean_role_model_params(role_model_params)
         precheck_scenario_materials(scenario_key, project_id)
         tid = thread_id or self.new_thread_id()
         taken = self.taken_run_names(project_id)
@@ -659,6 +708,8 @@ class GraphRunService:
         if role_models:
             initial["role_models"] = role_models
         initial["role_reasoning_efforts"] = efforts
+        initial["role_fast_modes"] = fast_modes
+        initial["role_model_params"] = model_params
         if attachment_ids:
             from geni_studio.hitl.attachments import stage_attachments
 
@@ -690,6 +741,8 @@ class GraphRunService:
         attachment_ids: list[str] | None = None,
         role_models: dict[str, str] | None = None,
         role_reasoning_efforts: dict[str, str] | None = None,
+        role_fast_modes: dict[str, str] | None = None,
+        role_model_params: dict[str, dict[str, str]] | None = None,
     ) -> RunStatus:
         tid, initial = self._prepare_start(
             human_request=human_request,
@@ -701,6 +754,8 @@ class GraphRunService:
             attachment_ids=attachment_ids,
             role_models=role_models,
             role_reasoning_efforts=role_reasoning_efforts,
+            role_fast_modes=role_fast_modes,
+            role_model_params=role_model_params,
         )
         from geni_studio.workspace.layout import workspace_lock
         from geni_studio.workspace.policy import assert_write_available
@@ -723,6 +778,8 @@ class GraphRunService:
         attachment_ids: list[str] | None = None,
         role_models: dict[str, str] | None = None,
         role_reasoning_efforts: dict[str, str] | None = None,
+        role_fast_modes: dict[str, str] | None = None,
+        role_model_params: dict[str, dict[str, str]] | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """准备本轮并入队启动任务，HTTP 可立即返回 thread_id。"""
         tid, initial = self._prepare_start(
@@ -735,6 +792,8 @@ class GraphRunService:
             attachment_ids=attachment_ids,
             role_models=role_models,
             role_reasoning_efforts=role_reasoning_efforts,
+            role_fast_modes=role_fast_modes,
+            role_model_params=role_model_params,
         )
         from geni_studio.workspace.layout import workspace_lock
         from geni_studio.workspace.policy import assert_write_available
@@ -756,15 +815,21 @@ class GraphRunService:
     def view(self, thread_id: str) -> dict[str, Any]:
         """状态接口：已有检查点时给完整状态；启动任务尚未写检查点时给一帧运行中状态。"""
         try:
-            return self.status_dict(thread_id)
+            data = self.status_dict(thread_id)
         except HitlError:
             job = self._job_active(thread_id)
             if job is not None and job.kind == "start" and isinstance(job.payload, dict):
                 return self.provisional_status_dict(thread_id, job.payload)
             raise
+        if not data.get("next_nodes"):
+            # 启动任务刚写下第一个检查点、尚未排出下一节点时，泳道仍按启动中显示，不闪成全部完成。
+            job = self._job_active(thread_id)
+            if job is not None and job.kind == "start" and isinstance(job.payload, dict):
+                return self.provisional_status_dict(thread_id, job.payload)
+        return data
 
     def provisional_status_dict(self, thread_id: str, initial: dict[str, Any]) -> dict[str, Any]:
-        """检查点尚未写入时，给前端一帧运行中状态。"""
+        """检查点尚未写入或尚未排出下一节点时，给前端一帧运行中状态。"""
         st = RunStatus(
             thread_id=thread_id,
             phase="running",
@@ -785,36 +850,45 @@ class GraphRunService:
         node_id: str,
         *,
         skills: list[str],
-        mcp: list[str],
     ) -> RunStatus:
-        """记下这一轮、这一个节点选用的 Skill 和 MCP。"""
+        """记下这一轮、这一个节点选用的 Skill。MCP 是全局配置，不按节点选择。"""
         st = self.status(thread_id)
         if st.phase in ("completed", "rejected", "stopped"):
             raise HitlError("这一轮已经结束。")
         current = st.values.get("node_tools")
         chosen = dict(current) if isinstance(current, dict) else {}
-        if skills or mcp:
-            chosen[node_id] = {"skills": skills, "mcp": mcp}
+        if skills:
+            chosen[node_id] = {"skills": skills}
         else:
             chosen.pop(node_id, None)
-        self._bound(thread_id).update_state(self._config(thread_id), {"node_tools": chosen})
+        self._write_values(thread_id, {"node_tools": chosen})
         return self._done(thread_id)
 
     @run_mutation
     def set_role_models(
         self, thread_id: str, role_models: dict[str, str],
         role_reasoning_efforts: dict[str, str] | None = None,
+        role_fast_modes: dict[str, str] | None = None,
+        role_model_params: dict[str, dict[str, str]] | None = None,
     ) -> RunStatus:
-        """保存本轮角色模型和可选的推理覆盖；省略推理映射时保留原值。"""
+        """保存本轮角色模型和可选的推理、Fast、模型参数覆盖；省略的映射保留原值。"""
         st = self.status(thread_id)
         if st.phase in ("completed", "rejected", "stopped"):
             raise HitlError("这一轮已经结束。")
-        from geni_studio.backends.reasoning import clean_role_reasoning_efforts
+        from geni_studio.backends.reasoning import (
+            clean_role_fast_modes,
+            clean_role_model_params,
+            clean_role_reasoning_efforts,
+        )
 
         update = {"role_models": role_models}
         if role_reasoning_efforts is not None:
             update["role_reasoning_efforts"] = clean_role_reasoning_efforts(role_reasoning_efforts)
-        self._bound(thread_id).update_state(self._config(thread_id), update)
+        if role_fast_modes is not None:
+            update["role_fast_modes"] = clean_role_fast_modes(role_fast_modes)
+        if role_model_params is not None:
+            update["role_model_params"] = clean_role_model_params(role_model_params)
+        self._write_values(thread_id, update)
         return self._done(thread_id)
 
     def advance_until_blocked(self, thread_id: str) -> RunStatus:
@@ -845,14 +919,13 @@ class GraphRunService:
         st = self.status(thread_id)
         if st.phase in ("completed", "rejected", "stopped"):
             raise HitlError(f"Run 已结束（phase={st.phase}），无法打开 HITL")
-        cfg = self._config(thread_id)
         patch: dict[str, Any] = {
             "hitl_pending_kind": kind,
             "hitl_questions": questions or [],
             "hitl_summary": summary,
             "hitl_pending_since": datetime.now(UTC).isoformat(),
         }
-        self._bound(thread_id).update_state(cfg, patch)
+        self._write_values(thread_id, patch)
         return self._done(thread_id)
 
     def _clear_pending_patch(self) -> dict[str, Any]:
@@ -954,8 +1027,9 @@ class GraphRunService:
                 "human_reply": human_reply,
                 **audit,
             }
-            self._bound(thread_id).update_state(cfg, patch)
+            self._write_values(thread_id, patch)
             _note_answer(thread_id, st, human_reply, gate_decision, channel, actor)
+            _note_decision(thread_id, st, human_reply, gate_decision, channel, actor)
             return True
 
         if awaiting.kind == "pm_clarification":
@@ -974,8 +1048,9 @@ class GraphRunService:
                 **self._clear_pending_patch(),
                 **audit,
             }
-            self._bound(thread_id).update_state(cfg, patch)
+            self._write_values(thread_id, patch)
             _note_answer(thread_id, st, human_reply, "replied", channel, actor)
+            _note_decision(thread_id, st, human_reply, "replied", channel, actor)
             snap = self._bound(thread_id).get_state(cfg)
             if not snap.next:
                 self._bound(thread_id).update_state(cfg, None, as_node="tester_testability")
@@ -998,8 +1073,9 @@ class GraphRunService:
                 **self._clear_pending_patch(),
                 **audit,
             }
-            self._bound(thread_id).update_state(cfg, patch)
+            self._write_values(thread_id, patch)
             _note_answer(thread_id, st, human_reply, str(choice), channel, actor)
+            _note_decision(thread_id, st, human_reply, str(choice), channel, actor)
             if choice == "continue":
                 snap = self._bound(thread_id).get_state(cfg)
                 if not snap.next:
@@ -1131,8 +1207,8 @@ class GraphRunService:
         self._require_resume_definition(thread_id)
         clear_pause_request(thread_id)
         self.runtime_store().set_control(thread_id, pause=False)
-        self._bound(thread_id).update_state(
-            self._config(thread_id),
+        self._write_values(
+            thread_id,
             {"run_paused": False, "paused_at": ""},
         )
 
@@ -1158,8 +1234,8 @@ class GraphRunService:
         if st.phase != "interrupted":
             raise HitlError(f"当前阶段是{st.phase}，不能续跑")
         self._require_resume_definition(thread_id)
-        self._bound(thread_id).update_state(
-            self._config(thread_id),
+        self._write_values(
+            thread_id,
             {"run_interrupted": False, "interrupted_at": ""},
         )
 
@@ -1202,8 +1278,8 @@ class GraphRunService:
             return
         next_nodes = tuple(snap.next or ())
         node = next_nodes[0] if next_nodes else ""
-        self._bound(thread_id).update_state(
-            self._config(thread_id),
+        self._write_values(
+            thread_id,
             {"run_interrupted": True, "interrupted_at": node},
         )
 
@@ -1219,8 +1295,8 @@ class GraphRunService:
             clear_pause_request(thread_id)
             return st
         paused_at = st.next_nodes[0] if st.next_nodes else str(presenter.rail_for(st).get("current") or "")
-        self._bound(thread_id).update_state(
-            self._config(thread_id),
+        self._write_values(
+            thread_id,
             {"run_paused": True, "paused_at": paused_at},
         )
         clear_pause_request(thread_id)
@@ -1312,6 +1388,8 @@ class GraphRunService:
                     "node_tools": dict(draft.get("node_tools") or {}),
                     "role_models": dict(draft.get("role_models") or {}),
                     "role_reasoning_efforts": dict(draft.get("role_reasoning_efforts") or {}),
+                    "role_fast_modes": dict(draft.get("role_fast_modes") or {}),
+                    "role_model_params": dict(draft.get("role_model_params") or {}),
                     "attachments": list(draft.get("attachments") or []),
                 }
         st = self.status(thread_id)
@@ -1333,6 +1411,8 @@ class GraphRunService:
             "node_tools": dict(node_tools) if isinstance(node_tools, dict) else {},
             "role_models": dict(role_models) if isinstance(role_models, dict) else {},
             "role_reasoning_efforts": dict(values.get("role_reasoning_efforts") or {}),
+            "role_fast_modes": dict(values.get("role_fast_modes") or {}),
+            "role_model_params": dict(values.get("role_model_params") or {}),
             "attachments": [],
         }
 
@@ -1359,6 +1439,7 @@ class GraphRunService:
                     "phase": current_phase,
                     "project_id": row.project_id,
                     "current": row.current,
+                    "updated_at": row.updated_at,
                 }
             )
         return rows
@@ -1384,9 +1465,19 @@ class GraphRunService:
         self.notify_change(thread_id)
         clear_stop_request(thread_id)
         clear_pause_request(thread_id)
+        from geni_studio.backends.lifecycle import release_run
         from geni_studio.workspace.gc import remove_run_workspace
 
+        release_run(thread_id)
+
         return remove_run_workspace(str(st.values.get("workspace_path") or ""), thread_id).lines()
+
+    def phase_of(self, thread_id: str) -> str | None:
+        """这一轮的阶段；本服务没有这一轮时为 None。"""
+        try:
+            return self.status(thread_id).phase
+        except HitlError:
+            return None
 
     def live_thread_ids(self) -> set[str]:
         self._ensure_index()
@@ -1406,8 +1497,8 @@ class GraphRunService:
         line = f"[timeout] {note}"
         if line not in audit:
             audit = f"{audit}\n{line}".strip()
-        self._bound(thread_id).update_state(
-            self._config(thread_id),
+        self._write_values(
+            thread_id,
             {
                 "awaiting_since": ah.since,
                 "gate_timeout_recorded": True,
@@ -1537,6 +1628,59 @@ def _note_answer(
             groups,
             reply=reply,
             decision=decision,
+            channel=channel,
+            actor=actor,
+            workspace_path=str(st.values.get("workspace_path") or ""),
+        )
+    except OSError:
+        pass
+
+
+def _checkpoint_id(config: Any) -> str:
+    return str(((config or {}).get("configurable") or {}).get("checkpoint_id") or "")
+
+
+def _predecessors(graph: CompiledStateGraph, targets: set[str]) -> list[str]:
+    """图中能直接走到 targets 的节点：固定边，以及去向里含 targets 或去向未声明的条件边。"""
+    builder = graph.builder
+    found: list[str] = []
+    for src, dst in builder.edges:
+        if dst in targets and src not in found:
+            found.append(src)
+    for src, branches in builder.branches.items():
+        for spec in branches.values():
+            ends = spec.ends
+            if (ends is None or targets & set(ends.values())) and src not in found:
+                found.append(src)
+    return [node for node in found if node in graph.nodes and node != START]
+
+
+def _note_decision(
+    thread_id: str, st: RunStatus, reply: str, decision: str, channel: str, actor: str
+) -> None:
+    """记下停点当时给人看的内容与人的选择，记在待办所在的格子名下；写失败不影响批复本身。"""
+    from geni_studio.hitl.decision_log import record_decision
+    from geni_studio.hitl.reading import human_review
+
+    ah = st.awaiting_human
+    if ah is None:
+        return
+    gate_id = str(ah.gate_id or "")
+    node = str(presenter.rail_for(st).get("current") or gate_id)
+    if not node:
+        return
+    awaiting = {"kind": ah.kind, "gate_id": ah.gate_id, "questions": ah.questions, "summary": ah.summary}
+    try:
+        record_decision(
+            thread_id,
+            node=node,
+            kind=ah.kind,
+            summary=ah.summary,
+            questions=ah.questions,
+            review=human_review(awaiting, st.values),
+            decision=decision,
+            reject_label=presenter.gate_reject_label(st.values, gate_id) if gate_id else "",
+            reply=reply,
             channel=channel,
             actor=actor,
             workspace_path=str(st.values.get("workspace_path") or ""),

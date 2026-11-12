@@ -131,7 +131,9 @@ def split_outputs(body: str, outputs: list[str], *, optional: frozenset[str] = f
     """
     if len(outputs) <= 1 and not (set(outputs) & optional):
         return {key: body for key in outputs}
-    headings = list(_HEADING.finditer(body or ""))
+    # 只以产物名标题分段，正文里的其他英文小标题不打断产物。
+    names = set(outputs)
+    headings = [match for match in _HEADING.finditer(body or "") if match.group("name") in names]
     out: dict[str, str] = {}
     for key in outputs:
         blocks = fenced_blocks(body, key)

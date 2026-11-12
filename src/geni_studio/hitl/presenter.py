@@ -11,32 +11,36 @@ from typing import Any
 from geni_studio.config.context import ConfigError, build_run_context_from_state
 from geni_studio.hitl.choices import choice_groups_from_reading, choices_from_reading
 from geni_studio.hitl.rail import build_rail
-from geni_studio.hitl.reading import human_reading
+from geni_studio.hitl.reading import human_reading, human_review
 
 
 def status_payload(st: Any, values: dict[str, Any]) -> dict[str, Any]:
     """状态接口中与展示相关的字段；控制位与任务信息由调用方补充。"""
     ah = st.awaiting_human
     reading, choices, choice_groups = reading_and_choices(ah, values)
+    awaiting = (
+        {
+            "kind": ah.kind,
+            "since": ah.since,
+            "gate_id": ah.gate_id,
+            "questions": ah.questions,
+            "summary": ah.summary,
+        }
+        if ah
+        else None
+    )
+    if awaiting and ah.kind == "gate":
+        awaiting["reject_label"] = gate_reject_label(values, ah.gate_id or "")
     return {
         "thread_id": st.thread_id,
         "phase": st.phase,
         "next_nodes": list(st.next_nodes),
-        "awaiting_human": (
-            {
-                "kind": ah.kind,
-                "since": ah.since,
-                "gate_id": ah.gate_id,
-                "questions": ah.questions,
-                "summary": ah.summary,
-            }
-            if ah
-            else None
-        ),
+        "awaiting_human": awaiting,
         "values": public_values(values),
         "limits": {"max_dev_retries": dev_retry_limit(values)},
         "rail": rail_for(st),
         "reading": reading,
+        "review": human_review(awaiting, values),
         "choices": choices,
         "choice_groups": choice_groups,
     }
@@ -155,10 +159,11 @@ def workflow_catalog(
     return tuple(items), meta
 
 
-def workflow_gate_summary(values: dict[str, Any], gate_id: str) -> str:
+def _workflow_gate(values: dict[str, Any], gate_id: str) -> tuple[str, str] | None:
+    """流程里该决策点的显示名与不通过时前往的节点名；后者为空表示结束本轮。"""
     raw = values.get("workflow_nodes")
     if not isinstance(raw, list):
-        return ""
+        return None
     for item in raw:
         if isinstance(item, dict) and str(item.get("id") or "") == gate_id:
             name = str(item.get("label") or gate_id)
@@ -169,10 +174,23 @@ def workflow_gate_summary(values: dict[str, Any], gate_id: str) -> str:
                     if isinstance(other, dict) and str(other.get("id") or "") == reject_id:
                         reject_name = str(other.get("label") or reject_id)
                         break
-            if reject_name:
-                return f"{name}：请批准，或不通过并前往「{reject_name}」。"
-            return f"{name}：请批准，或不通过以结束本轮。"
-    return ""
+            return name, reject_name
+    return None
+
+
+def workflow_gate_summary(values: dict[str, Any], gate_id: str) -> str:
+    found = _workflow_gate(values, gate_id)
+    if found is None:
+        return ""
+    name, reject_name = found
+    if reject_name:
+        return f"{name}：请批准，或不通过并前往「{reject_name}」。"
+    return f"{name}：请批准，或不通过以结束本轮。"
+
+
+def gate_reject_label(values: dict[str, Any], gate_id: str) -> str:
+    found = _workflow_gate(values, gate_id)
+    return found[1] if found else ""
 
 
 def public_values(values: dict[str, Any]) -> dict[str, Any]:

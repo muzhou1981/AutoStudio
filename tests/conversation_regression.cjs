@@ -105,4 +105,34 @@ assert.match(answered, /<label class="conv-ask-option is-picked"><input type="ch
 assert.match(answered, /<label class="conv-ask-option"><input type="checkbox" value="B" disabled>/);
 assert.match(answered, /<p class="conv-human-head">人工答复 · 批准<\/p><p class="conv-human-text">同意A<\/p>/);
 
+const taskArgs = { description: '统计文件', prompt: '列出文件', subagentType: { kind: 'explore' }, model: 'composer-2.5-fast', agentId: 'sub-1' };
+const taskTurn = {
+  seq: 3,
+  events: [
+    step('taskStarted', { args: taskArgs }),
+    step('taskStarted', { args: { ...taskArgs, description: '另一个子代理', agentId: 'sub-2' } }),
+    step('toolCall', { type: 'shell', args: { command: 'nohup npm run dev >/tmp/dev.log 2>&1 &' }, result: { status: 'success', value: { exitCode: 0 } } }),
+    step('toolCall', { type: 'shell', args: { command: 'sleep 30' }, result: { status: 'success', value: { exitCode: 0 } } }),
+    step('toolCall', { type: 'shell', args: { command: 'nohup python -m http.server 8766 &' }, result: { status: 'success', value: { exitCode: 0 } } }),
+    step('toolCall', { type: 'task', args: taskArgs, result: { status: 'success', value: { agentId: 'sub-1', isBackground: false, durationMs: 3064, toolCount: 2, reply: '**数量：0**' } } }),
+  ],
+};
+const processes = [
+  { pid: 41, command: 'npm run dev', started_at: 0 },
+  { pid: 42, command: 'sleep 30', started_at: 0 },
+];
+const tasks = context.formatConversation({ turns: [taskTurn], processes }, { live: true });
+assert.equal((tasks.match(/统计文件/g) || []).length, 1, '子代理完成后只保留完成的一条');
+assert.match(tasks, /<div class="conv-task is-running">.*另一个子代理.*运行中/, '未完成的子代理标为运行中');
+assert.match(tasks, /<div class="conv-task is-done">.*子代理<\/span> <span class="conv-task-desc">统计文件<\/span><span class="conv-tag">完成<\/span>/);
+assert.match(tasks, /explore · composer-2.5-fast · 工具调用 2 次 · 3 秒/);
+assert.match(tasks, /<summary>结果<\/summary><div class="conv-task-reply"><p><strong>数量：0<\/strong><\/p>/);
+assert.match(tasks, /npm run dev &gt;\/tmp\/dev.log 2&gt;&amp;1 &amp;<\/span><span class="conv-tag is-live" title="pid 41">后台 · 运行中/, '仍在运行的后台命令按进程比对');
+assert.match(tasks, /sleep 30<\/span><span class="conv-tag is-live" title="pid 42">后台 · 运行中/, '没有 & 的命令只要进程仍在也标为后台');
+assert.match(tasks, /http.server 8766 &amp;<\/span><span class="conv-tag">后台 · 已结束/, '写法是后台但进程已不在');
+assert.match(tasks, /^<details class="conv-procs" data-key="procs" open><summary>本轮仍在运行的进程 2 个<\/summary>/);
+const noProcs = context.formatConversation({ turns: [taskTurn] }, { live: false });
+assert.ok(!noProcs.includes('conv-procs'));
+assert.match(noProcs, /http.server 8766 &amp;<\/span><span class="conv-tag">后台<\/span>/, '没有进程信息时不判断是否结束');
+
 console.log('Conversation rendering regression passed');

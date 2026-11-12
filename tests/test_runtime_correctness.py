@@ -72,6 +72,25 @@ def test_background_start_preserves_snapshot_and_reports_failure(monkeypatch, fa
         assert service.start_failure_message(tid) is None
 
 
+def test_start_job_first_checkpoint_without_next_nodes_stays_running(monkeypatch):
+    service = GraphRunService(compile_graph(checkpointer=MemorySaver()))
+    snap = SimpleNamespace(values={"human_request": "刚启动", "run_name": "r"}, next=(), created_at="")
+    monkeypatch.setattr(service, "_bound", lambda _tid: SimpleNamespace(get_state=lambda _cfg: snap))
+    monkeypatch.setattr(service, "_is_active", lambda _tid: True)
+    job = SimpleNamespace(kind="start", state="running", note="",
+                          payload={"human_request": "刚启动", "run_name": "r"})
+    monkeypatch.setattr(service, "_job_active", lambda _tid: job)
+
+    assert service.status("t").phase == "running"
+    frame = service.view("t")
+    assert frame["phase"] == "running"
+    assert frame["rail"]["current"] != "end"
+    assert {c["id"]: c["state"] for c in frame["rail"]["cells"]}.get("end") != "done"
+
+    monkeypatch.setattr(service, "_job_active", lambda _tid: None)
+    assert service.status("t").phase == "completed"
+
+
 def parallel():
     return {"id": "p", "kind": "parallel", "name": "p", "fork_id": "p__fork", "join_id": "p__join",
             "branches": [

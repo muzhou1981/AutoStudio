@@ -88,6 +88,9 @@ NODE_ROLE: dict[str, str] = {
     "process_owner_retro": "process_owner",
 }
 
+# 内置流程中不调用 Agent 的格子；其余带角色的格子是活动。
+SYSTEM_NODES = frozenset({"config_manager_plan", "project_manager_scope", "change_control"})
+
 _INTERNAL_TO_RAIL = {
     "pm_clarification_check": "project_manager_draft",
     "hitl_pause": "project_manager_draft",
@@ -195,6 +198,11 @@ def build_rail(
         role = info.get("role")
         if not isinstance(role, str):
             role = NODE_ROLE.get(name, "")
+        kind = str(info.get("kind") or "")
+        if not kind and name in SYSTEM_NODES:
+            kind = "system"
+        elif not kind and name in NODE_ROLE:
+            kind = "activity"
         cells.append(
             {
                 "id": name,
@@ -202,7 +210,7 @@ def build_rail(
                 "state": state,
                 "artifacts": [str(item) for item in artifacts],
                 "role": role,
-                "kind": str(info.get("kind") or ""),
+                "kind": kind,
             }
         )
 

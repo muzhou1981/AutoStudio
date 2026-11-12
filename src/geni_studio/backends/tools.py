@@ -1,14 +1,16 @@
-"""当前后端能交给活动节点的 Skill 和 MCP。
+"""后端可用的 Skill 与 MCP 目录。
 
 Cursor 的公开 SDK 没有单独的列表接口。本地 Agent 会从项目目录和用户目录
-加载 Skill 与 ``.cursor/mcp.json``。这里按同样的位置读取，只返回名称，不返回
-命令、参数或密钥。
+加载 Skill 与 ``.cursor/mcp.json``；Codex 读取 ``$CODEX_HOME/config.toml`` 的
+``mcp_servers``。这里按同样的位置读取，只返回名称，不返回命令、参数或密钥。
+Skill 可按节点选用；MCP 是全局配置，对所有角色可见。
 """
 
 from __future__ import annotations
 
 import json
 import os
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -40,17 +42,24 @@ def clean_tool_ids(raw: object, label: str) -> list[str]:
     return names
 
 
-def list_backend_tools() -> dict:
+def list_backend_tools(backend: str | None = None, project_id: str = "") -> dict:
+    """`backend` 为空时按当前环境判定；`project_id` 指定时项目层取该项目的工作区。"""
     from geni_studio.backends.cursor_backend import _cursor_backend_enabled
 
-    if os.environ.get("GENI_STUDIO_BACKEND", "").strip().lower() == "codex":
-        from geni_studio.config.context import factory_root
-
-        skills = _skills_in(factory_root() / ".agents" / "skills", "project")
+    name = (backend or "").strip().lower()
+    if not name:
+        name = os.environ.get("GENI_STUDIO_BACKEND", "").strip().lower()
+        if name != "codex":
+            name = "cursor" if _cursor_backend_enabled() else "stub"
+    root = _project_root(project_id)
+    if name == "codex":
+        codex_home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+        skills = _skills_in(root / ".agents" / "skills", "project")
         skills += _skills_in(Path.home() / ".agents" / "skills", "user")
-        skills += _skills_in(Path.home() / ".codex" / "skills", "user")
-        return {"skills": _unique(skills), "mcp": [], "source": "codex", "detail": ""}
-    if not _cursor_backend_enabled():
+        skills += _skills_in(codex_home / "skills", "user")
+        mcp = _codex_mcp(codex_home / "config.toml")
+        return {"skills": _unique(skills), "mcp": _unique(mcp), "source": "codex", "detail": ""}
+    if name != "cursor":
         return {
             "skills": [],
             "mcp": [],
@@ -66,15 +75,33 @@ def list_backend_tools() -> dict:
             "source": "cursor",
             "detail": "读不到 Skill 和 MCP。当前环境没有 Cursor SDK。",
         }
-    from geni_studio.config.context import factory_root
-
-    catalog = collect_cursor_tools(factory_root(), Path.home())
+    catalog = collect_cursor_tools(root, Path.home())
     return {
         "skills": catalog["skills"],
         "mcp": catalog["mcp"],
         "source": "cursor",
         "detail": "",
     }
+
+
+def _project_root(project_id: str) -> Path:
+    from geni_studio.config.context import (
+        ConfigError,
+        factory_root,
+        load_project_config,
+    )
+
+    root = factory_root()
+    pid = project_id.strip()
+    if not pid:
+        return root
+    try:
+        cfg, _ = load_project_config(root, pid)
+    except ConfigError:
+        return root
+    workspace = str(cfg.get("workspace") or "").strip()
+    path = Path(workspace).expanduser() if workspace else None
+    return path if path is not None and path.is_dir() else root
 
 
 def collect_cursor_tools(project_root: Path, user_root: Path) -> dict:
@@ -164,6 +191,25 @@ def _mcp_file(path: Path, scope: str) -> list[dict]:
         if not name or "\n" in name:
             continue
         found.append({"id": f"{scope}:{name}", "name": name, "scope": scope, "description": ""})
+    return found
+
+
+def _codex_mcp(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    servers = data.get("mcp_servers")
+    if not isinstance(servers, dict):
+        return []
+    found = []
+    for raw, spec in servers.items():
+        name = str(raw).strip()
+        if not name or "\n" in name or (isinstance(spec, dict) and spec.get("enabled") is False):
+            continue
+        found.append({"id": f"user:{name}", "name": name, "scope": "user", "description": ""})
     return found
 
 

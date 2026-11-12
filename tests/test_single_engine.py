@@ -9,6 +9,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from geni_studio.config.context import ConfigError
 from geni_studio.config.workflow_defs import validate_workflow
+from geni_studio.workflows import default as default_module
 from geni_studio.workflows.default import (
     _BUILTIN_ROOT,
     builtin_definition,
@@ -19,7 +20,7 @@ from geni_studio.workflows.executable import (
     compile_workflow,
     resolve_executable,
 )
-from geni_studio.workflows.system_nodes import HANDLERS
+from geni_studio.workflows.system_nodes import EFFECTS, HANDLERS
 
 
 def _compile(nodes):
@@ -39,10 +40,55 @@ def test_default_graph_is_compiled_from_the_yaml():
     definition = builtin_definition()
     handlers = {node["handler"] for node in definition["nodes"] if node["kind"] == "system"}
     assert handlers == HANDLERS
+    effects = {node["effect"] for node in definition["nodes"] if node.get("effect")}
+    assert effects == EFFECTS == set(default_module.EFFECTS)
     graph = compile_graph(MemorySaver()).get_graph()
     names = set(graph.nodes)
     assert HANDLERS <= names
     assert {"gate_requirement_confirm", "gate_architecture_review", "gate_final_delivery"} <= names
+
+
+def test_default_flow_agent_steps_use_the_chosen_tools(monkeypatch):
+    prompts: list[tuple[str, str]] = []
+
+    def fake_invoke(*, role_name: str, user_prompt: str, stub_note: str, **_: object) -> str:
+        prompts.append((role_name, user_prompt))
+        return f"[stub:{role_name}] {stub_note}"
+
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", fake_invoke)
+    graph = compile_graph(MemorySaver())
+    config = {"configurable": {"thread_id": "tools"}}
+    graph.invoke(
+        {
+            "human_request": "做一个工具",
+            "node_tools": {
+                "project_manager_draft": {"skills": ["project:brainstorming"], "mcp": ["user-geni-wiki"]},
+                "tester_testability": {"skills": ["user:grill-me"], "mcp": []},
+            },
+        },
+        config,
+    )
+    draft = next(prompt for role, prompt in prompts if role == "project_manager")
+    assert "这一步优先使用下面的 Skill：brainstorming（项目）" in draft
+    assert "user-geni-wiki" not in draft, "MCP 是全局配置，提示词不再列出"
+    assert "验收标准 AC-*" in draft and "`requirement_spec`" in draft
+    review = next(prompt for role, prompt in prompts if role == "tester")
+    assert "grill-me（用户）" in review and "brainstorming" not in review
+
+
+def test_plain_outputs_from_the_role_contract_need_no_template():
+    def flow(outputs):
+        return [
+            {"id": "start", "kind": "start", "name": "启动", "role": "human"},
+            {"id": "arch", "kind": "activity", "name": "架构", "role": "architect", "outputs": outputs},
+            {"id": "end", "kind": "end", "name": "结束", "role": "human"},
+        ]
+
+    _compile(flow(["architecture_design", "task_plan"]))
+    with pytest.raises(ConfigError, match="输出「ux_spec」没有模板"):
+        _compile(flow(["ux_spec"]))
+    with pytest.raises(ConfigError, match="输出「task_plan」没有模板"):
+        _compile(flow([{"name": "task_plan", "source": "file", "template": ""}]))
 
 
 def test_removing_a_node_in_the_yaml_changes_the_run():
@@ -92,9 +138,18 @@ def test_activity_when_condition_is_honoured():
 def test_system_node_validation():
     base = _builtin_nodes()
     bad_handler = copy.deepcopy(base)
-    bad_handler[1]["handler"] = "nope"
+    next(node for node in bad_handler if node["id"] == "pm_clarification_check")["handler"] = "nope"
     with pytest.raises(ConfigError, match="实现「nope」不存在"):
         validate_workflow({"workflow_id": "x", "nodes": bad_handler}, root=_BUILTIN_ROOT)
+    bad_effect = copy.deepcopy(base)
+    next(node for node in bad_effect if node["id"] == "qa")["effect"] = "nope"
+    with pytest.raises(ConfigError, match="内置后处理「nope」不存在"):
+        validate_workflow({"workflow_id": "x", "nodes": bad_effect}, root=_BUILTIN_ROOT)
+    both = copy.deepcopy(base)
+    reviewer = next(node for node in both if node["id"] == "code_reviewer")
+    reviewer["returns_to"], reviewer["max_loops"] = "developer", 2
+    with pytest.raises(ConfigError, match="已写回退"):
+        validate_workflow({"workflow_id": "x", "nodes": both}, root=_BUILTIN_ROOT)
     bad_route = copy.deepcopy(base)
     next(node for node in bad_route if node["id"] == "change_control")["routes"][0]["to"] = "nowhere"
     with pytest.raises(ConfigError, match="去向「nowhere」"):

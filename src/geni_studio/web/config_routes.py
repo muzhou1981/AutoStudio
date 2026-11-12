@@ -223,10 +223,71 @@ def api_models(backend: str = "") -> dict:
 
 
 @router.get("/tools")
-def api_tools() -> dict:
+def api_tools(backend: str = "", project_id: str = "") -> dict:
     from geni_studio.backends.tools import list_backend_tools
 
-    return list_backend_tools()
+    return list_backend_tools(backend=backend.strip() or None, project_id=project_id)
+
+
+class RoleModelPrefBody(BaseModel):
+    role: str = Field(min_length=1)
+    backend: str = Field(min_length=1)
+    model: str = ""
+    effort: str = ""
+    fast: str = ""
+    params: dict[str, str] = Field(default_factory=dict)
+
+
+@router.get("/user/role-model-prefs")
+def api_role_model_prefs() -> dict:
+    from geni_studio.config.user_prefs import role_model_prefs
+
+    try:
+        return {"role_model_prefs": role_model_prefs()}
+    except ConfigError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.put("/user/role-model-prefs")
+def api_set_role_model_pref(body: RoleModelPrefBody) -> dict:
+    """记下一个角色在一个模型上的推理强度、Fast 与模型参数；全为默认时删去该项。"""
+    from geni_studio.config.user_prefs import set_role_model_pref
+
+    entry = {"effort": body.effort, "fast": body.fast, "params": body.params}
+    try:
+        prefs = set_role_model_pref(body.role, body.backend, body.model, entry)
+    except ConfigError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"role_model_prefs": prefs}
+
+
+class UiPrefBody(BaseModel):
+    name: str = Field(min_length=1)
+    value: str = ""
+
+
+@router.get("/user/ui")
+def api_ui_prefs() -> dict:
+    from geni_studio.config.user_prefs import ui_prefs
+
+    try:
+        return {"ui": ui_prefs()}
+    except ConfigError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.put("/user/ui")
+def api_set_ui_pref(body: UiPrefBody) -> dict:
+    from geni_studio.config.user_prefs import set_ui_pref
+
+    try:
+        return {"ui": set_ui_pref(body.name, body.value)}
+    except ConfigError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/settings")

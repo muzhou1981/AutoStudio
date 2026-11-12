@@ -1,6 +1,6 @@
 workflow_id: factory_default
 title: 通用软件开发
-description: 工厂内置的通用软件开发流程。各步骤是系统节点（handler 指向内置实现），路由与可选分支在本文件声明。要改，先复制一份。
+description: 工厂内置的通用软件开发流程。调用 Agent 的步骤是活动，提示词按通用活动拼装，判定与状态写入由 effect 指向的内置后处理完成；不调用 Agent 的步骤是系统节点。路由与可选分支在本文件声明。要改，先复制一份。
 builtin: true
 rail: builtin
 profile:
@@ -19,11 +19,14 @@ nodes:
   role: human
   returns_to: ''
 - id: project_manager_draft
-  kind: system
+  kind: activity
   name: 项目经理起草
   role: project_manager
   returns_to: ''
-  handler: project_manager_draft
+  inputs: []
+  outputs:
+  - requirement_spec
+  instruction: 需求说明须含可检验的验收标准 AC-*。
 - id: pm_clarification_check
   kind: system
   name: 澄清检查
@@ -34,11 +37,15 @@ nodes:
   - when: pending:pm_clarification
     to: hitl_pause
 - id: tester_testability
-  kind: system
+  kind: activity
   name: 可测性
   role: tester
   returns_to: ''
-  handler: tester_testability
+  inputs:
+  - requirement_spec
+  outputs:
+  - testability_review
+  instruction: 指出可测试性风险与建议。
 - id: gate_requirement_confirm
   kind: gate
   name: 需求确认
@@ -52,32 +59,47 @@ nodes:
   returns_to: ''
   handler: config_manager_plan
 - id: ux_designer
-  kind: system
+  kind: activity
   name: 体验
   role: ux_designer
   returns_to: ''
-  handler: ux_designer
+  inputs:
+  - requirement_spec
+  outputs:
+  - ux_spec
   when: feature:design_track
 - id: ui_designer
-  kind: system
+  kind: activity
   name: 界面
   role: ui_designer
   returns_to: ''
-  handler: ui_designer
+  inputs:
+  - ux_spec
+  outputs:
+  - ui_spec
   when: feature:design_track
 - id: visual_designer
-  kind: system
+  kind: activity
   name: 视觉
   role: visual_designer
   returns_to: ''
-  handler: visual_designer
+  inputs:
+  - ui_spec
+  outputs:
+  - visual_assets
+  instruction: visual_assets 写视觉资源清单说明。
   when: feature:design_track
 - id: finance_budget_rough
-  kind: system
+  kind: activity
   name: 预算粗估
   role: finance
   returns_to: ''
-  handler: finance_budget_rough
+  inputs:
+  - requirement_spec
+  outputs:
+  - budget_plan
+  instruction: 这是需求确认前的预算粗估。
+  effect: budget_rough
   when: feature:finance
 - id: project_manager_scope
   kind: system
@@ -86,17 +108,27 @@ nodes:
   returns_to: ''
   handler: project_manager_scope
 - id: architect
-  kind: system
+  kind: activity
   name: 架构
   role: architect
   returns_to: ''
-  handler: architect
+  inputs:
+  - requirement_spec
+  outputs:
+  - architecture_design
+  - task_plan
+  instruction: task_plan 写任务拆分与依赖。
 - id: finance_budget_final
-  kind: system
+  kind: activity
   name: 预算正式版
   role: finance
   returns_to: ''
-  handler: finance_budget_final
+  inputs:
+  - architecture_design
+  outputs:
+  - budget_plan
+  instruction: 这是架构评审前的预算正式版。
+  effect: budget_final
   when: feature:finance
 - id: gate_architecture_review
   kind: gate
@@ -105,11 +137,18 @@ nodes:
   returns_to: ''
   decision: approve
 - id: developer
-  kind: system
+  kind: activity
   name: 开发
   role: developer
   returns_to: ''
-  handler: developer
+  inputs:
+  - architecture_design
+  - task_plan
+  outputs:
+  - code_change
+  - change_request
+  instruction: code_change 写本轮代码变更说明。
+  effect: developer
 - id: change_control
   kind: system
   name: 变更
@@ -122,11 +161,17 @@ nodes:
   - when: impact:architecture
     to: gate_architecture_review
 - id: code_reviewer
-  kind: system
+  kind: activity
   name: 评审
   role: code_reviewer
   returns_to: ''
-  handler: code_reviewer
+  inputs:
+  - architecture_design
+  - task_plan
+  - code_change
+  outputs:
+  - review_report
+  effect: code_review
   routes:
   - when:
     - failed:review_status
@@ -135,11 +180,18 @@ nodes:
   - when: failed:review_status
     to: developer
 - id: tester_execute
-  kind: system
+  kind: activity
   name: 测试
   role: tester
   returns_to: ''
-  handler: tester_execute
+  inputs:
+  - requirement_spec
+  - code_change
+  outputs:
+  - test_cases
+  - test_report
+  instruction: 若执行了测试命令，test_report 须引用命令输出中的 AC-*。
+  effect: test_execute
   routes:
   - when:
     - failed:test_status
@@ -148,11 +200,17 @@ nodes:
   - when: failed:test_status
     to: developer
 - id: qa
-  kind: system
+  kind: activity
   name: 质量门禁
   role: qa
   returns_to: ''
-  handler: qa
+  inputs:
+  - requirement_spec
+  - test_report
+  outputs:
+  - qa_report
+  instruction: 若需求含 AC-*，须逐条引用测试证据，并在结论块的 ac 中逐条给出 pass / fail / untested。
+  effect: qa_gate
   routes:
   - when:
     - failed:qa_status
@@ -161,18 +219,29 @@ nodes:
   - when: failed:qa_status
     to: developer
 - id: finance_cost_snapshot
-  kind: system
+  kind: activity
   name: 成本快照
   role: finance
   returns_to: ''
-  handler: finance_cost_snapshot
+  inputs:
+  - qa_report
+  outputs:
+  - cost_report
+  instruction: 根据本轮产物做交付前的成本快照。
+  effect: cost_snapshot
   when: feature:finance
 - id: project_manager_delivery
-  kind: system
+  kind: activity
   name: 交付汇总
   role: project_manager
   returns_to: ''
-  handler: project_manager_delivery
+  inputs:
+  - test_report
+  - qa_report
+  outputs:
+  - delivery_report
+  instruction: 交付报告供最终交付关卡使用。
+  effect: delivery
   routes:
   - when: false:delivery_ready
     to: escalate_dev_retry
@@ -183,17 +252,26 @@ nodes:
   returns_to: ''
   decision: approve
 - id: config_manager_closeout
-  kind: system
+  kind: activity
   name: 收口
   role: config_manager
   returns_to: ''
-  handler: config_manager_closeout
+  inputs:
+  - baseline_log
+  outputs:
+  - config_baseline
+  - config_retro
+  instruction: config_baseline 写交付基线说明，config_retro 写模板与配置复盘。
 - id: process_owner_retro
-  kind: system
+  kind: activity
   name: 复盘
   role: process_owner
   returns_to: ''
-  handler: process_owner_retro
+  inputs: []
+  outputs:
+  - process_proposals
+  instruction: process_proposals 写流程与角色改进提案。
+  effect: retro
   next: end
 - id: escalate_dev_retry
   kind: system

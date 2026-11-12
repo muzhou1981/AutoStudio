@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -27,6 +28,9 @@ def _import_all_modules() -> None:
 
 _import_all_modules()
 
+from geni_studio.config.context import factory_root
+from geni_studio.hitl import feishu_config
+
 _ISOLATED_PREFIXES = ("LARK_", "CURSOR_", "GENI_STUDIO_FEISHU_", "OPENAI_", "CODEX_", "LANGSMITH_")
 _ISOLATED_KEYS = (
     "GENI_STUDIO_LARK_BACKEND",
@@ -45,16 +49,33 @@ _ISOLATED_KEYS = (
 
 
 @pytest.fixture(autouse=True)
-def _isolate_runtime_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_runtime_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for key in list(os.environ):
         if key.startswith(_ISOLATED_PREFIXES) or key in _ISOLATED_KEYS:
             monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("GENI_STUDIO_BACKEND", "stub")
+    # 用户配置默认落在仓库 runs/ 下，用例改写的记忆不能留到开发机上。
+    monkeypatch.setenv("GENI_STUDIO_USER_CONFIG_PATH", str(tmp_path / "user_config.json"))
     monkeypatch.setenv("GENI_STUDIO_FEISHU_BRIDGE", "0")
     monkeypatch.setenv("GENI_STUDIO_FEISHU_WEBHOOK_INSECURE", "1")
     from geni_studio.backends.runner import reset_backend_cache
 
     reset_backend_cache()
+    # 不为每一轮启动真实桥接；测试里的 Cursor 后端共用打桩的默认客户端。
+    monkeypatch.setattr("geni_studio.backends.cursor_backend._launch_run_bridge", lambda run_id: None, raising=False)
+    # 飞书配置直接读取仓库根目录的 .env 文件，不经过上面的环境变量隔离；开发机上填了通知对象时，
+    # 每个停在人工关卡的用例都会调用 lark-cli 发出真实消息。只屏蔽仓库根目录，临时目录里的 .env 照常读取。
+    monkeypatch.setattr(feishu_config, "_read_env_file", _read_env_file_except_repo)
+
+
+_REPO_ROOT = factory_root().resolve()
+_real_read_env_file = feishu_config._read_env_file
+
+
+def _read_env_file_except_repo(root: Path) -> dict[str, str]:
+    if Path(root).resolve() == _REPO_ROOT:
+        return {}
+    return _real_read_env_file(root)
 
 
 @pytest.fixture

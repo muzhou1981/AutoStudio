@@ -119,7 +119,7 @@ def backend_for_role(role_name: str, project_id: str = ""):
         return backend
     if name == "codex" or (not name and os.environ.get("GENI_STUDIO_BACKEND", "").strip().lower() == "codex"):
         from geni_studio.backends.codex_backend import CodexBackend
-        from geni_studio.backends.reasoning import reasoning_for_role
+        from geni_studio.backends.reasoning import fast_for_role, reasoning_for_role
 
         try:
             import openai_codex  # noqa: F401
@@ -130,11 +130,14 @@ def backend_for_role(role_name: str, project_id: str = ""):
             str(cfg.get("sandbox") or ""),
             cfg.get("timeout_seconds", 1800),
             reasoning_for_role(role_name, cfg.get("reasoning_effort")),
+            fast_for_role(role_name),
         )
         with _backend_lock:
             backend = _codex_backends.get(key)
             if backend is None:
-                backend = CodexBackend(sandbox=key[0], timeout_seconds=key[1], reasoning_effort=key[2])
+                backend = CodexBackend(
+                    sandbox=key[0], timeout_seconds=key[1], reasoning_effort=key[2], fast=key[3],
+                )
                 _codex_backends[key] = backend
         return backend
     if name:

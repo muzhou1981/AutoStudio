@@ -64,7 +64,42 @@ def begin_turn(
 
 
 def append_step(path: Path, step: Any) -> None:
-    _append(path, {"kind": "step", "step": step_to_dict(step)})
+    _append(path, {"kind": "step", "step": _compact_task(step_to_dict(step))})
+
+
+def task_started_step(tool_call: Any) -> dict[str, Any]:
+    """子代理开始时记一笔；完成后的 toolCall 步骤按 args.agentId 与它配对。"""
+    call = _plain(tool_call) if not isinstance(tool_call, dict) else tool_call
+    return {"type": "taskStarted", "message": {"args": dict(call.get("args") or {})}}
+
+
+_TASK_REPLY_LIMIT = 4000
+
+
+def _compact_task(step: dict[str, Any]) -> dict[str, Any]:
+    """子代理结果里带有它的完整步骤，只保留回复、工具调用次数与耗时。"""
+    message = step.get("message")
+    if step.get("type") != "toolCall" or not isinstance(message, dict) or message.get("type") != "task":
+        return step
+    result = message.get("result")
+    value = result.get("value") if isinstance(result, dict) else None
+    if not isinstance(value, dict) or "conversationSteps" not in value:
+        return step
+    inner = value.get("conversationSteps") or []
+    reply = ""
+    tools = 0
+    for item in inner:
+        if not isinstance(item, dict):
+            continue
+        if "toolCall" in item:
+            tools += 1
+        text = (item.get("assistantMessage") or {}).get("text") if "assistantMessage" in item else None
+        if isinstance(text, str) and text.strip():
+            reply = text.strip()
+    compact = {k: v for k, v in value.items() if k != "conversationSteps"}
+    compact["toolCount"] = tools
+    compact["reply"] = reply[:_TASK_REPLY_LIMIT]
+    return {**step, "message": {**message, "result": {**result, "value": compact}}}
 
 
 def finish_turn(path: Path, text: str) -> None:

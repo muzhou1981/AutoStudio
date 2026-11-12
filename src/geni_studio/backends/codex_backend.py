@@ -1,4 +1,4 @@
-"""Codex SDK 后端：有界调用、按 Run/节点隔离并持久化线程。"""
+"""Codex SDK 后端：有界调用、按 Run/角色隔离并持久化线程。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from geni_studio.backends.session import (
-    current_node_id,
     load_session,
     save_session,
     session_digest,
@@ -71,9 +70,10 @@ class CodexBackend:
 
     def __init__(
         self, *, sandbox: str = "", timeout_seconds: float = 1800,
-        reasoning_effort: str | None = None,
+        reasoning_effort: str | None = None, fast: str = "",
     ) -> None:
         from geni_studio.backends.codex_settings import normalize_reasoning_effort
+        from geni_studio.backends.reasoning import normalize_fast
 
         if sandbox not in {"", "read-only", "workspace-write"}:
             raise ValueError("Codex sandbox 只支持 read-only 或 workspace-write")
@@ -85,6 +85,7 @@ class CodexBackend:
         self._reasoning_effort = (
             None if reasoning_effort is None else normalize_reasoning_effort(reasoning_effort)
         )
+        self._fast = normalize_fast(fast)
         # 未绑定 Run 的直接调用也能在同一对象内续接，但不跨对象共享。
         self._threads: dict[str, str] = {}
 
@@ -133,10 +134,12 @@ class CodexBackend:
         chosen = _codex_model(model if model is not None else factory_default_model("codex"))
         effort = factory_reasoning_effort() if self._reasoning_effort is None else self._reasoning_effort
         run_id = current_thread_id()
-        identity = [run_id, current_node_id(), role_name, cwd, chosen, sandbox, system_prompt.strip()]
+        identity = [run_id, role_name, cwd, chosen, sandbox, system_prompt.strip()]
         if effort:
             # 显式强度不同的调用不共用线程；未配置时兼容已有会话键。
             identity.append(effort)
+        if self._fast:
+            identity.append(f"fast={self._fast}")
         digest = session_digest(identity)
         session_file = session_path("codex-sessions", run_id, cwd, digest) if run_id else None
         options = {
@@ -166,7 +169,10 @@ class CodexBackend:
                         run_id, role_name, agent_id=thread.id, model=chosen or "default",
                         prompt=user_prompt.strip(), workspace_path=cwd,
                     )
-                turn_options = {"effort": ReasoningEffort(effort)} if effort else {}
+                turn_options: dict[str, Any] = {"effort": ReasoningEffort(effort)} if effort else {}
+                if self._fast:
+                    # "default" 是 SDK 约定的标准速度；未设置时沿用 Codex 自身配置。
+                    turn_options["service_tier"] = "fast" if self._fast == "on" else "default"
                 handle = thread.turn(user_prompt.strip(), **turn_options)
                 active = _ActiveTurn(handle, client)
                 register_active_run(run_id, active)
@@ -194,6 +200,10 @@ class CodexBackend:
             raise
 
 
+# 会话只记完成的条目与出错；逐字增量与用量刷新会让会话文件和每次推送无限变长。
+_RECORDED_EVENTS = frozenset({"item/completed", "error"})
+
+
 def _consume_turn(handle: Any, turn_path: Path | None) -> tuple[str, Any]:
     from geni_studio.hitl.conversation import append_step
 
@@ -205,7 +215,7 @@ def _consume_turn(handle: Any, turn_path: Path | None) -> tuple[str, Any]:
     try:
         for event in stream:
             data = event.payload.model_dump(mode="json", by_alias=True)
-            if turn_path is not None:
+            if turn_path is not None and event.method in _RECORDED_EVENTS:
                 append_step(turn_path, {"type": event.method, "message": data})
             if event.method == "turn/completed":
                 turn = data["turn"]
@@ -280,8 +290,11 @@ def _cost_line(role_name: str, model: str, usage: Any) -> str:
 
 def _model_rows(listed: Any) -> list[dict[str, Any]]:
     # SDK 的 id 是目录条目 ID，model 才是请求模型名。
-    return [
-        {
+    rows = []
+    for item in listed.data:
+        if not item.model:
+            continue
+        row = {
             "id": item.model,
             "label": item.display_name or item.model,
             "is_default": item.is_default,
@@ -291,5 +304,19 @@ def _model_rows(listed: Any) -> list[dict[str, Any]]:
                 for option in item.supported_reasoning_efforts
             ],
         }
-        for item in listed.data if item.model
-    ]
+        fast_tier = _fast_tier(item)
+        if fast_tier:
+            default_tier = str(getattr(item, "default_service_tier", "") or "")
+            row.update(fast=True, default_fast="on" if default_tier == fast_tier else "off")
+        rows.append(row)
+    return rows
+
+
+def _fast_tier(item: Any) -> str:
+    """模型目录里 Fast 档的标识；新目录用 service_tiers，旧目录只有 additional_speed_tiers。"""
+    for tier in getattr(item, "service_tiers", None) or ():
+        tier_id = str(getattr(tier, "id", "") or "")
+        if "fast" in {tier_id.lower(), str(getattr(tier, "name", "") or "").lower()}:
+            return tier_id
+    legacy = [str(value) for value in getattr(item, "additional_speed_tiers", None) or ()]
+    return "fast" if "fast" in legacy else ""

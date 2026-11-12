@@ -173,7 +173,10 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert "hitlDockResize" in text
     assert "focusRunRailView" in text
     assert "armStartPoll" in text
-    assert 'id="region-setup"' in text
+    assert 'id="region-setup"' not in text
+    assert 'id="btnStart" variant="brand">启动</wa-button>\n            <wa-button id="btnSaveRun"' in text
+    assert 'id="pendingAlert"' in text and 'id="stopConfirm"' in text
+    assert 'class="sidebar-foot"' in text and "theme-fab" not in text
     assert "inspect-body-run" in text
     assert "inspect-hitl-dock" in text
     assert "原始状态" not in text
@@ -231,7 +234,7 @@ def test_role_model_settings_live_in_the_inspect_panel() -> None:
     assert 'id="roleModelList"' not in page
     assert "角色模型与推理强度</p>" not in page
     assert "roleGroup.appendChild(roleModelSection(cell, data, notes));" in script
-    assert "stepGroup.append(...nodeToolColumns(cell, data, notes));" in script
+    assert "stepGroup.appendChild(nodeToolColumn(cell, data, notes));" in script
     assert 'settingsGroup("角色属性", "settings-group-role"' in script
     assert 'settingsGroup("步骤属性", "settings-group-step"' in script
     assert "个节点共用" not in script
@@ -246,10 +249,19 @@ def test_role_model_settings_live_in_the_inspect_panel() -> None:
     assert "模型与推理强度不能再改" not in script
     css = TestClient(app).get("/static/hitl.css").text
     assert ".role-model-block { display: contents; }" in css
-    assert "@container (max-width: 44rem)" in css
-    assert 'model.label = "模型"' in script
-    assert 'effort.label = "推理强度"' in script
-    assert 'note(runModelDetails[s.backend] || "读不到模型列表。")' in script
+    assert "@container (max-width: 44rem)" not in css
+    assert ".inspect-settings-columns {\n  display: grid;\n  grid-template-columns: repeat(2, minmax(0, 1fr));" in css
+    assert 'const ROLE_PREFS_URL = "/api/config/user/role-model-prefs";' in script
+    assert "restoreConversationScroll(body, nodeId);" in script
+    assert 'body.addEventListener("scroll", (ev) => {' in script
+    assert "void loadRolePrefs();" in script
+    assert 'chip.className = "role-menu-chip";' in script
+    assert 'subRow("推理强度", text, "effort")' in script and 'subRow("模型",' in script
+    assert 'row.addEventListener("mouseenter", () => showFlyout(row, page, false));' in script
+    assert "function placeFlyout(wrap, row, fly)" in script
+    assert 'search.placeholder = "搜索模型";' in script
+    assert 'document.createElement("wa-switch")' in script
+    assert 'notes.push({ text: runModelDetails[s.backend] || "读不到模型列表。" });' in script
     assert "window.__backendModelsDetail" in config
     assert "留空表示沿用配置里的默认模型" not in page + config
     assert "这一轮的选择不影响其它 Run" not in page + config
@@ -268,7 +280,7 @@ def test_hitl_reading_fills_parent_width() -> None:
     assert "closeSkillPick" in text
     assert "toolAddSelect" not in text
     assert "if (add) list.lastElementChild.appendChild(add);" in text
-    assert 's.problem || locked || s.auto ? ""' in text
+    assert 'subRow("推理强度", "由 Auto 决定", "effort", { disabled: true })' in text
     assert "Auto 模型由 Cursor 自动选择，不能指定推理强度。\"" not in text
     css = TestClient(app).get(stylesheet.group(1)).text
     assert "wa-color-surface-raised" in css
@@ -371,3 +383,48 @@ def test_inspect_sections_have_no_redundant_headings() -> None:
     assert 'section.setAttribute("aria-label", "会话")' in script
     assert 'strip.setAttribute("aria-label", "本步骤设置")' in script
     assert 'heading.textContent = "本步骤设置"' not in script
+
+
+def test_mcp_is_listed_read_only_on_the_config_page_not_per_step() -> None:
+    client = TestClient(app)
+    page = client.get("/").text
+    script = client.get("/static/hitl.js").text
+    config = client.get("/static/config.js").text
+    agent = page[page.index('id="region-agent"'):page.index('id="region-feishu"')]
+    assert 'id="mcpList"' in agent and "<wa-select" not in agent[agent.index('id="mcpField"'):]
+    assert '"mcp", "MCP"' not in script and "mcp:" not in script
+    assert "/api/config/tools?" in config and 'params.set("project_id"' in config
+
+
+def test_run_page_ignores_stale_responses_and_stops_push_off_route() -> None:
+    script = TestClient(app).get("/static/hitl.js").text
+    assert "data.thread_id !== $(\"thread\").value.trim()) return;" in script
+    assert "refreshQueued" in script and "if (refreshing) return;" not in script
+    assert "syncConversationThread(tid)" in script and "rememberConversation(payload, tid)" in script
+    assert "if (leavingRun) stopPoll();" in script and "onRunRoute()" in script
+    assert '"paused", "interrupted", "awaiting_human"' in script
+    assert "nodeToolError = { node: cell.id" in script
+
+
+def test_run_page_new_steps_redraw_only_the_conversation() -> None:
+    script = TestClient(app).get("/static/hitl.js").text
+    assert "if (rememberConversation(payload, tid)) refreshConversation(payload.node);" in script
+    assert "rememberConversation(JSON.parse(ev.data), tid) && lastStatus) renderInspect" not in script
+    # 推送与补拉两处都按同一个进行中判断渲染，不再一处展开、一处收起。
+    assert script.count("formatConversation(payload)") == 0
+    assert script.count("conversationLive(") >= 3
+    assert "followBottom(body, () => fillConversation(body, nodeId, html));" in script
+    assert "if (renderedConversation.get(body) === html) return;" in script
+
+
+def test_run_page_lanes_scroll_when_they_do_not_fit() -> None:
+    client = TestClient(app)
+    script = client.get("/static/hitl.js").text
+    css = client.get("/static/hitl.css").text
+    shared = client.get("/static/shared.css").text
+    assert "rail-compact" not in script and "rail-compact" not in css
+    assert 'grid.style.minWidth = Math.ceil(grid.clientWidth + need - width) + "px";' in script
+    assert ".swim-scroll {\n  overflow-x: auto;" in css
+    assert "const STATE_MARK = {" in script and 'id="railLegend"' in client.get("/").text
+    assert ".workspace-inspect { grid-column: 2 / -1; }" in shared
+    assert 'current.kind === "end"' in script

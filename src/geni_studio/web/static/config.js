@@ -406,15 +406,10 @@ function clearProjectForm() {
 
 async function loadProjectYaml(id) {
   if (!id) {
-    $("projectYaml").value = "";
     clearProjectForm();
     return;
   }
-  const [raw, form] = await Promise.all([
-    fetch("/api/config/projects/" + encodeURIComponent(id)).then((r) => r.json()),
-    fetch("/api/config/projects/" + encodeURIComponent(id) + "/form").then((r) => r.json()),
-  ]);
-  if (raw.yaml) $("projectYaml").value = raw.yaml;
+  const form = await fetch("/api/config/projects/" + encodeURIComponent(id) + "/form").then((r) => r.json());
   if (form.project_id) {
     await fillProjectForm(form);
     if ($("scenarioPick") && form.scenario_key && [...$("scenarioPick").querySelectorAll("wa-option")].some((o) => o.value === form.scenario_key)) {
@@ -1006,8 +1001,67 @@ async function syncBackendFields() {
   if ($("backendPick").value !== backend) return;
   applyApiKeyField(backend, envName ? find(envName) : null);
   fillReasoning(data, backend);
+  void refreshMcpList();
   const selected = defaultModelFromSettings(data, backend);
   await refreshDefaultModelPick(backend, selected);
+}
+
+let mcpRequestVersion = 0;
+
+const MCP_SOURCE_HINTS = {
+  cursor: "读取工作区与用户目录的 .cursor/mcp.json，对所有角色可见。增删请在 Cursor 的 MCP 设置里修改。",
+  codex: "读取 ~/.codex/config.toml 的 mcp_servers，对所有角色可见。增删请修改该文件。",
+};
+
+/** 所选后端会加载的 MCP 服务器，只读。项目层按当前打开项目的工作区读取。 */
+async function refreshMcpList() {
+  const list = $("mcpList");
+  const hint = $("mcpHint");
+  if (!list || !hint) return;
+  const backend = ($("backendPick") && $("backendPick").value) || "stub";
+  const version = ++mcpRequestVersion;
+  if (backend === "stub") {
+    list.hidden = true;
+    list.replaceChildren();
+    hint.textContent = "stub 不调用外部模型，不加载 MCP。";
+    return;
+  }
+  const params = new URLSearchParams({ backend });
+  const project = (($("projectPick") && $("projectPick").value) || "").trim();
+  if (project) params.set("project_id", project);
+  let payload = null;
+  try {
+    const r = await fetch("/api/config/tools?" + params.toString());
+    if (r.ok) payload = await r.json();
+  } catch (_err) {
+    payload = null;
+  }
+  if (version !== mcpRequestVersion) return;
+  const servers = (payload && payload.mcp) || [];
+  list.hidden = false;
+  if (!payload) {
+    list.replaceChildren(statusRow("读不到 MCP 配置", "未知", false));
+    hint.textContent = "确认服务已启动后再刷新。";
+    return;
+  }
+  list.replaceChildren(
+    ...(servers.length
+      ? servers.map((item) => scopeRow(item.name, item.scope === "project" ? "项目" : "用户"))
+      : [statusRow("没有配置 MCP 服务器", "无", false)]),
+  );
+  hint.textContent = payload.detail || MCP_SOURCE_HINTS[backend] || "";
+}
+
+function scopeRow(label, scope) {
+  const li = document.createElement("li");
+  const name = document.createElement("span");
+  name.className = "setting-key";
+  name.textContent = label;
+  const chip = document.createElement("span");
+  chip.className = "status-chip";
+  chip.textContent = scope;
+  li.append(name, chip);
+  return li;
 }
 
 if ($("backendPick")) {
@@ -1072,6 +1126,7 @@ async function loadSettings() {
     block.hidden = true;
   }
   fillRuntime(data);
+  void refreshMcpList();
   const backend = ($("backendPick") && $("backendPick").value) || resolveBackendPick(data);
   await refreshDefaultModelPick(backend, defaultModelFromSettings(data));
   await loadBackendModels(backend);
@@ -1120,7 +1175,7 @@ let formSnapshot = "";
 let loadedProjectId = "";
 
 function formSnapshotNow() {
-  return JSON.stringify(projectFormPayload()) + "\n" + ($("projectYaml").value || "");
+  return JSON.stringify(projectFormPayload());
 }
 
 function markFormClean() {
@@ -1173,7 +1228,6 @@ function showProjectPieces(mode) {
   $("btnCreateProject").hidden = !isNew;
   $("btnSaveProject").hidden = !isOpen || !loadedProjectId;
   if ($("btnDeleteProject")) $("btnDeleteProject").hidden = !isOpen || !loadedProjectId;
-  $("projectRaw").hidden = !isOpen;
   if ($("dirPicker")) $("dirPicker").hidden = true;
   highlightProjectMode(mode);
 }
@@ -1192,15 +1246,16 @@ async function enterOpen(id, replace) {
     $("openProjectId").hidden = true;
     clearProjectForm();
     setProjectFieldsEnabled(false);
-    $("projectYaml").value = "";
     markFormClean();
     writeProjectUrl("open", "", replace);
     await refreshEffective();
+    void refreshMcpList();
     return;
   }
   $("projectPick").value = id;
   await loadProjectYaml(id);
   loadedProjectId = id;
+  void refreshMcpList();
   $("btnSaveProject").hidden = false;
   if ($("btnDeleteProject")) $("btnDeleteProject").hidden = false;
   $("openProjectId").hidden = false;
@@ -1215,7 +1270,6 @@ function enterNew(replace) {
   projectMode = "new";
   showProjectPieces("new");
   clearProjectForm();
-  $("projectYaml").value = "";
   setProjectFieldsEnabled(true);
   markFormClean();
   writeProjectUrl("new", "", replace);
@@ -1371,7 +1425,6 @@ $("btnSaveProject").onclick = async () => {
     showError($("projectError"), data.detail || "没能写入项目。检查选项后再试。");
     return;
   }
-  if (data.yaml) $("projectYaml").value = data.yaml;
   showSaved($("projectSaved"), "已写入 " + id + " 的项目字段。");
   markFormClean();
   refreshEffective();
@@ -1414,30 +1467,6 @@ if ($("btnDeleteProject")) {
     }
   };
 }
-
-$("btnSaveRaw").onclick = async () => {
-  const id = loadedProjectId;
-  showError($("projectError"), "");
-  showSaved($("projectSaved"), "");
-  if (!id) {
-    showError($("projectError"), "先选择一个项目，再覆盖原文。");
-    return;
-  }
-  const r = await fetch("/api/config/projects/" + encodeURIComponent(id), {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ yaml: $("projectYaml").value }),
-  });
-  const data = await r.json();
-  if (!r.ok) {
-    showError($("projectError"), data.detail || "没能用原文覆盖。检查 YAML 后再试。");
-    return;
-  }
-  await loadProjectYaml(id);
-  markFormClean();
-  showSaved($("projectSaved"), "已用原文覆盖 " + id + "。");
-  refreshEffective();
-};
 
 async function createProjectRecord(title) {
   const r = await fetch("/api/config/projects", {
@@ -1581,7 +1610,6 @@ if ($("btnPickWorkspace")) {
   $("btnPickWorkspace").onclick = () =>
     openDirPicker(($("fieldWorkspace").value || "").trim(), async (path) => {
       $("fieldWorkspace").value = path;
-      markFormDirty();
       syncWorkspaceClearButton();
       await validateWorkspaceField();
     });
@@ -1589,7 +1617,6 @@ if ($("btnPickWorkspace")) {
 if ($("btnClearWorkspace")) {
   $("btnClearWorkspace").onclick = async () => {
     $("fieldWorkspace").value = "";
-    markFormDirty();
     syncWorkspaceClearButton();
     await validateWorkspaceField();
   };

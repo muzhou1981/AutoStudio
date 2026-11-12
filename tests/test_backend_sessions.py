@@ -88,3 +88,35 @@ def test_agent_is_resumed_from_disk_by_a_new_backend(client: _Client, tmp_path: 
     assert client.prompts[2].startswith("新版角色定义")
     saved = list((tmp_path / ".geni_studio" / "runs" / "run-1" / "cursor-sessions").glob("*.json"))
     assert len(saved) == 2
+
+
+def test_role_keeps_one_agent_across_nodes(client: _Client, tmp_path: Path, monkeypatch) -> None:
+    from geni_studio.backends.cursor_backend import CursorBackend
+    from geni_studio.hitl.control import bind_thread, unbind_thread
+    from geni_studio.workspace.context import use_worktree
+
+    options = []
+    create = client.create_agent
+
+    def _create(opts, api_key=None):
+        options.append(opts)
+        return create(opts, api_key)
+
+    node = {"id": "design"}
+    monkeypatch.setattr(client, "create_agent", _create)
+    monkeypatch.setattr("geni_studio.backends.session.current_node_id", lambda: node["id"])
+    (tmp_path / ".geni_studio").mkdir()
+    backend = CursorBackend()
+    token = bind_thread("run-nodes")
+    try:
+        with use_worktree(tmp_path):
+            backend.complete(role_name="architect", system_prompt="角色定义", user_prompt="写设计")
+            node["id"] = "plan"
+            backend.complete(role_name="architect", system_prompt="角色定义", user_prompt="写计划")
+    finally:
+        unbind_thread(token)
+    assert client.created == 1
+    assert client.prompts[1] == "## 本轮任务\n\n写计划"
+    assert tuple(options[0].local.setting_sources) == ("project", "user")
+    nodes = tmp_path / ".geni_studio" / "runs" / "run-nodes" / "conversations" / "nodes"
+    assert sorted(p.name for p in nodes.iterdir()) == ["design", "plan"]

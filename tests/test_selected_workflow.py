@@ -52,6 +52,46 @@ def _patch_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr("geni_studio.hitl.service.workspace_enabled", lambda: False)
 
 
+def test_gate_rejection_after_escalation_continue_takes_effect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _root(tmp_path)
+    (tmp_path / "workflows" / "sample" / "workflow.yaml").write_text(
+        "workflow_id: sample\ntitle: 示例\nnodes:\n"
+        "- {id: start, kind: start, name: 启动, role: human, returns_to: ''}\n"
+        "- {id: n1, kind: activity, name: 起草, role: project_manager, returns_to: ''}\n"
+        "- {id: n3, kind: activity, name: 开发, role: developer, returns_to: n1, max_loops: 1}\n"
+        "- {id: n4, kind: gate, name: 看结果, role: human, returns_to: '', decision: approve, reject_to: n1}\n"
+        "- {id: end, kind: end, name: 结束, role: human, returns_to: ''}\n",
+        encoding="utf-8",
+    )
+    _patch_root(monkeypatch, tmp_path)
+    calls = {"project_manager": 0}
+
+    def fake_invoke(*, role_name: str, user_prompt: str, stub_note: str, model: str | None = None) -> str:
+        if role_name == "developer":
+            return "未通过\nSTATUS: fail"
+        calls["project_manager"] += 1
+        return f"[stub:{role_name}] {stub_note}"
+
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", fake_invoke)
+    svc = GraphRunService(compile_graph(MemorySaver()))
+    st = svc.start(human_request="做一件事", scenario_key="demo", project_id="bound")
+    assert st.awaiting_human is not None and st.awaiting_human.kind == "escalation"
+    st = svc.submit_hitl(st.thread_id, escalation_choice="continue")
+    assert st.awaiting_human is not None and st.awaiting_human.gate_id == "n4"
+    drafted = calls["project_manager"]
+    svc._write_values(st.thread_id, {"gate_timeout_note": "超时未批复"})
+    assert svc.status(st.thread_id).next_nodes == ("n4",)
+
+    st = svc.submit_hitl(st.thread_id, gate_decision="rejected", human_reply="重写需求")
+    assert calls["project_manager"] == drafted + 1
+    assert "[baseline:n4] decision=rejected" in st.values["baseline_log"]
+    assert st.phase == "awaiting_human"
+    assert st.phase != "completed"
+
+
 def test_missing_decision_refuses_to_start(tmp_path: Path) -> None:
     _root(tmp_path)
     workflow = {

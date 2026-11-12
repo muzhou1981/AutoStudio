@@ -10,7 +10,7 @@
 
 ## 决定
 
-1. 编译器增加系统节点 `kind: system`：`handler` 引用内置实现（`workflows/system_nodes.py` 的 `HANDLERS`，实现在 `default.py`，调用时按名称查找）；`routes` 按顺序声明条件去向，都不满足时去往 `next` 或文件中的下一个节点；系统节点不写 `returns_to`。
+1. 编译器增加系统节点 `kind: system`（后由 [0019](0019-default-flow-agent-steps-as-activities.md) 限定为不调用 Agent 的步骤）：`handler` 引用内置实现（`workflows/system_nodes.py` 的 `HANDLERS`，实现在 `default.py`，调用时按名称查找）；`routes` 按顺序声明条件去向，都不满足时去往 `next` 或文件中的下一个节点；系统节点不写 `returns_to`。
 2. 系统节点和活动都可以写 `when`，条件不成立时该节点不执行、直接通过。条件词表：`feature:design_track`、`feature:finance`、`pending:<类型>`、`impact:<影响>`、`failed:<状态字段>`、`false:<字段>`、`retries_exhausted`，`not:` 取反，列表表示同时成立。保存流程时校验处理函数、条件与去向。
 3. `factory_default.yaml` 写出完整的节点、可选分支与路由，删除 `engine: default` 与 `uses_default_engine()`。`default.py` 只保留图状态、节点实现与编译入口：`compile_graph()` 编译内置流程文件，供 `langgraph.json` 与未选流程的轮次使用。
 4. 项目选择 `factory_default` 时与其他流程一样经 `compile_for_project` 编译，并冻结 `workflow_definition_ref`。该流程声明 `rail: builtin`，进度轨道沿用内置轨道（标签、设计轨与财务的隐藏规则），因此不写入 `workflow_nodes`。
@@ -19,5 +19,5 @@
 ## 后果
 
 - 运行图只有一条生成路径；修改 `factory_default.yaml` 的副本（例如删除可测性评审）直接改变运行行为。
-- 默认流程的智能体节点仍以系统节点形式复用原实现，提示词与结论判定未改为通用活动；把它们改写为通用活动需要逐个对齐结论与反馈的约定，留待后续。
+- 默认流程的智能体节点起初仍以系统节点形式复用原实现；已由 [0019](0019-default-flow-agent-steps-as-activities.md) 改为通用活动，判定与状态写入改由活动的内置后处理完成。
 - 复制出的流程保留 `rail: builtin` 时，轨道仍按内置节点表显示；删除节点后轨道中的对应项不会消失，需要去掉该字段改用流程节点表。

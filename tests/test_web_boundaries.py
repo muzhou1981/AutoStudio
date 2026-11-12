@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import os
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -90,6 +90,25 @@ def test_hitl_page_loads_external_script() -> None:
     assert client.get("/static/hitl.js").status_code == 200
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="需要 node")
+def _node_that_parses_hitl() -> str | None:
+    candidates = [Path(d) / "node" for d in os.environ.get("PATH", "").split(os.pathsep)]
+    candidates += sorted((Path.home() / ".nvm/versions/node").glob("*/bin/node"), reverse=True)
+    for node in candidates:
+        if not node.is_file():
+            continue
+        version = subprocess.run(
+            [str(node), "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if version.startswith("v") and int(version[1:].split(".")[0]) >= 18:
+            return str(node)
+    return None
+
+
 def test_hitl_script_parses() -> None:
-    subprocess.run(["node", "--check", str(WEB / "static" / "hitl.js")], check=True)
+    node = _node_that_parses_hitl()
+    if node is None:
+        pytest.skip("需要 Node.js 18 或更新版本")
+    subprocess.run([node, "--check", str(WEB / "static" / "hitl.js")], check=True)

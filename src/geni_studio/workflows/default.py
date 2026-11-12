@@ -1,11 +1,13 @@
 """GeniStudio 默认工作流程：图状态、内置节点实现与编译入口。
 
 节点顺序、可选分支与路由写在 workflows/factory_default/workflow.yaml，
-由 workflows/executable.py 编译；本文件中的节点函数以系统节点 handler 的名义被引用。
+由 workflows/executable.py 编译。本文件提供不调用 Agent 的系统节点（handler）
+与活动的内置后处理（effect）；调用 Agent 的步骤都按通用活动执行。
 """
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Annotated, Any, Literal, NamedTuple, TypedDict
 
 from geni_studio.config.context import (
     ConfigError,
@@ -142,12 +144,16 @@ class FactoryState(TypedDict, total=False):
     artifact_meta: Annotated[dict[str, dict], _merge_maps]
     # 并行支路的快照工作树（"<并行>:<支路>"）与快照提交（"<并行>:__base__"）。
     branch_workspaces: Annotated[dict[str, str], _merge_maps]
-    # 这一轮各活动节点选用的 Skill 与 MCP。键是节点标识。
+    # 这一轮各活动节点选用的 Skill。键是节点标识；MCP 是全局配置，不在这里。
     node_tools: dict[str, dict[str, list[str]]]
     # 这一轮各角色选用的模型。空着的角色沿用配置里的默认模型。
     role_models: dict[str, str]
     # 本轮角色推理覆盖；缺省继承项目/工厂，default 表示 Codex 默认。
     role_reasoning_efforts: dict[str, str]
+    # 本轮角色 Fast 模式：on 或 off；缺省交给模型默认。
+    role_fast_modes: dict[str, str]
+    # 本轮角色的其它模型参数（如上下文长度）：参数名到取值；缺省交给模型默认。
+    role_model_params: dict[str, dict[str, str]]
     return_target: str
     escalated_from: str
     # 判定类活动未通过时写入，供被退回的活动修复；该活动执行后清空。
@@ -156,14 +162,6 @@ class FactoryState(TypedDict, total=False):
 
 def _touch_artifact(state: FactoryState, key: str, role: str, note: str) -> dict:
     return {key: f"[stub:{role}] {note}"}
-
-
-def _ref(state: FactoryState, key: str, label: str, role: str, value: str | None = None) -> str:
-    """上游产物在提示词中的写法；不截断。"""
-    from geni_studio.workflows.artifacts import reference
-
-    text = reference(state, key, label, role=role, value=value)
-    return f"{text}\n\n" if text else ""
 
 
 def _run_context_or_none(state: FactoryState):
@@ -190,28 +188,7 @@ def resolve_design_track_enabled(state: FactoryState) -> bool:
     return resolve_design_track(state, ctx)
 
 
-# --- 角色节点（占位） ---
-
-
-@skip_if_disabled("project_manager_draft")
-def project_manager_draft(state: FactoryState) -> dict:
-    build_run_context_from_state(state)
-    req = state.get("human_request", "")
-    from geni_studio.backends.runner import invoke_role
-    from geni_studio.hitl.attachments import prompt_section
-
-    attached = prompt_section(state.get("attachments"))
-    body = invoke_role(
-        role_name="project_manager",
-        user_prompt=(
-            f"人类原始需求：\n{req}\n\n"
-            + (f"{attached}\n\n" if attached else "")
-            + "请按 role.md 产出 `requirement_spec` 正文（Markdown），"
-            "须含可检验验收标准 AC-*。"
-        ),
-        stub_note=f"需求说明草稿 input_len={len(req)}",
-    )
-    return {"requirement_spec": body}
+# --- 系统节点：不调用 Agent ---
 
 
 def pm_clarification_check(state: FactoryState) -> dict:
@@ -241,57 +218,6 @@ def hitl_pause(state: FactoryState) -> dict:
     return {}
 
 
-@skip_if_disabled("tester_testability")
-def tester_testability(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role
-
-    body = invoke_role(
-        role_name="tester",
-        user_prompt=(
-            _ref(state, "requirement_spec", "需求说明", "tester")
-            + "请产出 `testability_review` 正文（Markdown），指出可测试性风险与建议。"
-        ),
-        stub_note="可测试性评审（关卡前）",
-    )
-    return {"testability_review": body}
-
-
-@skip_if_disabled("ux_designer")
-def ux_designer(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role
-
-    body = invoke_role(
-        role_name="ux_designer",
-        user_prompt=_ref(state, "requirement_spec", "需求说明", "ux_designer") + "请产出 `ux_spec` 正文。",
-        stub_note="体验设计说明（任务流与线框，待 UI）",
-    )
-    return {"ux_spec": body}
-
-
-@skip_if_disabled("ui_designer")
-def ui_designer(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role
-
-    body = invoke_role(
-        role_name="ui_designer",
-        user_prompt=_ref(state, "ux_spec", "UX 说明", "ui_designer") + "请产出 `ui_spec` 正文。",
-        stub_note="界面与组件规格（待美工资源）",
-    )
-    return {"ui_spec": body}
-
-
-@skip_if_disabled("visual_designer")
-def visual_designer(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role
-
-    body = invoke_role(
-        role_name="visual_designer",
-        user_prompt=_ref(state, "ui_spec", "UI 规格", "visual_designer") + "请产出 `visual_assets` 清单说明。",
-        stub_note="视觉资源清单与文件（待架构/实现）",
-    )
-    return {"visual_assets": body}
-
-
 def config_manager_plan(state: FactoryState) -> dict:
     ctx = build_run_context_from_state(state)
     enabled = resolve_design_track_enabled(state)
@@ -308,18 +234,6 @@ def config_manager_plan(state: FactoryState) -> dict:
     }
 
 
-@skip_if_disabled("finance_budget_rough")
-def finance_budget_rough(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role
-
-    body = invoke_role(
-        role_name="finance",
-        user_prompt=_ref(state, "requirement_spec", "需求说明", "finance") + "请产出 `budget_plan` 粗估正文。",
-        stub_note="预算粗估（需求确认前）",
-    )
-    return {"budget_plan": body, "budget_phase": "rough"}
-
-
 @skip_if_disabled("project_manager_scope")
 def project_manager_scope(state: FactoryState) -> dict:
     existing = (state.get("requirement_spec") or "").rstrip()
@@ -331,78 +245,6 @@ def project_manager_scope(state: FactoryState) -> dict:
     )["requirement_spec"]
     body = f"{existing}\n\n---\n\n{note}" if existing else note
     return {"requirement_spec": body}
-
-
-@skip_if_disabled("architect")
-def architect(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role
-
-    arch = invoke_role(
-        role_name="architect",
-        user_prompt=_ref(state, "requirement_spec", "需求说明", "architect") + "请产出 `architecture_design` 正文。",
-        stub_note="架构设计",
-    )
-    plan = invoke_role(
-        role_name="architect",
-        user_prompt=(
-            _ref(state, "architecture_design", "架构设计", "architect", value=arch)
-            + "请产出 `task_plan` 正文（任务拆分与依赖）。"
-        ),
-        stub_note="任务计划",
-    )
-    return {"architecture_design": arch, "task_plan": plan}
-
-
-@skip_if_disabled("finance_budget_final")
-def finance_budget_final(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role
-
-    body = invoke_role(
-        role_name="finance",
-        user_prompt=_ref(state, "architecture_design", "架构设计", "finance") + "请产出 `budget_plan` 正式版正文。",
-        stub_note="预算正式版（架构评审关卡）",
-    )
-    return {"budget_plan": body, "budget_phase": "final"}
-
-
-@skip_if_disabled("developer")
-def developer(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role
-    from geni_studio.hitl.attachments import prompt_section
-
-    retries = state.get("dev_retry_count", 0)
-    task = state.get("task_plan") or ""
-    worktree = state.get("workspace_path") or ""
-    request = state.get("human_request") or ""
-    scope = ""
-    if worktree:
-        scope = f"只能修改这个工作树中的文件：{worktree}\n不要修改工作树以外的路径，也不要合并到其他分支。\n"
-    from geni_studio.verification.verdict import (
-        CHANGE_REQUEST_INSTRUCTION,
-        parse_change_request,
-    )
-
-    attached = prompt_section(state.get("attachments"))
-    feedback = state.get("return_feedback") or ""
-    body = invoke_role(
-        role_name="developer",
-        user_prompt=(
-            f"{scope}"
-            f"人类要求：\n{request}\n\n"
-            + (f"{attached}\n\n" if attached else "")
-            + _ref(state, "architecture_design", "架构设计", "developer")
-            + (_ref(state, "task_plan", "任务计划", "developer") or f"任务计划：\n{task}\n\n")
-            + (f"## 需要修复的问题\n上一轮未通过，原因如下，请逐条修复：\n{feedback}\n\n" if feedback else "")
-            + f"{CHANGE_REQUEST_INSTRUCTION}\n\n"
-            f"请产出本轮 `code_change` 说明（attempt={retries + 1}）。"
-        ),
-        stub_note=f"代码变更 attempt={retries + 1}",
-    )
-    update: dict = {"code_change": body, "dev_retry_count": retries + 1, "return_feedback": ""}
-    impact, raw = parse_change_request(body)
-    if raw:
-        update["change_request"] = f"IMPACT: {impact}\n{raw}" if impact else raw
-    return update
 
 
 def change_control(state: FactoryState) -> dict:
@@ -417,63 +259,65 @@ def change_control(state: FactoryState) -> dict:
     return {"change_impact": impact, "change_baseline_note": note, "change_request": ""}
 
 
-@skip_if_disabled("code_reviewer")
-def code_reviewer(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role, role_is_simulated
-    from geni_studio.verification.verdict import (
-        VERDICT_INSTRUCTION,
-        judge,
-        with_verdict,
-    )
+# --- 活动的内置后处理 ---
+# 活动的提示词由 workflows/executable.py 按通用活动拼装（输入产物、返工反馈、所选 Skill）。
+# 流程文件以 effect 引用下面的条目，在 Agent 返回后做判定并写入流程状态。
+
+
+class Effect(NamedTuple):
+    # 拆分产物后的更新 -> 最终更新
+    finish: Callable[[FactoryState, dict], dict]
+    # 追加到提示词的段落
+    prompt: Callable[[FactoryState], list[str]] | None = None
+    # 返回更新时不调用 Agent
+    precheck: Callable[[FactoryState], dict | None] | None = None
+    # 提示词要求附上结论块
+    verdict: bool = False
+
+
+def _developer_prompt(state: FactoryState) -> list[str]:
+    attempt = int(state.get("dev_retry_count") or 0) + 1
+    parts: list[str] = []
+    worktree = state.get("workspace_path") or ""
+    if worktree:
+        parts.append(f"只能修改这个工作树中的文件：{worktree}\n不要修改工作树以外的路径，也不要合并到其他分支。")
+    parts.append(f"这是本轮第 {attempt} 次开发（attempt={attempt}）。")
+    return parts
+
+
+def _developer_finish(state: FactoryState, update: dict) -> dict:
+    from geni_studio.verification.verdict import parse_change_request
+
+    update.pop("change_request", None)
+    impact, raw = parse_change_request(str(update.get("code_change") or ""))
+    if raw:
+        update["change_request"] = f"IMPACT: {impact}\n{raw}" if impact else raw
+    update["dev_retry_count"] = int(state.get("dev_retry_count") or 0) + 1
+    update["return_feedback"] = ""
+    return update
+
+
+def _review_finish(state: FactoryState, update: dict) -> dict:
+    from geni_studio.backends.runner import role_is_simulated
+    from geni_studio.verification.verdict import judge, with_verdict
 
     preset: ReviewStatus = state.get("review_status") or "pass"
-    change = state.get("code_change") or ""
-    body = invoke_role(
-        role_name="code_reviewer",
-        user_prompt=(
-            _ref(state, "architecture_design", "架构设计", "code_reviewer")
-            + _ref(state, "task_plan", "任务计划", "code_reviewer")
-            + (_ref(state, "code_change", "代码变更说明", "code_reviewer") or f"代码变更说明：\n{change}\n\n")
-            + "请产出 `review_report`。\n\n"
-            f"{VERDICT_INSTRUCTION}"
-        ),
-        stub_note=f"评审结论 status={preset}",
-    )
+    body = str(update.get("review_report") or "")
     verdict = judge(body, simulated=role_is_simulated("code_reviewer"), preset=preset)
     report = with_verdict(body, verdict)
-    update = {"review_report": report, "review_status": verdict.status}
+    update.update({"review_report": report, "review_status": verdict.status})
     if not verdict.passed:
         update["return_feedback"] = f"代码评审未通过：\n{report}"
     return update
 
 
-@skip_if_disabled("tester_execute")
-def tester_execute(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role, role_is_simulated
+def _test_finish(state: FactoryState, update: dict) -> dict:
+    from geni_studio.backends.runner import role_is_simulated
     from geni_studio.verification.command import verified_report
-    from geni_studio.verification.verdict import (
-        VERDICT_INSTRUCTION,
-        Verdict,
-        judge,
-        with_verdict,
-    )
+    from geni_studio.verification.verdict import Verdict, judge, with_verdict
 
     preset: TestStatus = state.get("test_status") or "pass"
-    cases = invoke_role(
-        role_name="tester",
-        user_prompt=_ref(state, "requirement_spec", "需求说明", "tester") + "请产出 `test_cases` 正文。",
-        stub_note="测试用例",
-    )
-    report = invoke_role(
-        role_name="tester",
-        user_prompt=(
-            _ref(state, "test_cases", "测试用例", "tester", value=cases)
-            + _ref(state, "code_change", "代码变更说明", "tester")
-            + "请产出 `test_report`。若执行了测试命令，须引用命令输出中的 AC-*。\n\n"
-            f"{VERDICT_INSTRUCTION}"
-        ),
-        stub_note=f"测试报告 status={preset}",
-    )
+    report = str(update.get("test_report") or "")
     claimed = judge(report, simulated=role_is_simulated("tester"), preset=preset)
     report, status = verified_report(
         state, report, claimed.status, claim_binding=claimed.source in {"block", "legacy", "invalid"}
@@ -483,44 +327,27 @@ def tester_execute(state: FactoryState) -> dict:
         error = claimed.error or "验证命令未通过或缺少机器验证证据。"
     final = Verdict(status, ac=claimed.ac, summary=claimed.summary, source=claimed.source, error=error)  # type: ignore[arg-type]
     report = with_verdict(report, final)
-    update = {"test_cases": cases, "test_report": report, "test_status": status}
+    update.update({"test_report": report, "test_status": status})
     if status == "fail":
         update["return_feedback"] = f"测试未通过：\n{report}"
     return update
 
 
-@skip_if_disabled("qa")
-def qa(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role, role_is_simulated
+def _qa_finish(state: FactoryState, update: dict) -> dict:
+    from geni_studio.backends.runner import role_is_simulated
     from geni_studio.verification.acceptance import (
         acceptance_matrix,
         acceptance_sources,
     )
-    from geni_studio.verification.verdict import (
-        VERDICT_INSTRUCTION,
-        Verdict,
-        judge,
-        with_verdict,
-    )
+    from geni_studio.verification.verdict import Verdict, judge, with_verdict
 
     preset: QaStatus = state.get("qa_status") or "pass"
-    spec = state.get("requirement_spec") or ""
+    body = str(update.get("qa_report") or "")
     report_in = state.get("test_report") or ""
-    body = invoke_role(
-        role_name="qa",
-        user_prompt=(
-            (_ref(state, "requirement_spec", "需求说明", "qa") or "需求说明：\n\n\n")
-            + (_ref(state, "test_report", "测试报告", "qa") or "测试报告：\n\n\n")
-            + "请产出 `qa_report`。若需求含 AC-*，须逐条引用测试证据，"
-            "并在结论块的 ac 中逐条给出 pass / fail / untested。\n\n"
-            f"{VERDICT_INSTRUCTION}"
-        ),
-        stub_note=f"QA 报告 status={preset}",
-    )
     simulated = role_is_simulated("qa")
     verdict = judge(body, simulated=simulated, preset=preset)
     sources = acceptance_sources(
-        requirement_spec=spec,
+        requirement_spec=state.get("requirement_spec") or "",
         verdicts=[verdict],
         test_report=report_in,
         simulated_evidence=f"{report_in}\n{body}" if simulated else None,
@@ -534,94 +361,45 @@ def qa(state: FactoryState) -> dict:
         status, error = "fail", error or "测试未通过。"
     final = Verdict(status, ac=verdict.ac, summary=verdict.summary, source=verdict.source, error=error)
     report = with_verdict(f"{body}\n\n{acceptance_matrix(sources)}", final)
-    update = {"qa_report": report, "qa_status": status}
+    update.update({"qa_report": report, "qa_status": status})
     if status == "fail":
         update["return_feedback"] = f"QA 未通过：\n{report}"
     return update
 
 
-@skip_if_disabled("finance_cost_snapshot")
-def finance_cost_snapshot(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role
-
-    body = invoke_role(
-        role_name="finance",
-        user_prompt=(
-            "请根据本轮产物产出 `cost_report` 成本快照（交付前）。\n\n"
-            + _ref(state, "qa_report", "qa_report", "finance")
-        ),
-        stub_note="成本快照（交付前）",
-    )
-    return {"cost_report": body, "budget_phase": "snapshot"}
-
-
-@skip_if_disabled("project_manager_delivery")
-def project_manager_delivery(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role, role_is_simulated
+def _delivery_precheck(state: FactoryState) -> dict | None:
+    from geni_studio.backends.runner import role_is_simulated
     from geni_studio.verification.acceptance import acceptance_sources
     from geni_studio.verification.verdict import parse_verdict
 
-    spec = state.get("requirement_spec") or ""
     test_report = state.get("test_report") or ""
     qa_report = state.get("qa_report") or ""
     sources = acceptance_sources(
-        requirement_spec=spec,
+        requirement_spec=state.get("requirement_spec") or "",
         verdicts=[parse_verdict(qa_report)],
         test_report=test_report,
         simulated_evidence=f"{test_report}\n{qa_report}" if role_is_simulated("qa") else None,
     )
     missing = [ac for ac, source in sources.items() if not source]
-    ready = not missing and state.get("qa_status") != "fail"
-    if not ready:
-        gap = "、".join(missing) if missing else "QA 未通过"
-        return {
-            "delivery_report": f"未形成可交付结论：{gap}。无验收证据不视为交付。",
-            "delivery_ready": False,
-        }
-    body = invoke_role(
-        role_name="project_manager",
-        user_prompt=(
-            "请产出 `delivery_report` 交付报告正文（待最终交付关卡）。\n\n"
-            + _ref(state, "test_report", "测试报告", "project_manager")
-            + _ref(state, "qa_report", "QA 报告", "project_manager")
-        ),
-        stub_note="交付报告（待最终交付关卡）",
-    )
-    return {"delivery_report": body, "delivery_ready": True}
+    if not missing and state.get("qa_status") != "fail":
+        return None
+    gap = "、".join(missing) if missing else "QA 未通过"
+    return {
+        "delivery_report": f"未形成可交付结论：{gap}。无验收证据不视为交付。",
+        "delivery_ready": False,
+    }
 
 
-@skip_if_disabled("config_manager_closeout")
-def config_manager_closeout(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role
-
-    baseline = invoke_role(
-        role_name="config_manager",
-        user_prompt=(
-            "请产出 `config_baseline` 交付基线说明。\n"
-            f"baseline_log：{state.get('baseline_log') or ''}"
-        ),
-        stub_note="交付基线",
-    )
-    retro = invoke_role(
-        role_name="config_manager",
-        user_prompt="请产出 `config_retro` 模板与配置复盘正文。",
-        stub_note="模板与配置复盘",
-    )
-    return {"config_baseline": baseline, "config_retro": retro}
+def _delivery_finish(state: FactoryState, update: dict) -> dict:
+    update["delivery_ready"] = True
+    return update
 
 
-@skip_if_disabled("process_owner_retro")
-def process_owner_retro(state: FactoryState) -> dict:
-    from geni_studio.backends.runner import invoke_role
-
-    proposals = invoke_role(
-        role_name="process_owner",
-        user_prompt="请产出 `process_proposals` 流程与角色改进提案。",
-        stub_note="流程与角色改进提案",
-    )
+def _retro_finish(state: FactoryState, update: dict) -> dict:
     from geni_studio.backends.cost import take_cost_lines
     from geni_studio.verification.retro import scorecard
 
+    proposals = str(update.get("process_proposals") or "")
     audit = str(state.get("hitl_audit_log") or state.get("run_record") or "").strip()
     run_record = audit or "[engine] 本轮无 HITL 审计条目"
     prior_costs = str(state.get("cost_ledger") or "").strip()
@@ -637,12 +415,46 @@ def process_owner_retro(state: FactoryState) -> dict:
     pending = "提案状态：pending。未经批准不得修改角色定义或流程。"
     if proposal_id:
         pending = f"{pending}\n提案编号：{proposal_id}"
-    return {
-        "retro_report": card,
-        "process_proposals": proposals + "\n\n" + pending,
-        "run_record": run_record,
-        "cost_ledger": costs,
-    }
+    update.update(
+        {
+            "retro_report": card,
+            "process_proposals": proposals + "\n\n" + pending,
+            "run_record": run_record,
+            "cost_ledger": costs,
+        }
+    )
+    return update
+
+
+def _budget_phase(phase: str) -> Callable[[FactoryState, dict], dict]:
+    def finish(state: FactoryState, update: dict) -> dict:
+        update["budget_phase"] = phase
+        return update
+
+    return finish
+
+
+EFFECTS: dict[str, Effect] = {
+    "developer": Effect(_developer_finish, prompt=_developer_prompt),
+    "code_review": Effect(_review_finish, verdict=True),
+    "test_execute": Effect(_test_finish, verdict=True),
+    "qa_gate": Effect(_qa_finish, verdict=True),
+    "delivery": Effect(_delivery_finish, precheck=_delivery_precheck),
+    "retro": Effect(_retro_finish),
+    "budget_rough": Effect(_budget_phase("rough")),
+    "budget_final": Effect(_budget_phase("final")),
+    "cost_snapshot": Effect(_budget_phase("snapshot")),
+}
+
+
+def run_builtin_node(node_id: str, state: FactoryState) -> dict:
+    """按内置流程中的定义单独执行一个节点，供调试与测试使用。"""
+    from geni_studio.workflows.executable import step_callable
+
+    for node in builtin_definition()["nodes"]:
+        if node.get("id") == node_id:
+            return step_callable(node, builtin=True)(state)
+    raise KeyError(node_id)
 
 
 def escalate_dev_retry(state: FactoryState) -> dict:

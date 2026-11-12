@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from geni_studio.backends.run_processes import live_processes
 from geni_studio.config.context import ConfigError, build_run_context
 from geni_studio.config.env_loader import bootstrap_env
 from geni_studio.hitl.rail import build_rail
@@ -48,11 +49,14 @@ def run_service() -> GraphRunService:
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
+    from geni_studio.backends import lifecycle
     from geni_studio.hitl.feishu_bridge import start_background
     from geni_studio.runtime.executor import executor_mode
 
+    lifecycle.forget_parent_run()
     bootstrap_env()
     service = run_service()
+    lifecycle.reap_leftovers(service.phase_of)
     executor = service.executor() if executor_mode() == "thread" else None
     if executor is not None:
         executor.start()
@@ -62,6 +66,7 @@ async def _lifespan(_app: FastAPI):
     finally:
         if executor is not None:
             executor.stop()
+        lifecycle.close_all()
 
 
 app = FastAPI(title="GeniStudio", version="0.1.0", lifespan=_lifespan)
@@ -86,7 +91,6 @@ def _with_feishu(payload: dict, thread_id: str) -> dict:
 
 class NodeToolChoice(BaseModel):
     skills: list[str] = Field(default_factory=list)
-    mcp: list[str] = Field(default_factory=list)
 
 
 class AttachmentRef(BaseModel):
@@ -105,6 +109,8 @@ class StartRunBody(BaseModel):
     attachments: list[AttachmentRef] = Field(default_factory=list)
     role_models: dict[str, str] = Field(default_factory=dict)
     role_reasoning_efforts: dict[str, str] = Field(default_factory=dict)
+    role_fast_modes: dict[str, str] = Field(default_factory=dict)
+    role_model_params: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 class DeleteRunBody(BaseModel):
@@ -213,6 +219,8 @@ class SaveRunDraftBody(BaseModel):
     attachments: list[AttachmentRef] = Field(default_factory=list)
     role_models: dict[str, str] = Field(default_factory=dict)
     role_reasoning_efforts: dict[str, str] = Field(default_factory=dict)
+    role_fast_modes: dict[str, str] = Field(default_factory=dict)
+    role_model_params: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 @app.get("/api/runs/role-defaults")
@@ -252,6 +260,8 @@ def api_save_run_draft(body: SaveRunDraftBody) -> dict:
             attachments=clean_attachment_ids(body.attachments),
             role_models=_clean_role_models(body.role_models),
             role_reasoning_efforts=body.role_reasoning_efforts,
+            role_fast_modes=body.role_fast_modes,
+            role_model_params=body.role_model_params,
         )
     except HitlError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -338,9 +348,8 @@ def _clean_node_tools(raw: dict[str, NodeToolChoice]) -> dict[str, dict[str, lis
         if not key:
             raise ValueError("节点标识不能空。")
         skills = clean_tool_ids(choice.skills, "Skill")
-        mcp = clean_tool_ids(choice.mcp, "MCP")
-        if skills or mcp:
-            cleaned[key] = {"skills": skills, "mcp": mcp}
+        if skills:
+            cleaned[key] = {"skills": skills}
     return cleaned
 
 
@@ -362,6 +371,8 @@ def api_start_run(body: StartRunBody) -> dict:
             "attachment_ids": attachment_ids,
             "role_models": _clean_role_models(body.role_models),
             "role_reasoning_efforts": body.role_reasoning_efforts,
+            "role_fast_modes": body.role_fast_modes,
+            "role_model_params": body.role_model_params,
         }
         tid, _initial = run_service().enqueue_start(**kwargs)
         fail = run_service().start_failure_message(tid)
@@ -376,6 +387,8 @@ def api_start_run(body: StartRunBody) -> dict:
 class RoleModelsBody(BaseModel):
     role_models: dict[str, str] = Field(default_factory=dict)
     role_reasoning_efforts: dict[str, str] | None = None
+    role_fast_modes: dict[str, str] | None = None
+    role_model_params: dict[str, dict[str, str]] | None = None
 
 
 @app.put("/api/runs/{thread_id}/role-models")
@@ -383,6 +396,7 @@ def api_set_role_models(thread_id: str, body: RoleModelsBody) -> dict:
     try:
         st = run_service().set_role_models(
             thread_id, _clean_role_models(body.role_models), body.role_reasoning_efforts,
+            body.role_fast_modes, body.role_model_params,
         )
     except (HitlError, ValueError, TypeError) as e:
         raise http_error(e) from e
@@ -395,8 +409,7 @@ def api_set_node_tools(thread_id: str, node_id: str, body: NodeToolChoice) -> di
 
     try:
         skills = clean_tool_ids(body.skills, "Skill")
-        mcp = clean_tool_ids(body.mcp, "MCP")
-        st = run_service().set_node_tools(thread_id, node_id, skills=skills, mcp=mcp)
+        st = run_service().set_node_tools(thread_id, node_id, skills=skills)
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except HitlError as e:
@@ -493,9 +506,13 @@ def api_run_conversation(thread_id: str, node_id: str) -> dict:
     except HitlError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     from geni_studio.hitl.conversation import conversation_view, node_role
+    from geni_studio.hitl.decision_log import node_decisions
+    from geni_studio.hitl.presenter import gate_reject_label
 
     workspace = str(values.get("workspace_path") or "")
-    return conversation_view(thread_id, node_role(values, node_id), node=node_id, workspace_path=workspace)
+    view = conversation_view(thread_id, node_role(values, node_id), node=node_id, workspace_path=workspace)
+    decisions = node_decisions(thread_id, node_id, values, reject_label=gate_reject_label(values, node_id))
+    return {**view, "decisions": decisions, "processes": live_processes(thread_id)}
 
 
 def _conversation_event(thread_id: str, data: dict) -> str:
@@ -511,7 +528,7 @@ def _conversation_event(thread_id: str, data: dict) -> str:
     view = conversation_view(thread_id, node_role(values, node), node=node, workspace_path=workspace)
     if not view["turns"]:
         return ""
-    return json.dumps(view, ensure_ascii=False, default=str)
+    return json.dumps({**view, "processes": live_processes(thread_id)}, ensure_ascii=False, default=str)
 
 
 @app.get("/api/runs/{thread_id}")

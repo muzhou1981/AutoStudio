@@ -9,12 +9,13 @@ from geni_studio.config.context import factory_root
 from geni_studio.hitl.service import GraphRunService
 from geni_studio.verification.acceptance import missing_acceptance_ids
 from geni_studio.verification.retro import scorecard
-from geni_studio.workflows.default import graph, qa
+from geni_studio.workflows.default import graph, run_builtin_node
 from geni_studio.workspace.layout import prepare_run_layout
 
 
 def test_missing_acceptance_blocks_qa():
-    out = qa(
+    out = run_builtin_node(
+        "qa",
         {
             "requirement_spec": "AC-1 必须有单测",
             "test_report": "未提及编号",
@@ -232,14 +233,12 @@ def test_unapproved_proposal_does_not_change_role(tmp_path: Path):
 
 def test_retro_writes_pending_proposal_without_editing_role(tmp_path: Path):
     from geni_studio.evolution.proposals import load_proposal
-    from geni_studio.workflows.default import process_owner_retro
-
     worktree = tmp_path / ".geni_studio" / "worktrees" / "run1"
     worktree.mkdir(parents=True)
     role = tmp_path / "roles" / "process_owner" / "role.md"
     role.parent.mkdir(parents=True)
     role.write_text("# 流程负责人\n", encoding="utf-8")
-    out = process_owner_retro({"workspace_path": str(worktree), "dev_retry_count": 0, "qa_status": "pass"})
+    out = run_builtin_node("process_owner_retro", {"workspace_path": str(worktree), "dev_retry_count": 0, "qa_status": "pass"})
     assert "retro-run1" in out["process_proposals"]
     saved = load_proposal(tmp_path, "retro-run1")
     assert saved["status"] == "pending"
@@ -311,9 +310,8 @@ def test_developer_prompt_limits_edits_to_worktree(monkeypatch):
         return "ok"
 
     monkeypatch.setattr("geni_studio.backends.runner.invoke_role", _fake)
-    from geni_studio.workflows.default import developer
-
-    developer(
+    run_builtin_node(
+        "developer",
         {
             "human_request": "只改 README 的一行",
             "workspace_path": "/tmp/factory-worktree",

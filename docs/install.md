@@ -217,7 +217,7 @@ Web 里新建的项目目录与「另存为」流程默认在 `.gitignore` 中�
 
 `CURSOR_API_KEY` 一行应显示为前四个字符加省略号，不应出现完整密钥。模型要用固定值时再写 `GENI_STUDIO_CURSOR_MODEL`；留空表示 Auto。
 
-Cursor 角色的推理强度可在项目 YAML 的 `backends.<角色>.reasoning_effort` 中填写，或在运行页点选活动节点后于右栏为本轮选择。可选级别取自 `Cursor.models.list` 中该模型声明的推理参数，调用时以 `ModelSelection` 参数传给 SDK；Auto 模型不能指定推理强度，所选级别不受该模型支持时拒绝启动。目录中列出的模型可能因账号所在地区不可用，此时调用会返回地区不支持的错误。
+Cursor 角色的推理强度可在项目 YAML 的 `backends.<角色>.reasoning_effort` 中填写，或在运行页点选活动节点后于右栏为本轮选择。可选级别取自 `Cursor.models.list` 中该模型声明的推理参数，调用时以 `ModelSelection` 参数传给 SDK；Auto 模型不能指定推理强度，所选级别不受该模型支持时拒绝启动。同一位置还可为本轮选择 Fast：模型声明了 `fast` 参数时可选开或关，留空沿用模型默认。模型声明了 `context` 参数时还可选上下文长度（如 300K 或 1M）；部分模型并非所有组合都可用（如 GPT-5.5 的 1M 上下文不能开 Fast），页面与调用前均按模型目录列出的变体校验。推理强度、Fast 与上下文按角色和模型记在服务端用户配置中，换模型时恢复该模型上次的取值；文件默认与检查点库同目录（`runs/user_config.json`），可用 `GENI_STUDIO_USER_CONFIG_PATH` 另行指定，也可通过 `GET`/`PUT /api/config/user/role-model-prefs` 读写。目录中列出的模型可能因账号所在地区不可用，此时调用会返回地区不支持的错误。
 
 连通性脚本是 `scripts/smoke_cursor_backend.py`。只有人要求验证 Cursor 连通时才运行，并且不要把它的输出里的凭据转述出来。
 
@@ -263,7 +263,7 @@ verification:
 
 `model` 是各角色可选字段；运行页临时选择优先于项目配置。沙箱只接受 `read-only` 和 `workspace-write`，需要写入的角色不能选择只读。`timeout_seconds` 为 SDK 客户端启动完成后的调用时限，必须是有限正数。验证命令在本轮工作树中执行；真实测试角色缺少验证命令时，工厂不会自动认定测试通过。
 
-推理强度可在「配置 → Agent」选择 Codex 后设置，或在工厂 `.env` 中填写 `GENI_STUDIO_CODEX_REASONING_EFFORT=high`。也可在运行页点选活动节点后，在右栏为该角色选择本轮的推理强度。优先级是本轮角色选择、项目 YAML 中该角色的 `reasoning_effort`、工厂环境配置、Codex 默认；省略项目角色字段表示继承工厂设置，填写 `default`、`auto` 或空字符串表示跳过工厂设置并沿用 Codex 默认。
+推理强度可在「配置 → Agent」选择 Codex 后设置，或在工厂 `.env` 中填写 `GENI_STUDIO_CODEX_REASONING_EFFORT=high`。也可在运行页点选活动节点后，在右栏为该角色选择本轮的推理强度。优先级是本轮角色选择、项目 YAML 中该角色的 `reasoning_effort`、工厂环境配置、Codex 默认；省略项目角色字段表示继承工厂设置，填写 `default`、`auto` 或空字符串表示跳过工厂设置并沿用 Codex 默认。运行页右栏还可为本轮选择 Fast，开时以 `service_tier="fast"` 调用，关时传 `default`，留空沿用 Codex 自身配置。
 
 运行页选择「沿用项目 / 工厂设置」表示不覆盖原配置；选择「沿用 Codex 默认」则跳过项目和工厂推理设置。可用级别随该角色选中的模型刷新；继承的默认模型已明确时，也会直接显示其支持的级别。本轮选择随「保存 Run 配置」、重新打开、复制与 Run 续跑保留，不修改 `.env` 或项目 YAML；已启动 Run 的控件与模型控件一样只读。
 

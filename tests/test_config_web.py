@@ -278,7 +278,11 @@ def test_config_page_and_static():
     client = TestClient(app)
     page = client.get("/config")
     assert page.status_code == 200
-    assert "原文 project.yaml" in page.text
+    assert "原文 project.yaml" not in page.text
+    assert 'id="projectRaw"' not in page.text
+    assert 'id="projectYaml"' not in page.text
+    assert 'id="btnSaveRaw"' not in page.text
+    assert "原文 workflow.yaml" in page.text
     assert "原文 JSON" in page.text
     assert client.get("/static/shared.css").status_code == 200
 
@@ -430,11 +434,24 @@ def test_api_form_save_preserves_remote_url_when_omitted(tmp_path: Path, monkeyp
 
 
 def test_project_page_workspace_follows_description():
-    page = TestClient(app).get("/project").text
+    client = TestClient(app)
+    page = client.get("/project").text
     description = page.index('id="fieldDescription"')
     workspace = page.index('id="fieldWorkspace"')
     assert description < workspace
     assert 'id="fieldRemoteUrl"' not in page
+    assert "原文 project.yaml" not in page
+    assert 'id="projectYaml"' not in page
+    assert 'id="btnSaveRaw"' not in page
+    assert 'aria-label="选择工作区目录"' in page
+    assert 'id="btnClearWorkspace"' in page
+    assert "待开发项目的 git 目录，可空" in page
+    assert "原文 workflow.yaml" in page
+    css = client.get("/static/hitl.css").text
+    row = css.split(".workspace-pick-row {", 1)[1].split("}", 1)[0]
+    assert "align-items: flex-end" in row
+    assert "align-self: flex-end" not in css.split(".workspace-pick-row #btnClearWorkspace {", 1)[1].split("}", 1)[0]
+    assert "markFormDirty" not in client.get("/static/config.js").text
 
 
 def test_project_workspace_overrides_default_root(tmp_path, monkeypatch):

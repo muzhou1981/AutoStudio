@@ -29,6 +29,14 @@ def test_gate_waiting_marks_earlier_done_and_later_pending():
     assert rail["total"] == len(rail["cells"])
 
 
+def test_builtin_cells_tell_activities_from_system_nodes():
+    rail = build_rail(phase="idle", next_nodes=[], awaiting=None, skip_nodes=set())
+    kinds = {cell["id"]: cell["kind"] for cell in rail["cells"]}
+    assert kinds["developer"] == "activity" and kinds["project_manager_draft"] == "activity"
+    assert kinds["config_manager_plan"] == kinds["project_manager_scope"] == kinds["change_control"] == "system"
+    assert kinds["gate_requirement_confirm"] == "" and kinds["run_start"] == ""
+
+
 def test_skip_nodes_are_omitted_and_leave_the_count():
     rail = build_rail(
         phase="awaiting_human",

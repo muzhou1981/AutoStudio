@@ -82,6 +82,97 @@ def test_start_api_and_legacy_role_update(monkeypatch):
     assert invalid.status_code == 400
 
 
+def test_fast_modes_roundtrip_through_draft_start_update_and_copy(tmp_path, monkeypatch):
+    from geni_studio.backends import runner
+    from geni_studio.backends.reasoning import fast_for_role
+
+    monkeypatch.setattr("geni_studio.hitl.drafts.drafts_dir", lambda: tmp_path)
+    service = GraphRunService(compile_graph(checkpointer=MemorySaver()))
+    monkeypatch.setattr("geni_studio.web.app._service", service)
+    client = TestClient(app)
+    draft = client.put("/api/runs/drafts", json={
+        "project_id": "fast-draft", "run_name": "Fast 草稿",
+        "role_fast_modes": {"developer": "ON", "tester": "default"},
+    }).json()
+    assert draft["role_fast_modes"] == {"developer": "on"}
+    assert service.copy_run_template(draft["draft_id"])["role_fast_modes"] == {"developer": "on"}
+    bad = client.put("/api/runs/drafts", json={"project_id": "fast-draft", "role_fast_modes": {"developer": "turbo"}})
+    assert bad.status_code == 400
+
+    original = runner.invoke_role
+    observed = []
+
+    def invoke(**kwargs):
+        observed.append((kwargs["role_name"], fast_for_role(kwargs["role_name"])))
+        return original(**kwargs)
+
+    monkeypatch.setattr(runner, "invoke_role", invoke)
+    response = client.post("/api/runs", json={
+        "human_request": "Fast 回归", "role_fast_modes": {"project_manager": "off"},
+    })
+    assert response.status_code == 200, response.text
+    tid = response.json()["thread_id"]
+    service.advance_until_blocked(tid)
+    assert ("project_manager", "off") in observed
+    url = f"/api/runs/{tid}/role-models"
+    updated = client.put(url, json={"role_models": {}, "role_fast_modes": {"architect": "on"}})
+    assert updated.json()["values"]["role_fast_modes"] == {"architect": "on"}
+    kept = client.put(url, json={"role_models": {"developer": "gpt-test"}})
+    assert kept.json()["values"]["role_fast_modes"] == {"architect": "on"}
+    assert service.copy_run_template(tid)["role_fast_modes"] == {"architect": "on"}
+
+
+def test_model_params_roundtrip_through_draft_start_update_and_copy(tmp_path, monkeypatch):
+    from geni_studio.backends import runner
+    from geni_studio.backends.reasoning import model_params_for_role
+
+    monkeypatch.setattr("geni_studio.hitl.drafts.drafts_dir", lambda: tmp_path)
+    service = GraphRunService(compile_graph(checkpointer=MemorySaver()))
+    monkeypatch.setattr("geni_studio.web.app._service", service)
+    client = TestClient(app)
+    draft = client.put("/api/runs/drafts", json={
+        "project_id": "ctx-draft", "run_name": "上下文草稿",
+        "role_model_params": {"developer": {"context": "1m"}, "tester": {"context": ""}},
+    }).json()
+    assert draft["role_model_params"] == {"developer": {"context": "1m"}}
+    assert service.copy_run_template(draft["draft_id"])["role_model_params"] == {"developer": {"context": "1m"}}
+    bad = client.put("/api/runs/drafts", json={
+        "project_id": "ctx-draft", "role_model_params": {"developer": {"thinking": "true"}},
+    })
+    assert bad.status_code == 400
+
+    original = runner.invoke_role
+    observed = []
+
+    def invoke(**kwargs):
+        observed.append((kwargs["role_name"], model_params_for_role(kwargs["role_name"])))
+        return original(**kwargs)
+
+    monkeypatch.setattr(runner, "invoke_role", invoke)
+    response = client.post("/api/runs", json={
+        "human_request": "上下文回归", "role_model_params": {"project_manager": {"context": "272k"}},
+    })
+    assert response.status_code == 200, response.text
+    tid = response.json()["thread_id"]
+    service.advance_until_blocked(tid)
+    assert ("project_manager", {"context": "272k"}) in observed
+    url = f"/api/runs/{tid}/role-models"
+    updated = client.put(url, json={"role_models": {}, "role_model_params": {"architect": {"context": "1m"}}})
+    assert updated.json()["values"]["role_model_params"] == {"architect": {"context": "1m"}}
+    kept = client.put(url, json={"role_models": {"developer": "gpt-test"}})
+    assert kept.json()["values"]["role_model_params"] == {"architect": {"context": "1m"}}
+    assert service.copy_run_template(tid)["role_model_params"] == {"architect": {"context": "1m"}}
+
+
+def test_codex_fast_tier_reads_service_tiers_and_legacy_speed_tiers():
+    from geni_studio.backends.codex_backend import _fast_tier
+
+    tier = SimpleNamespace(id="priority", name="Fast", description="2x speed")
+    assert _fast_tier(SimpleNamespace(service_tiers=[tier])) == "priority"
+    assert _fast_tier(SimpleNamespace(service_tiers=[], additional_speed_tiers=["fast"])) == "fast"
+    assert _fast_tier(SimpleNamespace(service_tiers=None)) == ""
+
+
 def test_role_defaults_resolve_project_and_frozen_config(monkeypatch):
     service = GraphRunService(compile_graph(checkpointer=MemorySaver()))
     config = {"backends": {

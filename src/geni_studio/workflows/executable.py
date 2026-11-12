@@ -87,14 +87,10 @@ def compile_workflow(workflow: dict[str, Any], *, checkpointer: BaseCheckpointSa
     _validate_parallel(executable)
     by_id = {node["id"]: node for node in nodes}
     builder = StateGraph(FactoryState)
+    builtin = str(workflow.get("rail") or "") == "builtin"
     for step in _iter_steps(executable):
-        if step["kind"] == "activity":
-            fn = _activity(step)
-        elif step["kind"] == "system":
-            fn = _system(step)
-        else:
-            fn = _gate(step)
-        builder.add_node(step["id"], _with_stop_guard(_recorded(str(step["id"]), _when(step, fn))))
+        fn = step_callable(step, builtin=builtin)
+        builder.add_node(step["id"], _with_stop_guard(_recorded(str(step["id"]), fn)))
     for node in executable:
         if node["kind"] != "parallel":
             continue
@@ -123,14 +119,35 @@ def compile_workflow(workflow: dict[str, Any], *, checkpointer: BaseCheckpointSa
     return builder.compile(checkpointer=checkpointer, interrupt_before=gates)
 
 
+def step_callable(step: dict[str, Any], *, builtin: bool = False):
+    """单个步骤的执行函数，含 when 条件；内置流程的活动还受档案中 skip_nodes 裁剪。"""
+    if step["kind"] == "activity":
+        fn = _activity(step)
+        if builtin:
+            from geni_studio.workflows.node_wrap import skip_if_disabled
+
+            fn = skip_if_disabled(str(step["id"]))(fn)
+    elif step["kind"] == "system":
+        fn = _system(step)
+    else:
+        fn = _gate(step)
+    return _when(step, fn)
+
+
 def _validate_parallel(nodes):
     for node in nodes:
         if node.get("kind") != "parallel":
             continue
         for branch in node["branches"]:
             for step in branch["steps"]:
-                if step["kind"] != "activity" or step.get("returns_to"):
-                    raise ConfigError("并行支路暂不支持人工关卡、回退或嵌套并行，请拆为顺序流程")
+                if (
+                    step["kind"] != "activity"
+                    or step.get("returns_to")
+                    or step.get("routes")
+                    or step.get("next")
+                    or step.get("effect")
+                ):
+                    raise ConfigError("并行支路暂不支持人工关卡、回退、条件去向、内置后处理或嵌套并行，请拆为顺序流程")
 
 
 def _fork(node):
@@ -316,7 +333,9 @@ def _activity_contract(node: dict[str, Any], root: Any) -> tuple[list[str], list
             problems.append(f"活动「{name}」的产物名「{primary}」重复。")
         return inputs, [primary], problems
     if "outputs" in node:
-        items = _explicit_outputs(node.get("outputs"))
+        raw_outputs = node.get("outputs")
+        plain = {item.strip() for item in raw_outputs if isinstance(item, str)} if isinstance(raw_outputs, list) else set()
+        items = _explicit_outputs(raw_outputs)
         if not items:
             problems.append(f"活动「{name}」还没有输出。")
         seen_in = set(inputs)
@@ -326,9 +345,11 @@ def _activity_contract(node: dict[str, Any], root: Any) -> tuple[list[str], list
             if output_name in seen_out or output_name in seen_in:
                 problems.append(f"活动「{name}」的产物名「{output_name}」重复。")
             seen_out.add(output_name)
-            problems.extend(_template_problem(name, item))
+            # 只写名称且取自角色契约的产物，与不写 outputs 时一样不要求模板。
+            if not (output_name in plain and output_name in defaults_out):
+                problems.extend(_template_problem(name, item))
         outputs = [item["name"] for item in items]
-        node["output_specs"] = items
+        node["output_specs"] = [item for item in items if item.get("template")]
     else:
         outputs = list(defaults_out)
     return inputs, outputs, problems
@@ -351,6 +372,15 @@ def _activity(node: dict[str, Any]):
 
     fn.__name__ = f"activity_{node['id']}"
     return fn
+
+
+def _effect(node: dict[str, Any]):
+    name = str(node.get("effect") or "")
+    if not name:
+        return None
+    from geni_studio.workflows.system_nodes import effect
+
+    return effect(name)
 
 
 def _activity_run(node: dict[str, Any]):
@@ -377,12 +407,19 @@ def _activity_run(node: dict[str, Any]):
             )
             return _activity_update(node, state, outputs, body)
 
+        effect = _effect(node)
+        if effect is not None and effect.precheck is not None:
+            early = effect.precheck(state)
+            if early is not None:
+                return early
         sections = [f"活动：{node['name']}"]
         if node.get("on_current_branch"):
             sections.append(
                 "这一步直接修改目标仓库当前检出的分支，不另建工作树。"
                 "不要执行 git commit 或 git push。提交留到人类确认入库之后，由程序员完成。"
             )
+        if effect is not None and effect.prompt is not None:
+            sections.extend(effect.prompt(state))
         request = str(state.get("human_request") or "")
         if request and "human_request" not in inputs:
             sections.append(f"人类原始需求：\n{request}")
@@ -400,7 +437,11 @@ def _activity_run(node: dict[str, Any]):
             sections.append(artifacts.reference(state, key, key, role=str(node["role"]), value=value) or f"{key}：\n")
         for spec in node.get("output_specs") or []:
             sections.append(_template_section(spec))
-        if node.get("returns_to"):
+        sections.extend(_output_section(node, outputs))
+        instruction = str(node.get("instruction") or "")
+        if instruction:
+            sections.append(instruction)
+        if node.get("returns_to") or (effect is not None and effect.verdict):
             from geni_studio.verification.verdict import VERDICT_INSTRUCTION
 
             sections.append(VERDICT_INSTRUCTION)
@@ -416,6 +457,13 @@ def _activity_run(node: dict[str, Any]):
             user_prompt="\n\n".join(sections),
             stub_note=str(node["name"]),
         )
+        if effect is not None:
+            from geni_studio.verification.verdict import split_outputs
+
+            update: dict[str, Any] = {}
+            for key, value in split_outputs(body, outputs, optional=_OPTIONAL_OUTPUTS).items():
+                artifacts.put(update, key, value)
+            return effect.finish(state, update)
         verdict = None
         if node.get("returns_to") or (node["role"] == "tester" and "test_report" in outputs):
             from geni_studio.backends.runner import role_is_simulated
@@ -495,6 +543,19 @@ def _activity_update(
     return update
 
 
+def _output_section(node: dict[str, Any], outputs: list[str]) -> list[str]:
+    """写明要产出哪些产物；没有模板的产物只有在这里被点名。"""
+    required = [key for key in outputs if key not in _OPTIONAL_OUTPUTS]
+    templated = {str(spec.get("name") or "") for spec in node.get("output_specs") or []}
+    plain = [key for key in required if key not in templated]
+    parts: list[str] = []
+    if plain:
+        parts.append("请产出：" + "、".join(f"`{key}`" for key in plain) + "。")
+    if len(required) > 1:
+        parts.append(f"每个产物写在以产物名为标题的二级标题下，例如 `## {required[-1]}`。")
+    return parts
+
+
 def _chosen_tools(state: FactoryState, node_id: str) -> dict[str, Any]:
     raw = state.get("node_tools") or {}
     if not isinstance(raw, dict):
@@ -505,15 +566,9 @@ def _chosen_tools(state: FactoryState, node_id: str) -> dict[str, Any]:
 
 def _tool_section(chosen: dict[str, Any]) -> str:
     skills = [str(item) for item in chosen.get("skills") or [] if str(item).strip()]
-    mcp = [str(item) for item in chosen.get("mcp") or [] if str(item).strip()]
-    if not skills and not mcp:
+    if not skills:
         return ""
-    lines = ["这一步只使用下面列出的 Skill 和 MCP。"]
-    if skills:
-        lines.append("Skill：" + "、".join(_display_tool(item) for item in skills))
-    if mcp:
-        lines.append("MCP：" + "、".join(_display_tool(item) for item in mcp))
-    return "\n".join(lines)
+    return "这一步优先使用下面的 Skill：" + "、".join(_display_tool(item) for item in skills)
 
 
 def _display_tool(token: str) -> str:
@@ -807,7 +862,7 @@ def _link_steps(builder, steps, tail, nodes, by_id, executable) -> None:
 
 
 def _link_one(builder, node, nxt, nodes, by_id, executable) -> None:
-    if node["kind"] == "system":
+    if node["kind"] == "system" or node.get("routes") or node.get("next"):
         explicit = str(node.get("next") or "")
         if explicit:
             nxt = _node_or_end(explicit, by_id, executable)

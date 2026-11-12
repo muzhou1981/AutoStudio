@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from typing import TYPE_CHECKING
@@ -29,7 +30,7 @@ def ensure_lowercase_proxy() -> None:
 
 
 class CursorBackend:
-    """同一（Run、节点、角色、工作目录、模型、角色定义）复用一个 Cursor Agent。
+    """同一（Run、角色、工作目录、模型、角色定义）复用一个 Cursor Agent，跨节点延续上下文。
 
     Agent 标识落盘到运行目录 `cursor-sessions/`，进程重启或新实例可用 `resume_agent` 续接；
     角色定义只在 Agent 的首条消息中发送一次。
@@ -47,8 +48,13 @@ class CursorBackend:
         self._api_key = api_key
         self._client = _default_client()
         self._agents: dict[str, object] = {}
+        self._agent_run: dict[str, str] = {}
+        # 每一轮一个桥接进程，环境里带本轮标识，这一轮派生的进程结束时可按标识回收。
+        self._bridges: dict[str, tuple[object, object]] = {}
         self._role_sent: set[str] = set()
         self._lock = threading.Lock()
+        # 只读并行支路共用工作目录，同一角色会落到同一 Agent，发送须串行。
+        self._send_locks: dict[str, threading.Lock] = {}
         # 未指定默认模型时使用 SDK 的 Auto 路由（模型 ID 为 default）。
         from geni_studio.backends.base import factory_default_model
 
@@ -59,11 +65,13 @@ class CursorBackend:
 
         return current_worktree() or os.fspath(factory_root())
 
-    def _agent_for_role(self, role_name: str, model: str, system_prompt: str = "", effort: str = ""):
+    def _agent_for_role(
+        self, role_name: str, model: str, system_prompt: str = "", effort: str = "", fast: str = "",
+        extra: dict[str, str] | None = None,
+    ):
         from cursor_sdk.types import AgentOptions, LocalAgentOptions
 
         from geni_studio.backends.session import (
-            current_node_id,
             load_session,
             save_session,
             session_digest,
@@ -74,38 +82,79 @@ class CursorBackend:
 
         cwd = self._cwd()
         run_id = current_thread_id() or ""
-        identity = [run_id, current_node_id(), role_name, cwd, model, system_prompt.strip()]
+        identity = [run_id, role_name, cwd, model, system_prompt.strip()]
         if effort:
             # 显式强度不同的调用不共用 Agent；未设置时兼容已有会话键。
             identity.append(effort)
+        if fast:
+            identity.append(f"fast={fast}")
+        if extra:
+            identity.append(_params_text(extra).strip())
         key = session_digest(identity)
         with self._lock:
             agent = self._agents.get(key)
         if agent is not None:
             return key, agent
-        # tools 保持 SDK 默认，以便复用 Cursor 已有的 MCP、规则与 Skill。
+        # SDK 默认只加载内联 MCP；显式加载项目与用户层的 .cursor 配置（mcp.json、规则、Skill）。
         # 工作目录指向目标项目工作树，而不是工厂仓库。
         opts = AgentOptions(
             name=f"GeniStudio:{role_name}",
-            local=LocalAgentOptions(cwd=cwd),
-            model=_model_selection(model, effort),
+            local=LocalAgentOptions(cwd=cwd, setting_sources=SETTING_SOURCES),
+            model=_model_selection(model, effort, fast, extra),
         )
         path = session_path("cursor-sessions", run_id, cwd, key) if run_id else None
+        client = self._client_for(run_id)
         with session_lock(path):
             saved = load_session(path)
             agent_id = str(saved.get("agent_id") or "")
             if agent_id:
                 # 恢复失败必须报错，不静默丢弃历史另开 Agent。
-                agent = self._client.resume_agent(agent_id, opts)
+                agent = client.resume_agent(agent_id, opts)
                 if saved.get("role_sent"):
                     self._mark_role_sent(key)
             else:
-                agent = self._client.create_agent(opts, api_key=self._api_key)
+                agent = client.create_agent(opts, api_key=self._api_key)
                 if path is not None:
                     save_session(path, {"agent_id": str(getattr(agent, "agent_id", "") or ""), "role_sent": False})
         with self._lock:
             self._agents[key] = agent
+            self._agent_run[key] = run_id
         return key, agent
+
+    def _client_for(self, run_id: str):
+        if not run_id:
+            return self._client
+        with self._lock:
+            pair = self._bridges.get(run_id)
+            if pair is None:
+                pair = _launch_run_bridge(run_id)
+                if pair is None:
+                    return self._client
+                self._bridges[run_id] = pair
+            return pair[1]
+
+    def release_run(self, run_id: str) -> None:
+        """关闭这一轮的 Agent 与桥接进程。会话标识仍在磁盘上，之后可以续接。"""
+        with self._lock:
+            keys = [key for key, owner in self._agent_run.items() if owner == run_id]
+            agents = [self._agents.pop(key, None) for key in keys]
+            for key in keys:
+                self._agent_run.pop(key, None)
+                self._role_sent.discard(key)
+                self._send_locks.pop(key, None)
+            pair = self._bridges.pop(run_id, None)
+        for agent in agents:
+            _quietly(getattr(agent, "close", None))
+        if pair is not None:
+            bridge, client = pair
+            _quietly(getattr(client, "close", None))
+            _quietly(getattr(bridge, "close", None))
+
+    def close_all(self) -> None:
+        with self._lock:
+            runs = list(self._bridges)
+        for run_id in runs:
+            self.release_run(run_id)
 
     def _mark_role_sent(self, key: str) -> None:
         from geni_studio.backends.session import (
@@ -140,13 +189,32 @@ class CursorBackend:
         user_prompt: str,
         model: str | None = None,
     ) -> str:
+        from geni_studio.backends.reasoning import fast_for_role, model_params_for_role
         from geni_studio.backends.runner import effort_for_role
-        from geni_studio.hitl.control import current_thread_id
-        from geni_studio.hitl.conversation import append_step, begin_turn, finish_turn
-        from geni_studio.workspace.context import current_worktree
 
         effort = effort_for_role(role_name)
-        key, agent = self._agent_for_role(role_name, model or self._model, system_prompt, effort)
+        fast = fast_for_role(role_name)
+        extra = model_params_for_role(role_name)
+        key, agent = self._agent_for_role(role_name, model or self._model, system_prompt, effort, fast, extra)
+        with self._lock:
+            send_lock = self._send_locks.setdefault(key, threading.Lock())
+        with send_lock:
+            return self._send(key, agent, role_name, system_prompt, user_prompt, model, effort, fast, extra)
+
+    def _send(
+        self, key: str, agent: object, role_name: str, system_prompt: str,
+        user_prompt: str, model: str | None, effort: str, fast: str = "",
+        extra: dict[str, str] | None = None,
+    ) -> str:
+        from geni_studio.hitl.control import current_thread_id
+        from geni_studio.hitl.conversation import (
+            append_step,
+            begin_turn,
+            finish_turn,
+            task_started_step,
+        )
+        from geni_studio.workspace.context import current_worktree
+
         prompt = self._message(key, system_prompt, user_prompt)
         thread_id = current_thread_id()
         turn_path = None
@@ -164,9 +232,16 @@ class CursorBackend:
             if turn_path is not None:
                 append_step(turn_path, step)
 
+        def on_delta(update: object) -> None:
+            if turn_path is None or getattr(update, "type", "") != "tool-call-started":
+                return
+            call = getattr(update, "tool_call", None)
+            if isinstance(call, dict) and call.get("type") == "task":
+                append_step(turn_path, task_started_step(call))
+
         from cursor_sdk.types import SendOptions
 
-        run = agent.send(prompt, SendOptions(on_step=on_step))  # type: ignore[attr-defined]
+        run = agent.send(prompt, SendOptions(on_step=on_step, on_delta=on_delta))  # type: ignore[attr-defined]
         from geni_studio.hitl.control import (
             RunStopped,
             current_thread_id,
@@ -194,7 +269,10 @@ class CursorBackend:
         from geni_studio.backends.cost import note_cost
 
         usage = getattr(getattr(run, "_terminal_result", None), "usage", None)
-        chosen = (model or self._model) + (f" effort={effort}" if effort else "")
+        chosen = (
+            (model or self._model) + (f" effort={effort}" if effort else "") + (f" fast={fast}" if fast else "")
+            + _params_text(extra or {})
+        )
         if usage is None:
             note_cost(f"role={role_name} backend=cursor model={chosen} usage=unknown")
         else:
@@ -207,18 +285,49 @@ class CursorBackend:
         return text
 
 
-def _model_selection(model: str, effort: str):
-    """未设推理强度时只传模型 ID；设置时按该模型的参数名组装 ModelSelection。"""
-    if not effort:
+log = logging.getLogger(__name__)
+
+SETTING_SOURCES = ("project", "user")
+
+
+def _launch_run_bridge(run_id: str) -> tuple[object, object] | None:
+    from cursor_sdk._bridge import Bridge
+    from cursor_sdk._client import Client
+    from cursor_sdk._vendor import resolve_bridge_path
+
+    from geni_studio.backends.run_processes import bridge_command
+
+    bridge = Bridge.launch(bridge_command(run_id, resolve_bridge_path()), workspace=os.getcwd())
+    return bridge, Client(bridge.endpoint, allow_api_key_env_fallback=True)
+
+
+def _quietly(close) -> None:
+    if not callable(close):
+        return
+    try:
+        close()
+    except Exception:
+        log.debug("回收时关闭失败，桥接可能已退出", exc_info=True)
+
+
+def _model_selection(model: str, effort: str, fast: str = "", extra: dict[str, str] | None = None):
+    """未设任何模型参数时只传模型 ID；设置时按该模型的参数名组装 ModelSelection。"""
+    extra = extra or {}
+    if not effort and not fast and not extra:
         return model
     if model.strip().lower() in {"", "default", "auto"}:
-        raise ValueError("Cursor 的 Auto 模型由服务端自动选择，不能指定推理强度；请先为该角色选择具体模型。")
+        what = "推理强度" if effort else "Fast 模式" if fast else "上下文长度等模型参数"
+        raise ValueError(f"Cursor 的 Auto 模型由服务端自动选择，不能指定{what}；请先为该角色选择具体模型。")
     from cursor_sdk.types import ModelParameterValue, ModelSelection
 
-    from geni_studio.backends.models import cursor_effort_param
+    from geni_studio.backends.models import cursor_selection_params
 
-    param = cursor_effort_param(model, effort)
-    return ModelSelection(id=model, params=(ModelParameterValue(id=param, value=effort),))
+    params = cursor_selection_params(model, effort, fast, extra)
+    return ModelSelection(id=model, params=tuple(ModelParameterValue(id=k, value=v) for k, v in params))
+
+
+def _params_text(extra: dict[str, str]) -> str:
+    return "".join(f" {name}={value}" for name, value in sorted(extra.items()))
 
 
 def _cursor_backend_enabled() -> bool:

@@ -57,7 +57,10 @@ def test_factory_default_is_listed_and_locked():
     assert "engine" not in found[0]
     loaded = get_workflow("factory_default")["workflow"]
     assert "engine" not in loaded
-    assert {node["kind"] for node in loaded["nodes"][1:-1]} == {"system", "gate"}
+    assert {node["kind"] for node in loaded["nodes"][1:-1]} == {"activity", "system", "gate"}
+    systems = [node for node in loaded["nodes"] if node["kind"] == "system"]
+    assert all(node["handler"] in {"pm_clarification_check", "hitl_pause", "config_manager_plan",
+                                   "project_manager_scope", "change_control", "escalate_dev_retry"} for node in systems)
     assert loaded["nodes"][0]["kind"] == "start"
     assert loaded["nodes"][-1]["kind"] == "end"
     with pytest.raises(ConfigError, match="先复制"):
