@@ -59,6 +59,7 @@ def begin_turn(
         "agent_id": agent_id,
         "model": model,
         "prompt": prompt,
+        "at": datetime.now(UTC).isoformat(),
     })
     return path
 
@@ -102,8 +103,11 @@ def _compact_task(step: dict[str, Any]) -> dict[str, Any]:
     return {**step, "message": {**message, "result": {**result, "value": compact}}}
 
 
-def finish_turn(path: Path, text: str) -> None:
-    _append(path, {"kind": "result", "text": text})
+def finish_turn(path: Path, text: str, *, usage: dict[str, int] | None = None) -> None:
+    record: dict[str, Any] = {"kind": "result", "text": text, "at": datetime.now(UTC).isoformat()}
+    if usage:
+        record["usage"] = usage
+    _append(path, record)
 
 
 def read_artifact_text(thread_id: str, key: str, *, workspace_path: str = "") -> str:

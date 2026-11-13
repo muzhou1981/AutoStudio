@@ -87,6 +87,77 @@ def test_parallel_branches_run_together(tmp_path: Path, monkeypatch: pytest.Monk
     assert "实现甲" in started.values["code_change"] or started.values["code_change"].startswith("[developer]")
 
 
+_BRANCH_RETURN = (
+    "workflow_id: sample\ntitle: 支路回退\nnodes:\n"
+    "- {id: start, kind: start, name: 启动, role: human, returns_to: ''}\n"
+    "- id: both\n  kind: parallel\n  name: 两路\n  role: ''\n  returns_to: ''\n  branches:\n"
+    "  - id: b1\n    name: 实现甲\n    nodes:\n"
+    "    - {id: a1, kind: activity, name: 甲, role: developer, returns_to: ''}\n"
+    "    - {id: r1, kind: activity, name: 审甲, role: project_manager, returns_to: a1, max_loops: LOOPS}\n"
+    "  - id: b2\n    name: 实现乙\n    nodes:\n"
+    "    - {id: a2, kind: activity, name: 乙, role: developer, returns_to: ''}\n"
+    "- {id: gate, kind: gate, name: 确认, role: human, returns_to: '', decision: approve}\n"
+    "- {id: end, kind: end, name: 结束, role: human, returns_to: ''}\n"
+)
+
+
+def _branch_return_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loops: int, fails: int):
+    _root(tmp_path)
+    _patch(monkeypatch, tmp_path)
+    (tmp_path / "workflows" / "sample").mkdir(parents=True)
+    (tmp_path / "workflows" / "sample" / "workflow.yaml").write_text(
+        _BRANCH_RETURN.replace("LOOPS", str(loops)), encoding="utf-8"
+    )
+    calls: dict[str, list[str]] = {"甲": [], "审甲": [], "乙": []}
+
+    def fake_invoke(*, role_name: str, user_prompt: str, stub_note: str, model: str | None = None) -> str:
+        calls[stub_note].append(user_prompt)
+        if stub_note == "审甲" and len(calls["审甲"]) <= fails:
+            return "接口不一致\nSTATUS: fail"
+        return f"[{stub_note}] 第{len(calls[stub_note])}次"
+
+    monkeypatch.setattr("geni_studio.backends.runner.invoke_role", fake_invoke)
+    svc = GraphRunService(compile_graph(MemorySaver()))
+    return svc, svc.start(human_request="两路", scenario_key="demo", project_id="bound"), calls
+
+
+def test_branch_return_redoes_inside_the_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _svc, st, calls = _branch_return_run(tmp_path, monkeypatch, loops=3, fails=1)
+    assert st.awaiting_human is not None and st.awaiting_human.gate_id == "gate"
+    assert [len(calls[key]) for key in ("甲", "审甲", "乙")] == [2, 2, 1]
+    assert "「实现甲 · 审甲」未通过" in calls["甲"][1] and "需要修复的问题" not in calls["甲"][0]
+    assert "需要修复的问题" not in calls["乙"][0]
+    assert "[甲] 第2次" in st.values["code_change"] and "[乙] 第1次" in st.values["code_change"]
+    assert "__return_feedback__" not in st.values.get("extra_artifacts", {})
+    assert not st.values.get("return_feedback")
+
+
+def test_branch_escalation_continue_redoes_and_joins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    svc, st, calls = _branch_return_run(tmp_path, monkeypatch, loops=1, fails=1)
+    assert st.awaiting_human is not None and st.awaiting_human.kind == "escalation"
+    assert [len(calls[key]) for key in ("甲", "审甲", "乙")] == [1, 1, 1]
+    st = svc.submit_hitl(st.thread_id, escalation_choice="continue")
+    assert [len(calls[key]) for key in ("甲", "审甲", "乙")] == [2, 2, 1]
+    assert "「实现甲 · 审甲」未通过" in calls["甲"][1]
+    assert st.awaiting_human is not None and st.awaiting_human.gate_id == "gate"
+    assert "[甲] 第2次" in st.values["code_change"]
+
+
+def test_branch_return_must_stay_inside_the_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _root(tmp_path)
+    _patch(monkeypatch, tmp_path)
+    (tmp_path / "workflows" / "sample").mkdir(parents=True)
+    text = _BRANCH_RETURN.replace("LOOPS", "2")
+    (tmp_path / "workflows" / "sample" / "workflow.yaml").write_text(text, encoding="utf-8")
+    loaded = get_workflow("sample", root=tmp_path)["workflow"]
+    branch = next(node for node in loaded["nodes"] if node["kind"] == "parallel")["branches"][0]
+    assert branch["nodes"][1]["returns_to"] == "a1" and branch["nodes"][1]["max_loops"] == 2
+    outside = text.replace("returns_to: a1, max_loops: 2", "returns_to: a2, max_loops: 2")
+    (tmp_path / "workflows" / "sample" / "workflow.yaml").write_text(outside, encoding="utf-8")
+    with pytest.raises(ConfigError, match="只能回退到支路「实现甲」里更早的活动"):
+        get_workflow("sample", root=tmp_path)
+
+
 def test_reject_goes_to_the_chosen_node(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _root(tmp_path)
     _patch(monkeypatch, tmp_path)

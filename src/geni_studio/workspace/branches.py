@@ -63,6 +63,19 @@ def add_branch_worktree(repo: Path, thread_id: str, name: str, commit: str) -> P
     return path
 
 
+def branch_changes(branch: Path, base: str) -> tuple[str, list[tuple[str, int, int]]]:
+    """支路相对快照的补丁与逐文件增删行数；二进制文件的行数记为 0。"""
+    head = _tree_commit(branch, base, "geni-studio parallel branch")
+    patch = _git(branch, "diff", "--binary", base, head).stdout
+    stats: list[tuple[str, int, int]] = []
+    for line in _git(branch, "diff", "--numstat", base, head).stdout.splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) == 3:
+            added, removed, name = parts
+            stats.append((name, int(added) if added.isdigit() else 0, int(removed) if removed.isdigit() else 0))
+    return patch, stats
+
+
 def merge_back(worktree: Path, branch: Path, base: str) -> list[str]:
     """把支路相对快照的改动三方合并进本轮工作区；返回冲突文件，失败而无冲突文件时返回错误说明。"""
     head = _tree_commit(branch, base, "geni-studio parallel branch")

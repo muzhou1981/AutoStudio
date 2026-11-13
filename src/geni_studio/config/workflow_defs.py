@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -280,16 +281,158 @@ def save_workflow(workflow_id: str, payload: dict[str, Any], root: Path | None =
     data = validate_workflow(payload, root=root, workflow_id=workflow_id)
     if current.get("subgraph"):
         data["subgraph"] = True
+    try:
+        original = validate_workflow(current, root=root, workflow_id=workflow_id)
+    except ConfigError:
+        original = current
+    else:
+        if current.get("subgraph"):
+            original["subgraph"] = True
+    _record_version(path, original, data)
     path.write_text(_dump(data), encoding="utf-8")
     return {"workflow": data, "yaml": _dump(data)}
 
 
+_VERSION_LIMIT = 50
+
+
+def _version_files(path: Path) -> list[Path]:
+    folder = path.parent / "versions"
+    if not folder.is_dir():
+        return []
+    return sorted((item for item in folder.glob("*.yaml") if item.stem.isdigit()), key=lambda item: int(item.stem))
+
+
+def _write_version(path: Path, number: int, data: dict[str, Any], saved_at: datetime) -> Path:
+    target = path.parent / "versions" / f"{number}.yaml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    record = {"saved_at": saved_at.isoformat(timespec="seconds"), "workflow": data}
+    target.write_text(_dump(record), encoding="utf-8")
+    return target
+
+
+def _read_version(item: Path) -> dict[str, Any]:
+    record = _read_yaml(item)
+    workflow = record.get("workflow")
+    return {
+        "version": int(item.stem),
+        "saved_at": str(record.get("saved_at") or ""),
+        "workflow": workflow if isinstance(workflow, dict) else {},
+    }
+
+
+def _record_version(path: Path, current: dict[str, Any], data: dict[str, Any]) -> None:
+    """保存前写入版本记录：首次记录时先留下保存前的原样，内容未变不新增。"""
+    files = _version_files(path)
+    if not files:
+        if current == data:
+            return
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+        files.append(_write_version(path, 1, current, mtime))
+    if _read_version(files[-1])["workflow"] == data:
+        return
+    files.append(_write_version(path, int(files[-1].stem) + 1, data, datetime.now(UTC)))
+    for item in files[:-_VERSION_LIMIT]:
+        item.unlink(missing_ok=True)
+
+
+def _node_label(node: dict[str, Any]) -> str:
+    return str(node.get("name") or node.get("id") or "")
+
+
+def _version_changes(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    before = {node.get("id"): node for node in old.get("nodes") or [] if isinstance(node, dict)}
+    after = {node.get("id"): node for node in new.get("nodes") or [] if isinstance(node, dict)}
+    common = [key for key in after if key in before]
+    return {
+        "title": old.get("title") != new.get("title"),
+        "description": old.get("description") != new.get("description"),
+        "added": [_node_label(node) for key, node in after.items() if key not in before],
+        "removed": [_node_label(node) for key, node in before.items() if key not in after],
+        "changed": [_node_label(after[key]) for key in common if before[key] != after[key]],
+        "reordered": [key for key in before if key in after] != common,
+    }
+
+
+def list_workflow_versions(workflow_id: str, root: Path | None = None) -> list[dict[str, Any]]:
+    """由新到旧列出版本；每项附上相对前一版本的改动，最早一项没有。"""
+    path = _workflow_path(workflow_id, root, must_exist=True)
+    records = [_read_version(item) for item in _version_files(path)]
+    items = []
+    for index, record in enumerate(records):
+        workflow = record["workflow"]
+        items.append({
+            "version": record["version"],
+            "saved_at": record["saved_at"],
+            "title": str(workflow.get("title") or ""),
+            "changes": _version_changes(records[index - 1]["workflow"], workflow) if index else None,
+        })
+    return list(reversed(items))
+
+
+def get_workflow_version(workflow_id: str, version: int, root: Path | None = None) -> dict[str, Any]:
+    path = _workflow_path(workflow_id, root, must_exist=True)
+    for item in _version_files(path):
+        if int(item.stem) == version:
+            return _read_version(item)
+    raise ConfigNotFound(f"流程 {workflow_id} 没有版本 {version}。")
+
+
+def _subgraph_ids(nodes: Any) -> set[str]:
+    found: set[str] = set()
+    if not isinstance(nodes, list):
+        return found
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if node.get("kind") == "subgraph":
+            subgraph_id = str(node.get("subgraph_id") or "").strip()
+            if subgraph_id:
+                found.add(subgraph_id)
+        elif node.get("kind") == "parallel":
+            for branch in node.get("branches") or []:
+                if isinstance(branch, dict):
+                    found |= _subgraph_ids(branch.get("nodes"))
+    return found
+
+
+def workflow_usage(workflow_id: str, root: Path | None = None) -> dict[str, list[dict[str, str]]]:
+    """选用这份流程的项目，以及把它当作子图直接插入的其他流程。"""
+    root = root or factory_root()
+    target = workflow_id.strip()
+    projects: list[dict[str, str]] = []
+    for path in sorted((root / "projects").glob("*/project.yaml")):
+        try:
+            data = _read_yaml(path)
+        except (ConfigError, OSError, yaml.YAMLError):
+            continue
+        section = data.get("workflow")
+        if isinstance(section, dict) and str(section.get("profile_id") or "").strip() == target:
+            project_id = str(data.get("project_id") or path.parent.name)
+            projects.append({"project_id": project_id, "title": str(data.get("title") or project_id)})
+    workflows: list[dict[str, str]] = []
+    for path in sorted((root / "workflows").glob("*/workflow.yaml")):
+        try:
+            data = _read_yaml(path)
+        except (ConfigError, OSError, yaml.YAMLError):
+            continue
+        owner = str(data.get("workflow_id") or path.parent.name)
+        if owner != target and target in _subgraph_ids(data.get("nodes")):
+            workflows.append({"workflow_id": owner, "title": str(data.get("title") or owner)})
+    return {"projects": projects, "workflows": workflows}
+
+
 def delete_workflow(workflow_id: str, root: Path | None = None) -> None:
-    """删除 workflows/<id>/。内置流程不能删。不检查是否仍被其他流程当作子图引用。"""
+    """删除 workflows/<id>/。内置流程不能删；仍被项目选用或被其他流程当作子图时不能删。"""
     path = _workflow_path(workflow_id, root, must_exist=True)
     current = _read_yaml(path)
     if current.get("builtin"):
         raise ConfigError("这是内置流程，不能删除。")
+    usage = workflow_usage(workflow_id, root)
+    used = [f"项目「{item['title']}」" for item in usage["projects"]]
+    used += [f"流程「{item['title']}」" for item in usage["workflows"]]
+    if used:
+        raise ConfigError(f"这个流程还在使用：{'、'.join(used)}。先改用别的流程或去掉子图。")
     folder = path.parent.resolve()
     workflows_root = ((root or factory_root()) / "workflows").resolve()
     try:
@@ -326,6 +469,75 @@ def _require_subgraph(subgraph_id: str, owner: str, root: Path | None, seen_grap
             for child in branch.get("nodes") or []:
                 if isinstance(child, dict) and str(child.get("kind") or "") == "subgraph":
                     _require_subgraph(str(child.get("subgraph_id") or ""), owner, root, nested)
+
+
+def _check_pick_pairs(cleaned: list[dict[str, Any]]) -> None:
+    """对照择一的并行之后、下一个并行或结束之前，须有且只有一个「择一」决策点，见 ADR 0031。"""
+    pending: dict[str, Any] | None = None
+    for item in cleaned:
+        if item["kind"] == "parallel" and pending is not None:
+            raise ConfigError(f"并行「{pending['name']}」选了对照择一，要先放一个「择一」决策点，再开下一个并行。")
+        if item["kind"] == "parallel" and item.get("join") == "compare":
+            pending = item
+        elif item["kind"] == "gate" and item.get("decision") == "pick":
+            if pending is None:
+                raise ConfigError(f"「{item['name']}」是择一决策点，但前面没有选了对照择一的并行。")
+            pending = None
+    if pending is not None:
+        raise ConfigError(f"并行「{pending['name']}」选了对照择一，后面要有一个「择一」决策点。")
+
+
+_MAX_GATE_ITEMS = 30
+
+
+def _gate_items(raw: dict[str, Any], name: str, decision: str) -> dict[str, Any]:
+    """决策点的决策项与汇总规则；没有决策项时返回空字典，见 ADR 0032。"""
+    entries = raw.get("items")
+    rule = str(raw.get("pass_rule") or "").strip()
+    if entries in (None, "", []):
+        if rule and rule != "all":
+            raise ConfigError(f"决策点「{name}」没有决策项，不需要汇总规则。")
+        return {}
+    if decision == "pick":
+        raise ConfigError(f"「{name}」是择一决策点，不能带决策项。")
+    if not isinstance(entries, list):
+        raise ConfigError(f"决策点「{name}」的决策项要写成列表。")
+    if len(entries) > _MAX_GATE_ITEMS:
+        raise ConfigError(f"决策点「{name}」的决策项最多 {_MAX_GATE_ITEMS} 项。")
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ConfigError(f"决策点「{name}」的每个决策项要有标识与名称。")
+        item_id = str(entry.get("id") or "").strip()
+        title = str(entry.get("title") or "").strip()
+        if not item_id or item_id in seen:
+            raise ConfigError(f"决策点「{name}」的决策项标识不能空，也不能重复。")
+        if not title:
+            raise ConfigError(f"决策点「{name}」有决策项没写名称。")
+        seen.add(item_id)
+        item: dict[str, Any] = {"id": item_id, "title": title}
+        hint = str(entry.get("hint") or "").strip()
+        if hint:
+            item["hint"] = hint
+        if entry.get("required") is False:
+            item["required"] = False
+        items.append(item)
+    if rule not in {"", "all", "manual"}:
+        raise ConfigError(f"决策点「{name}」的汇总规则只能是全部通过才放行，或由人决定。")
+    return {"items": items, "pass_rule": rule or "all"}
+
+
+def _loop_count(raw_loops: object, name: str) -> int:
+    if raw_loops in (None, ""):
+        raise ConfigError(f"「{name}」先写最大循环次数。")
+    try:
+        count = int(raw_loops)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"「{name}」的最大循环次数要是整数。") from exc
+    if isinstance(raw_loops, bool) or count < 1:
+        raise ConfigError(f"「{name}」的最大循环次数至少为 1。")
+    return count
 
 
 def _clean_branches(
@@ -383,13 +595,19 @@ def _clean_branches(
                     raise ConfigError("活动要写名称。")
                 if role not in roles:
                     raise ConfigError(f"活动「{child_name}」要选择已有角色。")
+                returns_to = str(child.get("returns_to") or "").strip()
+                earlier = [item["id"] for item in cleaned_children if item["kind"] == "activity"]
+                if returns_to and returns_to not in earlier:
+                    raise ConfigError(f"「{child_name}」只能回退到支路「{name}」里更早的活动。")
                 step: dict[str, Any] = {
                     "id": child_id,
                     "kind": "activity",
                     "name": child_name,
                     "role": role,
-                    "returns_to": "",
+                    "returns_to": returns_to,
                 }
+                if returns_to:
+                    step["max_loops"] = _loop_count(child.get("max_loops"), child_name)
                 if "inputs" in child:
                     step["inputs"] = _name_list(child.get("inputs"))
                 if "outputs" in child:
@@ -510,6 +728,8 @@ def validate_workflow(
         reject_to = str(raw.get("reject_to") or "").strip()
         if kind == "gate" and reject_to:
             item["reject_to"] = reject_to
+        if kind == "gate":
+            item.update(_gate_items(raw, name, decision))
         if returns_to:
             item["_max_loops"] = max_loops
         if kind == "activity":
@@ -532,11 +752,17 @@ def validate_workflow(
             item["subgraph_id"] = subgraph_id
         if kind == "parallel":
             item["branches"] = _clean_branches(raw.get("branches"), seen, roles, expected, root)
+            join = str(raw.get("join") or "merge").strip()
+            if join not in {"merge", "compare"}:
+                raise ConfigError(f"并行「{name}」的汇合方式只能是合并或对照择一。")
+            if join == "compare":
+                item["join"] = "compare"
         cleaned.append(item)
     if cleaned[0]["kind"] != "start" or sum(item["kind"] == "start" for item in cleaned) != 1:
         raise ConfigError("启动必须有且只有一个，并且放在最前。")
     if cleaned[-1]["kind"] != "end" or sum(item["kind"] == "end" for item in cleaned) != 1:
         raise ConfigError("结束必须有且只有一个，并且放在最后。")
+    _check_pick_pairs(cleaned)
     index = {item["id"]: pos for pos, item in enumerate(cleaned)}
     for pos, item in enumerate(cleaned):
         target = item["returns_to"]
@@ -546,16 +772,7 @@ def validate_workflow(
             raise ConfigError("只有活动和关卡可以回退。")
         if target not in index or index[target] >= pos or cleaned[index[target]]["kind"] == "end":
             raise ConfigError(f"「{item['name']}」的回退只能指向更早的节点。")
-        raw_loops = item.pop("_max_loops", None)
-        if raw_loops in (None, ""):
-            raise ConfigError(f"「{item['name']}」先写最大循环次数。")
-        try:
-            count = int(raw_loops)
-        except (TypeError, ValueError) as exc:
-            raise ConfigError(f"「{item['name']}」的最大循环次数要是整数。") from exc
-        if isinstance(raw_loops, bool) or count < 1:
-            raise ConfigError(f"「{item['name']}」的最大循环次数至少为 1。")
-        item["max_loops"] = count
+        item["max_loops"] = _loop_count(item.pop("_max_loops", None), item["name"])
     for item in cleaned:
         targets = [str(route["to"]) for route in item.get("routes") or []]
         if item.get("next"):

@@ -120,6 +120,8 @@ def _review_sources(awaiting: dict[str, Any], values: dict[str, Any]) -> list[di
         pairs = _ESCALATION
     elif kind == "gate":
         gate_id = str(awaiting.get("gate_id") or "")
+        if any(item.get("id") == gate_id and item.get("pick_from") for item in _workflow_nodes(values)):
+            return [{"title": "两路对照", "key": "branch_comparison", **_producer(values, "branch_comparison")}]
         if gate_id in _GATE_SECTIONS:
             pairs = _GATE_SECTIONS[gate_id]
         else:

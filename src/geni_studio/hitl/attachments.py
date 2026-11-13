@@ -127,6 +127,27 @@ def stage_attachments(upload_ids: list[str], dest: Path) -> list[str]:
     return relative
 
 
+def stage_reply_attachments(upload_ids: list[str], dest: Path) -> list[Path]:
+    """待办答复带的附件拷进 dest；与已有文件重名时加序号，不覆盖启动时的附件。"""
+    if len(upload_ids) > _MAX_COUNT:
+        raise HitlError("一次最多 8 个附件。")
+    dest.mkdir(parents=True, exist_ok=True)
+    used = {item.name for item in dest.iterdir()}
+    staged: list[Path] = []
+    for upload_id in upload_ids:
+        item = load_upload(upload_id)
+        target = dest / _unique_name(item["name"], used)
+        shutil.copyfile(item["path"], target)
+        staged.append(target)
+    return staged
+
+
+def reply_section(paths: list[str]) -> str:
+    if not paths:
+        return ""
+    return "附件，可直接读取：\n" + "\n".join(f"- {path}" for path in paths)
+
+
 def prompt_section(paths: object) -> str:
     if not isinstance(paths, list):
         return ""

@@ -10,8 +10,11 @@ from geni_studio.config.workflow_defs import (
     create_workflow,
     delete_workflow,
     get_workflow,
+    get_workflow_version,
+    list_workflow_versions,
     list_workflows,
     save_workflow,
+    workflow_usage,
 )
 from geni_studio.web.app import app
 
@@ -146,7 +149,7 @@ def test_delete_plain_workflow_via_api_and_refuse_when_missing(
     assert missing.status_code == 404
 
 
-def test_delete_removes_the_workflow_and_keeps_a_referencing_parent(
+def test_delete_refuses_while_a_project_or_parent_still_uses_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _root(tmp_path, monkeypatch)
@@ -180,21 +183,129 @@ def test_delete_removes_the_workflow_and_keeps_a_referencing_parent(
     with pytest.raises(ConfigError, match="不能删除"):
         delete_workflow("locked", root=tmp_path)
     assert (folder / "workflow.yaml").is_file()
-    delete_workflow("child", root=tmp_path)
-    assert not (tmp_path / "workflows" / "child").exists()
-    assert [item["workflow_id"] for item in list_workflows(tmp_path)] == ["locked", "parent"]
-    with pytest.raises(ConfigError, match="流程不存在"):
-        get_workflow("child", root=tmp_path)
-    parent_text = (tmp_path / "workflows" / "parent" / "workflow.yaml").read_text(encoding="utf-8")
-    assert "subgraph_id: child" in parent_text
+    project = tmp_path / "projects" / "demo"
+    project.mkdir(parents=True)
+    (project / "project.yaml").write_text(
+        "project_id: demo\ntitle: 演示项目\nworkflow:\n  profile_id: parent\n", encoding="utf-8"
+    )
+    assert workflow_usage("child", root=tmp_path) == {
+        "projects": [],
+        "workflows": [{"workflow_id": "parent", "title": "父流程"}],
+    }
+    with pytest.raises(ConfigError, match="流程「父流程」"):
+        delete_workflow("child", root=tmp_path)
+    assert (tmp_path / "workflows" / "child" / "workflow.yaml").is_file()
 
     client = TestClient(app)
+    usage = client.get("/api/workflows/parent/usage").json()
+    assert usage == {"projects": [{"project_id": "demo", "title": "演示项目"}], "workflows": []}
+    refused_parent = client.delete("/api/workflows/parent")
+    assert refused_parent.status_code == 400
+    assert "项目「演示项目」" in refused_parent.json()["detail"]
+    (project / "project.yaml").write_text("project_id: demo\ntitle: 演示项目\n", encoding="utf-8")
     removed = client.delete("/api/workflows/parent")
     assert removed.status_code == 200
     assert removed.json()["deleted"] is True
     assert client.get("/api/workflows/parent").status_code == 404
+    delete_workflow("child", root=tmp_path)
+    assert not (tmp_path / "workflows" / "child").exists()
+    assert client.get("/api/workflows/child/usage").status_code == 404
     refused = client.delete("/api/workflows/locked")
     assert refused.status_code == 400
     assert "不能删除" in refused.json()["detail"]
     missing = client.delete("/api/workflows/missing")
     assert missing.status_code == 404
+
+
+def test_check_reports_start_time_problems_without_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _root(tmp_path, monkeypatch)
+    monkeypatch.setattr("geni_studio.config.context.factory_root", lambda: tmp_path)
+    created = create_workflow("demo", "演示", root=tmp_path)["workflow"]
+    client = TestClient(app)
+    empty = client.post("/api/workflows/demo/check", json=created).json()
+    assert empty == {"ok": False, "problems": ["流程里没有可执行的活动或决策点。"]}
+    draft = {
+        **created,
+        "nodes": [
+            created["nodes"][0],
+            {
+                "id": "n1", "kind": "activity", "name": "开发", "role": "developer", "returns_to": "",
+                "inputs": [], "outputs": [{"name": "plan_doc", "source": "file", "template": ""}],
+            },
+            created["nodes"][1],
+        ],
+    }
+    problems = client.post("/api/workflows/demo/check", json=draft).json()["problems"]
+    assert problems == ["活动「开发」的输出「plan_doc」没有模板。"]
+    assert client.post("/api/workflows/missing/check", json=draft).status_code == 404
+    assert len(get_workflow("demo", root=tmp_path)["workflow"]["nodes"]) == 2
+
+
+def test_saves_keep_versions_with_changes_and_skip_identical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _root(tmp_path, monkeypatch)
+    create_workflow("flow", "流程", root=tmp_path)
+    assert list_workflow_versions("flow", root=tmp_path) == []
+    start = {"id": "start", "kind": "start", "name": "启动", "role": "human", "returns_to": ""}
+    end = {"id": "end", "kind": "end", "name": "结束", "role": "human", "returns_to": ""}
+    dev = {"id": "dev", "kind": "activity", "name": "开发", "role": "developer", "returns_to": ""}
+    save_workflow("flow", {"title": "流程", "nodes": [start, dev, end]}, root=tmp_path)
+    save_workflow("flow", {"title": "流程", "nodes": [start, dev, end]}, root=tmp_path)
+    save_workflow("flow", {"title": "改名", "nodes": [start, {**dev, "name": "实现"}, end]}, root=tmp_path)
+    versions = list_workflow_versions("flow", root=tmp_path)
+    assert [item["version"] for item in versions] == [3, 2, 1]
+    assert versions[-1]["changes"] is None
+    assert versions[1]["changes"]["added"] == ["开发"] and not versions[1]["changes"]["title"]
+    assert versions[0]["title"] == "改名" and versions[0]["changes"]["title"]
+    assert versions[0]["changes"]["changed"] == ["实现"] and versions[0]["changes"]["removed"] == []
+    original = get_workflow_version("flow", 1, root=tmp_path)
+    assert [node["id"] for node in original["workflow"]["nodes"]] == ["start", "end"]
+    with pytest.raises(ConfigError, match="没有版本"):
+        get_workflow_version("flow", 9, root=tmp_path)
+    assert list_workflows(root=tmp_path)[0]["workflow_id"] == "flow"
+    client = TestClient(app)
+    assert client.get("/api/workflows/flow/versions").json()["versions"][0]["version"] == 3
+    assert client.get("/api/workflows/flow/versions/2").json()["workflow"]["nodes"][1]["name"] == "开发"
+    assert client.get("/api/workflows/flow/versions/9").status_code == 404
+    assert client.get("/api/workflows/missing/versions").status_code == 404
+
+
+def test_node_stats_merge_runs_by_top_level_node(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    from geni_studio.hitl.conversation import begin_turn, finish_turn
+    from geni_studio.hitl.node_stats import top_level_node, workflow_node_stats
+
+    monkeypatch.setattr("geni_studio.hitl.conversation.factory_root", lambda: tmp_path)
+    assert top_level_node("ops__a__dev", ["ops", "op"]) == "ops"
+    assert top_level_node("other", ["ops"]) == ""
+    for thread_id, node in (("t1", "dev"), ("t1", "dev"), ("t2", "sub__inner"), ("t3", "dev")):
+        path = begin_turn(thread_id, "developer", agent_id="a", model="m", prompt="p", node=node)
+        finish_turn(path, "ok", usage={"input_tokens": 10, "output_tokens": 2})
+    first = tmp_path / ".geni_studio" / "runs" / "t1" / "conversations" / "nodes" / "dev" / "001.jsonl"
+    rows = [json.loads(line) for line in first.read_text(encoding="utf-8").splitlines()]
+    rows[0]["at"], rows[1]["at"] = "2026-11-12T08:00:00+00:00", "2026-11-12T08:01:00+00:00"
+    first.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    decisions = tmp_path / ".geni_studio" / "runs" / "t2" / "decisions.jsonl"
+    decisions.write_text(
+        json.dumps({"node": "gate", "kind": "gate", "decision": "rejected"}) + "\n"
+        + json.dumps({"node": "sub__inner", "kind": "escalation", "decision": "continue"}) + "\n",
+        encoding="utf-8",
+    )
+    records = [
+        ("t1", {"workflow_id": "flow", "return_counts": {"dev": 2}}),
+        ("t2", {"workflow_id": "flow", "return_counts": {}}),
+        ("t3", {"workflow_id": "elsewhere"}),
+    ]
+    stats = workflow_node_stats(records, "flow", ["dev", "sub", "gate"])
+    assert stats["runs"] == 2
+    dev, sub, gate = (stats["nodes"][key] for key in ("dev", "sub", "gate"))
+    assert dev["runs"] == 1 and dev["turns"] == 2 and dev["returns"] == 2
+    assert dev["input_tokens"] == 20 and dev["output_tokens"] == 4
+    assert dev["avg_seconds"] is not None and dev["avg_seconds"] >= 30
+    assert sub["turns"] == 1 and sub["escalations"] == 1 and sub["runs"] == 1
+    assert gate["rejections"] == 1 and gate["turns"] == 0
+    assert TestClient(app).get("/api/workflows/missing/stats").status_code == 404

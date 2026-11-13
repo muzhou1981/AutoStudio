@@ -260,7 +260,11 @@ class CursorBackend:
             text = run.text().strip()
             self._mark_role_sent(key)
             if turn_path is not None:
-                finish_turn(turn_path, text)
+                usage = getattr(getattr(run, "_terminal_result", None), "usage", None)
+                finish_turn(turn_path, text, usage=None if usage is None else {
+                    "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+                    "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+                })
         finally:
             if thread_id:
                 unregister_active_run(thread_id, run)

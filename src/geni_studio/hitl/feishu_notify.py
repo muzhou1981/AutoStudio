@@ -202,6 +202,8 @@ def notify_awaiting_human_via_lark_cli(
                 excerpt=gate_excerpt(st.values, ah.gate_id or "", ah.summary),
                 choices=choices,
                 choice_groups=choice_groups,
+                pick_options=(status.get("awaiting_human") or {}).get("pick_options"),
+                items=(status.get("awaiting_human") or {}).get("items"),
             )
             _send_to_target(cfg, card_json=card_content_json(card))
         elif ah.kind == "escalation" and _use_interactive_card():

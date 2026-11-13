@@ -31,6 +31,13 @@ def status_payload(st: Any, values: dict[str, Any]) -> dict[str, Any]:
     )
     if awaiting and ah.kind == "gate":
         awaiting["reject_label"] = gate_reject_label(values, ah.gate_id or "")
+        pick = gate_pick(values, ah.gate_id or "")
+        if pick is not None:
+            awaiting["pick_options"] = pick["branches"]
+        checklist = gate_items(values, ah.gate_id or "")
+        if checklist is not None:
+            awaiting["items"] = checklist["items"]
+            awaiting["pass_rule"] = checklist["pass_rule"]
     return {
         "thread_id": st.thread_id,
         "phase": st.phase,
@@ -186,6 +193,37 @@ def workflow_gate_summary(values: dict[str, Any], gate_id: str) -> str:
     if reject_name:
         return f"{name}：请批准，或不通过并前往「{reject_name}」。"
     return f"{name}：请批准，或不通过以结束本轮。"
+
+
+def gate_pick(values: dict[str, Any], gate_id: str) -> dict[str, Any] | None:
+    """择一决策点所对照的并行与可选的各路；不是择一决策点时返回 None。"""
+    for item in values.get("workflow_nodes") or []:
+        if isinstance(item, dict) and str(item.get("id") or "") == gate_id and item.get("pick_from"):
+            branches = [
+                {"id": str(branch.get("id") or ""), "name": str(branch.get("name") or "")}
+                for branch in item.get("pick_branches") or []
+                if isinstance(branch, dict)
+            ]
+            return {"from": str(item["pick_from"]), "branches": branches}
+    return None
+
+
+def gate_items(values: dict[str, Any], gate_id: str) -> dict[str, Any] | None:
+    """决策点的决策项与汇总规则，见 ADR 0032；没有决策项时返回 None。"""
+    for item in values.get("workflow_nodes") or []:
+        if isinstance(item, dict) and str(item.get("id") or "") == gate_id and item.get("items"):
+            entries = [
+                {
+                    "id": str(entry.get("id") or ""),
+                    "title": str(entry.get("title") or ""),
+                    "hint": str(entry.get("hint") or ""),
+                    "required": entry.get("required") is not False,
+                }
+                for entry in item["items"]
+                if isinstance(entry, dict)
+            ]
+            return {"items": entries, "pass_rule": str(item.get("pass_rule") or "all")}
+    return None
 
 
 def gate_reject_label(values: dict[str, Any], gate_id: str) -> str:

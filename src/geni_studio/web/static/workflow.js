@@ -14,14 +14,20 @@
   /** 编辑器有控件的节点字段；其余字段（handler、routes、when、instruction 等）原样带回保存。 */
   const MANAGED_KEYS = new Set([
     "id", "kind", "name", "role", "returns_to", "decision", "max_loops", "reject_to",
-    "commits_on_branch", "subgraph_id", "branches", "inputs", "outputs", "contractTouched",
+    "commits_on_branch", "subgraph_id", "branches", "join", "inputs", "outputs", "contractTouched",
+    "items", "pass_rule",
   ]);
   const LOOP_CHOICES = [1, 2, 3, 4, 5, 10];
   const DEFAULT_LOOPS = 3;
   const KIND_LABELS = {
     start: "启动", end: "结束", activity: "活动", gate: "决策点", parallel: "并行", subgraph: "子图", system: "系统节点",
   };
-  const DECISIONS = [{ id: "approve", label: "批准或驳回" }];
+  const DECISIONS = [{ id: "approve", label: "批准或驳回" }, { id: "pick", label: "择一（两路对照）" }];
+  const JOINS = [{ id: "merge", label: "合并各路" }, { id: "compare", label: "对照择一" }];
+  const PASS_RULES = [
+    { id: "all", label: "全部通过才放行", hint: "任一项不通过，即按「不通过时」的去向退回，并把该项原因交给那个活动。" },
+    { id: "manual", label: "只作核对清单", hint: "逐项结论只作记录，最后仍由人选择批准或不通过。" },
+  ];
 
   let mode = "new";
   let loadedId = "";
@@ -35,6 +41,24 @@
   let graph = blankGraph("", "");
   let snapshot = "";
   let savedGraph = null;
+  let usage = null;
+  let versions = null;
+  let showStats = (() => {
+    try {
+      return localStorage.getItem("geni.flowStats") === "1";
+    } catch (_) {
+      return false;
+    }
+  })();
+  let stats = null;
+  let trail = [];
+  let undoStack = [];
+  let undoAt = -1;
+  let undoStamp = 0;
+  let problems = null;
+  let checkedSnap = "";
+  let checkTimer = 0;
+  let checkSeq = 0;
   let nameEdit = "";
   let yamlText = "";
 
@@ -82,7 +106,7 @@
   function normalizeOutputs(value) {
     if (!Array.isArray(value)) return [];
     return value.map((item) => {
-      if (typeof item === "string") return { name: item, source: "file", template: "" };
+      if (typeof item === "string") return { name: item, source: "file", template: "", plain: true };
       const source = item && item.source === "link" ? "link" : "file";
       return { name: (item && item.name) || "", source, template: (item && item.template) || "" };
     }).filter((item) => item.name);
@@ -102,6 +126,15 @@
     if (item.returns_to && Number.isInteger(loops) && loops >= 1) item.max_loops = loops;
     if (node.reject_to) item.reject_to = node.reject_to;
     if (node.commits_on_branch) item.commits_on_branch = true;
+    if (node.kind === "gate" && Array.isArray(node.items) && node.items.length) {
+      item.items = node.items.map((entry) => {
+        const one = { id: String(entry.id || ""), title: String(entry.title || "") };
+        if (entry.hint) one.hint = String(entry.hint);
+        if (entry.required === false) one.required = false;
+        return one;
+      });
+      if (node.pass_rule === "manual") item.pass_rule = "manual";
+    }
     if (node.kind === "subgraph") {
       item.role = "";
       item.returns_to = "";
@@ -115,10 +148,12 @@
         name: branch.name || "",
         nodes: (branch.nodes || []).map((child) => normalizeNode(child)),
       }));
+      if (node.join === "compare") item.join = "compare";
     }
+    // 只写了 inputs 或 outputs 之一时，另一侧仍按角色默认，不能补成空表。
     if (explicit && node.kind === "activity") {
-      item.inputs = Array.isArray(node.inputs) ? node.inputs.map((name) => String(name)) : [];
-      item.outputs = normalizeOutputs(node.outputs || []);
+      if (Array.isArray(node.inputs)) item.inputs = node.inputs.map((name) => String(name));
+      if (Array.isArray(node.outputs)) item.outputs = normalizeOutputs(node.outputs);
       item.contractTouched = true;
     }
     Object.keys(node).forEach((key) => {
@@ -130,7 +165,7 @@
   function applyRoleContract(node, roleId, touched) {
     const found = roleRecord(roleId);
     node.inputs = found && found.inputs ? found.inputs.slice() : [];
-    node.outputs = ((found && found.outputs) || []).map((name) => ({ name, source: "file", template: "" }));
+    node.outputs = ((found && found.outputs) || []).map((name) => ({ name, source: "file", template: "", plain: true }));
     node.contractTouched = Boolean(touched);
   }
 
@@ -143,7 +178,32 @@
   function viewOutputs(node) {
     if (Array.isArray(node.outputs)) return node.outputs;
     const found = roleRecord(node.role);
-    return ((found && found.outputs) || []).map((name) => ({ name, source: "file", template: "" }));
+    return ((found && found.outputs) || []).map((name) => ({ name, source: "file", template: "", plain: true }));
+  }
+
+  // 取自角色契约、只写名称的产物与服务端规则一致：不要求模板，保存时仍写成名称。
+  function roleDefaultOutput(node, item) {
+    const found = roleRecord(node.role);
+    return Boolean(item.plain && !item.template && found && (found.outputs || []).includes(item.name));
+  }
+
+  function wireNodes(nodes) {
+    return (nodes || []).map((node) => {
+      const copy = { ...node };
+      if (Array.isArray(node.outputs)) {
+        copy.outputs = node.outputs.map((item) => (item.plain && !item.template
+          ? item.name
+          : { name: item.name, source: item.source, template: item.template }));
+      }
+      if (Array.isArray(node.branches)) {
+        copy.branches = node.branches.map((branch) => ({ ...branch, nodes: wireNodes(branch.nodes) }));
+      }
+      return copy;
+    });
+  }
+
+  function wire(source) {
+    return { ...source, nodes: wireNodes(source.nodes) };
   }
 
   function earlierOutputs(node) {
@@ -327,6 +387,7 @@
     const inputs = viewInputs(node);
     const outputs = viewOutputs(node).map((output) => output.name);
     if (outputs.indexOf(item.name) !== index || inputs.includes(item.name)) return "这个产物名重复了。";
+    if (!item.template && roleDefaultOutput(node, item)) return "";
     if (!item.template) return item.source === "link" ? "先填写链接。" : "先选择本地文件。";
     if (item.source === "link" && !/^https?:\/\//.test(item.template)) return "链接必须是 http 或 https。";
     return item.fileError || "";
@@ -432,6 +493,7 @@
   function writeUrl(nextMode, id, replace) {
     let url = "/workflow";
     if (nextMode === "open" && id) url += "?workflow=" + encodeURIComponent(id);
+    if (nextMode === "open" && id && trail.length) url += "&trail=" + trail.map(encodeURIComponent).join(",");
     const hash = nextMode === "new" ? "#new" : "#edit";
     const next = url + hash;
     if (location.pathname + location.search + location.hash === next) return;
@@ -482,6 +544,9 @@
     };
     yamlText = yaml || "";
     savedGraph = JSON.parse(JSON.stringify(graph));
+    undoStack = [snapshotNow()];
+    undoAt = 0;
+    undoStamp = 0;
     selectedEdge = null;
     $("flowTitle").value = graph.title;
     $("flowDescription").value = graph.description;
@@ -513,15 +578,130 @@
       : "点空白处回到这里。点一个节点或一条虚线，在右侧修改它。";
     if ($("flowIdHint")) $("flowIdHint").hidden = mode !== "new";
     $("flowIdLine").hidden = mode !== "open" || !loadedId;
+    if (!loadedId) {
+      usage = null;
+      stats = null;
+      $("flowUsage").hidden = true;
+      $("flowStatsNote").hidden = true;
+    }
+    if (!loadedId || builtin) {
+      versions = null;
+      $("flowVersions").hidden = true;
+    }
+    if (!loadedId || mode !== "open") {
+      problems = null;
+      checkedSnap = "";
+      renderProblems();
+    }
     if (loadedId) $("flowIdLine").textContent = "流程标识：" + loadedId;
     highlight(mode);
+    renderTrail();
     renderInspect();
     renderBoard();
   }
 
   function refreshDirty() {
-    const show = mode === "open" && Boolean(loadedId) && !locked() && !nameEdit && isDirty();
+    const editable = mode === "open" && Boolean(loadedId) && !locked();
+    const show = editable && !nameEdit && isDirty();
     $("flowDirty").hidden = !show;
+    if (editable) recordHistory();
+    if (mode === "open" && loadedId && snapshotNow() !== checkedSnap) scheduleCheck();
+    $("btnFlowUndo").disabled = !editable || undoAt <= 0;
+    $("btnFlowRedo").disabled = !editable || undoAt >= undoStack.length - 1;
+  }
+
+  function scheduleCheck() {
+    clearTimeout(checkTimer);
+    checkTimer = setTimeout(runCheck, 600);
+  }
+
+  async function runCheck() {
+    if (mode !== "open" || !loadedId) return;
+    const id = loadedId;
+    const snap = snapshotNow();
+    const seq = ++checkSeq;
+    try {
+      const response = await fetch("/api/workflows/" + encodeURIComponent(id) + "/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(wire(graph)),
+      });
+      const data = await response.json();
+      if (seq !== checkSeq || id !== loadedId || !response.ok) return;
+      checkedSnap = snap;
+      problems = data.problems || [];
+    } catch (_) {
+      return;
+    }
+    renderProblems();
+    markProblemNodes();
+  }
+
+  function problemNames() {
+    const names = new Set();
+    (problems || []).forEach((text) => {
+      for (const match of text.matchAll(/「([^」]+)」/g)) names.add(match[1]);
+    });
+    return names;
+  }
+
+  function markProblemNodes() {
+    const names = problemNames();
+    graph.nodes.forEach((node) => {
+      const hit = names.has(node.name);
+      $("flowBoard").querySelectorAll('.flow-node[data-node-id="' + CSS.escape(node.id) + '"]').forEach((el) => {
+        el.classList.toggle("has-problem", hit);
+        if (hit) el.title = (problems || []).filter((text) => text.includes("「" + node.name + "」")).join("\n");
+        else el.removeAttribute("title");
+      });
+    });
+  }
+
+  function renderProblems() {
+    const chip = $("btnFlowCheck");
+    const list = problems || [];
+    chip.hidden = problems === null || Boolean(nameEdit);
+    chip.classList.toggle("is-ok", !list.length);
+    chip.textContent = list.length ? list.length + " 处待补" : "可以运行";
+    chip.title = list.length ? "启动运行前要先补齐，点开查看" : "按启动时的规则检查过，可以运行";
+    $("flowProblemList").replaceChildren(...list.map((text) => {
+      const item = document.createElement("li");
+      item.textContent = text;
+      return item;
+    }));
+    $("flowProblems").hidden = !list.length;
+  }
+
+  // 连续输入在短时间内合并为一步，撤销时不必逐字回退。
+  function recordHistory() {
+    const now = snapshotNow();
+    if (now === undoStack[undoAt]) return;
+    undoStack = undoStack.slice(0, undoAt + 1);
+    const stamp = Date.now();
+    if (undoAt > 0 && stamp - undoStamp < 700) undoStack[undoAt] = now;
+    else undoStack.push(now);
+    if (undoStack.length > 100) undoStack.shift();
+    undoAt = undoStack.length - 1;
+    undoStamp = stamp;
+  }
+
+  function stepHistory(delta) {
+    if (mode !== "open" || !loadedId || locked()) return;
+    const target = undoAt + delta;
+    if (target < 0 || target >= undoStack.length) return;
+    undoAt = target;
+    undoStamp = 0;
+    const state = JSON.parse(undoStack[target]);
+    graph.title = state.title;
+    graph.description = state.description;
+    graph.nodes = state.nodes;
+    $("flowTitle").value = graph.title;
+    $("flowDescription").value = graph.description;
+    selectedEdge = null;
+    if (selectedId && !graph.nodes.some((node) => node.id === selectedId)) selectedId = "";
+    renderInspect();
+    renderBoard();
+    showSaved(delta < 0 ? "已撤销。" : "已重做。");
   }
 
   function laneKey(node) {
@@ -554,7 +734,7 @@
     let left = ORIGIN_X;
     return graph.nodes.map((node) => {
       const lane = laneIndex.get(laneKey(node)) || 0;
-      const height = node.kind === "gate" ? 62 : node.kind === "parallel" ? 58 : 36;
+      const height = node.kind === "parallel" ? 58 : 36;
       const width = nodeWidth(node);
       const box = {
         node,
@@ -789,7 +969,77 @@
       column.appendChild(item);
     });
     refreshDirty();
+    markProblemNodes();
+    markStats();
     requestAnimationFrame(updateScrollHints);
+  }
+
+  function statLines(item, kind) {
+    const lines = [];
+    if (item.turns) lines.push("执行 " + item.turns + " 次");
+    if (item.avg_seconds !== null && item.avg_seconds !== undefined) {
+      lines.push("平均 " + (item.avg_seconds >= 60 ? (item.avg_seconds / 60).toFixed(1) + " 分钟" : Math.round(item.avg_seconds) + " 秒"));
+    }
+    if (item.returns) lines.push("回退 " + item.returns);
+    if (item.escalations) lines.push("升级 " + item.escalations);
+    if (item.rejections) lines.push("驳回 " + item.rejections);
+    const tokens = item.input_tokens + item.output_tokens;
+    if (tokens) lines.push((tokens >= 1000 ? (tokens / 1000).toFixed(1) + "k" : tokens) + " tokens");
+    if (!lines.length) lines.push(kind === "gate" && item.runs ? "均已批准" : "没有记录");
+    return lines;
+  }
+
+  function markStats() {
+    $("flowBoard").querySelectorAll(".flow-node-stat").forEach((el) => el.remove());
+    if (!showStats || !stats) return;
+    graph.nodes.forEach((node) => {
+      const item = stats.nodes[node.id];
+      if (!item || node.kind === "start" || node.kind === "end") return;
+      const lines = statLines(item, node.kind);
+      $("flowBoard").querySelectorAll('.flow-node[data-node-id="' + CSS.escape(node.id) + '"]').forEach((el) => {
+        const label = document.createElement("span");
+        label.className = "flow-node-stat";
+        label.textContent = lines.slice(0, 2).join(" · ");
+        label.title = "经过它的运行 " + item.runs + " 次\n" + lines.join("\n");
+        el.appendChild(label);
+      });
+    });
+  }
+
+  function renderStatsNote() {
+    const note = $("flowStatsNote");
+    note.hidden = !showStats || !stats;
+    if (!stats) return;
+    note.textContent = stats.runs
+      ? "画布上的运行数据汇总了用这份流程的 " + stats.runs + " 次运行；悬停数字查看全部。"
+      : "还没有用这份流程的运行，画布上没有运行数据。";
+  }
+
+  async function loadStats(id) {
+    if (!showStats || !id) return;
+    try {
+      const response = await fetch("/api/workflows/" + encodeURIComponent(id) + "/stats");
+      const data = await response.json();
+      if (!response.ok || id !== loadedId || !showStats) return;
+      stats = data;
+    } catch (_) {
+      return;
+    }
+    renderStatsNote();
+    markStats();
+  }
+
+  function toggleStats() {
+    showStats = !showStats;
+    try {
+      localStorage.setItem("geni.flowStats", showStats ? "1" : "");
+    } catch (_) {
+      // 本地存储不可用时只在本页生效。
+    }
+    stats = null;
+    renderStatsNote();
+    markStats();
+    if (showStats) loadStats(loadedId);
   }
 
   function pathEl(d, cls) {
@@ -916,10 +1166,15 @@
     button.style.width = box.width + "px";
     button.style.height = box.height + "px";
     if (box.node.kind === "gate") {
-      const img = document.createElement("img");
-      img.src = "/static/fork-sign.png";
-      img.alt = "";
-      button.append(img, document.createTextNode(box.node.name));
+      button.append(window.geniIcons.decisionIcon(), document.createTextNode(box.node.name));
+      const count = (box.node.items || []).length;
+      if (count) {
+        const tag = document.createElement("span");
+        tag.className = "flow-node-count";
+        tag.textContent = count + " 项";
+        button.setAttribute("aria-label", box.node.name + "，" + count + " 个决策项");
+        button.appendChild(tag);
+      }
     } else if (box.node.kind === "parallel") {
       const title = document.createElement("span");
       title.textContent = box.node.name;
@@ -1195,6 +1450,7 @@
     if (!builtin && !graph.subgraph) {
       rows.push({ title: "存为子图…", onPick: openSubgraphForm });
     }
+    rows.push({ title: showStats ? "隐藏运行数据" : "显示运行数据", onPick: toggleStats });
     rows.push({
       title: "导出 YAML",
       value: isDirty() ? "已保存的版本" : "",
@@ -1202,8 +1458,9 @@
       disabled: !yamlText,
     });
     if (!builtin) {
+      const inUse = usageCount() > 0;
       rows.push("divider");
-      rows.push({ title: "删除流程…", danger: true, onPick: openDeleteConfirm });
+      rows.push({ title: "删除流程…", danger: true, onPick: openDeleteConfirm, disabled: inUse, value: inUse ? "使用中" : "" });
     }
     return rows;
   }
@@ -1228,6 +1485,9 @@
     const builtin = locked();
     $("flowPick").hidden = on || !workflows.length;
     $("btnFlowAdd").hidden = on || !created || builtin;
+    $("btnFlowUndo").hidden = on || !created || builtin;
+    $("btnFlowRedo").hidden = on || !created || builtin;
+    $("btnFlowCheck").hidden = on || !created || problems === null;
     $("btnSaveFlow").hidden = on || !created || builtin;
     $("btnFlowMore").hidden = on || !created;
     ["flowNameEdit", "btnNameSave", "btnNameCancel"].forEach((id) => {
@@ -1291,7 +1551,7 @@
       const response = await fetch("/api/workflows/" + encodeURIComponent(loadedId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...savedGraph, title }),
+        body: JSON.stringify(wire({ ...savedGraph, title })),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -1303,6 +1563,7 @@
       clean.title = saved;
       snapshot = JSON.stringify(clean);
       savedGraph.title = saved;
+      undoStack = undoStack.map((entry) => JSON.stringify({ ...JSON.parse(entry), title: saved }));
       yamlText = data.yaml || yamlText;
       graph.title = saved;
       $("flowTitle").value = saved;
@@ -1310,9 +1571,159 @@
       await loadLists();
       closeNameEdit();
       showSaved("已重命名为「" + saved + "」。");
+      loadVersions(loadedId);
     } catch (err) {
       showError(err.message || "没能重命名流程。");
     }
+  }
+
+  function usageCount() {
+    return usage ? usage.projects.length + usage.workflows.length : 0;
+  }
+
+  function usageLine(label, items, href) {
+    const line = document.createElement("p");
+    line.append(label);
+    items.forEach((item, index) => {
+      if (index) line.append("、");
+      const link = document.createElement("a");
+      link.href = href(item);
+      link.textContent = item.title;
+      line.append(link);
+    });
+    line.append("。");
+    return line;
+  }
+
+  async function loadUsage(id) {
+    const box = $("flowUsage");
+    try {
+      const response = await fetch("/api/workflows/" + encodeURIComponent(id) + "/usage");
+      const data = await response.json();
+      if (!response.ok || id !== loadedId) return;
+      usage = { projects: data.projects || [], workflows: data.workflows || [] };
+    } catch (_) {
+      return;
+    }
+    const lines = [];
+    if (usage.projects.length) {
+      lines.push(usageLine("选用它的项目：", usage.projects, (item) => "/project?project=" + encodeURIComponent(item.project_id)));
+    }
+    if (usage.workflows.length) {
+      lines.push(usageLine("作为子图出现在：", usage.workflows, (item) => "/workflow?workflow=" + encodeURIComponent(item.workflow_id) + "#edit"));
+    }
+    if (!lines.length) {
+      const none = document.createElement("p");
+      none.textContent = "还没有项目选用它，也没有流程把它当作子图。";
+      lines.push(none);
+    } else if (!graph.builtin) {
+      const note = document.createElement("p");
+      note.textContent = "仍在使用时不能删除。";
+      lines.push(note);
+    }
+    box.replaceChildren(...lines);
+    box.hidden = false;
+  }
+
+  function versionTime(text) {
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return text || "时间不详";
+    const pad = (value) => String(value).padStart(2, "0");
+    return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate())
+      + " " + pad(date.getHours()) + ":" + pad(date.getMinutes());
+  }
+
+  function versionChanges(changes) {
+    if (!changes) return "最早的记录。";
+    const quote = (names) => names.map((name) => "「" + name + "」").join("");
+    const parts = [];
+    if (changes.title) parts.push("改了标题");
+    if (changes.description) parts.push("改了说明");
+    if (changes.added.length) parts.push("新增" + quote(changes.added));
+    if (changes.removed.length) parts.push("删除" + quote(changes.removed));
+    if (changes.changed.length) parts.push("修改" + quote(changes.changed));
+    if (changes.reordered) parts.push("调整了顺序");
+    return parts.length ? parts.join("，") + "。" : "只改了节点以外的设置。";
+  }
+
+  function renderVersions() {
+    const list = versions || [];
+    $("flowVersionSummary").textContent = list.length ? "版本记录 · " + list.length : "版本记录";
+    const rows = list.map((item, index) => {
+      const row = document.createElement("li");
+      const head = document.createElement("p");
+      head.className = "flow-version-head";
+      head.textContent = versionTime(item.saved_at) + (item.title ? " · " + item.title : "");
+      if (!index) {
+        const tag = document.createElement("span");
+        tag.className = "flow-version-tag";
+        tag.textContent = "当前";
+        head.append(tag);
+      }
+      const text = document.createElement("p");
+      text.textContent = versionChanges(item.changes);
+      row.append(head, text);
+      if (index) {
+        const load = document.createElement("button");
+        load.type = "button";
+        load.className = "linkish";
+        load.textContent = "载入到画布";
+        load.addEventListener("click", () => loadVersion(item));
+        row.append(load);
+      }
+      return row;
+    });
+    if (!rows.length) {
+      const none = document.createElement("li");
+      none.textContent = "每次保存都会留下一份版本，下次保存时开始记录。";
+      rows.push(none);
+    }
+    $("flowVersionList").replaceChildren(...rows);
+    $("flowVersions").hidden = false;
+  }
+
+  async function loadVersions(id) {
+    if (!id || graph.builtin) return;
+    try {
+      const response = await fetch("/api/workflows/" + encodeURIComponent(id) + "/versions");
+      const data = await response.json();
+      if (!response.ok || id !== loadedId) return;
+      versions = data.versions || [];
+    } catch (_) {
+      return;
+    }
+    renderVersions();
+  }
+
+  // 旧版本只载入画布，成为未保存的修改；保存后才生效，并作为新的一版记下。
+  async function loadVersion(item) {
+    if (!loadedId || locked()) return;
+    const id = loadedId;
+    let data;
+    try {
+      const response = await fetch("/api/workflows/" + encodeURIComponent(id) + "/versions/" + item.version);
+      data = await response.json();
+      if (!response.ok) {
+        showError(data.detail || "没能读取这个版本。");
+        return;
+      }
+    } catch (err) {
+      showError(err.message || "没能读取这个版本。");
+      return;
+    }
+    if (id !== loadedId) return;
+    const workflow = data.workflow || {};
+    graph.title = workflow.title || graph.title;
+    graph.description = workflow.description || "";
+    graph.nodes = (workflow.nodes || []).map((node) => normalizeNode(node));
+    $("flowTitle").value = graph.title;
+    $("flowDescription").value = graph.description;
+    selectedId = "";
+    selectedEdge = null;
+    undoStamp = 0;
+    renderInspect();
+    renderBoard();
+    showSaved("已载入 " + versionTime(item.saved_at) + " 的版本。确认无误后保存才生效；撤销可回到载入前。");
   }
 
   function openSubgraphForm() {
@@ -1658,6 +2069,8 @@
     node.role = role;
     node.decision = "";
     delete node.reject_to;
+    delete node.items;
+    delete node.pass_rule;
     applyRoleContract(node, role, false);
   }
 
@@ -1703,11 +2116,18 @@
         items: DECISIONS.map((item) => ({
           text: item.label,
           checked: (node.decision || "approve") === item.id,
-          onPick: () => { node.decision = item.id; after(); },
+          onPick: () => {
+            node.decision = item.id;
+            if (item.id === "pick") {
+              delete node.items;
+              delete node.pass_rule;
+            }
+            after();
+          },
         })),
       });
       rows.push({
-        title: "不通过时",
+        title: node.decision === "pick" ? "都不采用时" : "不通过时",
         value: node.reject_to ? "前往 " + nameOf(node.reject_to) : "结束本轮",
         items: rejectItems(node, after),
       });
@@ -1792,7 +2212,9 @@
       lines.push("未通过时回到「" + nameOf(node.returns_to) + "」重做，" + loopsText(node) + "；到达上限后停下来等人处理。");
     }
     if (node.kind === "gate") {
-      lines.push(node.reject_to ? "不批准时前往「" + nameOf(node.reject_to) + "」。" : "不批准时结束本轮。");
+      const when = node.decision === "pick" ? "都不采用时" : "不批准时";
+      if (node.decision === "pick") lines.push("人从前面并行的各路中采用一路，合并它的改动；其余各路留作补丁。");
+      lines.push(node.reject_to ? when + "前往「" + nameOf(node.reject_to) + "」。" : when + "结束本轮。");
     }
     return lines.join("");
   }
@@ -1840,6 +2262,9 @@
     $("flowNodeRouteHint").textContent = hint;
     $("flowContract").hidden = readOnly || node.kind !== "activity";
     if (!readOnly && node.kind === "activity") renderContract(node);
+    const itemized = node.kind === "gate" && node.decision !== "pick";
+    $("flowGateItemsBox").hidden = !itemized || (readOnly && !(node.items || []).length);
+    if (itemized) renderGateItemsEditor(node, readOnly);
     $("flowSubgraphBox").hidden = node.kind !== "subgraph";
     $("flowParallelBox").hidden = node.kind !== "parallel";
     if (node.kind === "subgraph") renderSubgraph(node);
@@ -1921,10 +2346,188 @@
       });
   }
 
+  // 支路内的回退只能回到同一支路里更早的活动，见 ADR 0031。
+  function branchReturnRow(node, step, earlier, locked) {
+    const row = document.createElement("div");
+    row.className = "branch-return";
+    const target = earlier.find((other) => other.id === step.returns_to);
+    if (locked) {
+      row.textContent = target ? "未通过时回到「" + target.name + "」，最多 " + (step.max_loops || DEFAULT_LOOPS) + " 轮" : "";
+      row.hidden = !target;
+      return row;
+    }
+    const label = document.createElement("label");
+    label.textContent = "未通过时回到";
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", "「" + step.name + "」未通过时回到");
+    select.appendChild(new Option("不回退", ""));
+    earlier.forEach((other) => select.appendChild(new Option(other.name, other.id)));
+    select.value = target ? target.id : "";
+    const loops = document.createElement("select");
+    loops.setAttribute("aria-label", "「" + step.name + "」最多循环轮数");
+    LOOP_CHOICES.forEach((count) => loops.appendChild(new Option("最多 " + count + " 轮", String(count))));
+    loops.value = String(step.max_loops || DEFAULT_LOOPS);
+    loops.hidden = !target;
+    select.addEventListener("change", () => {
+      step.returns_to = select.value;
+      if (select.value) step.max_loops = Number(loops.value) || DEFAULT_LOOPS;
+      else delete step.max_loops;
+      loops.hidden = !select.value;
+      renderBoard();
+    });
+    loops.addEventListener("change", () => {
+      step.max_loops = Number(loops.value) || DEFAULT_LOOPS;
+      renderBoard();
+    });
+    label.appendChild(select);
+    row.append(label, loops);
+    return row;
+  }
+
+  function nextItemId(node) {
+    const taken = new Set((node.items || []).map((item) => item.id));
+    let n = taken.size + 1;
+    while (taken.has("i" + n)) n += 1;
+    return "i" + n;
+  }
+
+  /** 决策点的决策项：逐项名称、说明、是否必答，以及汇总规则，见 ADR 0032。 */
+  function renderGateItemsEditor(node, readOnly) {
+    const host = $("flowGateItemsList");
+    const items = node.items || [];
+    $("flowGateItemsCount").textContent = items.length ? items.length + " 项" : "";
+    $("flowGateItemsEmpty").hidden = Boolean(items.length);
+    $("btnAddGateItem").hidden = readOnly;
+    const changed = () => {
+      if (!node.items.length) {
+        delete node.items;
+        delete node.pass_rule;
+      }
+      renderBoard();
+      renderGateItemsEditor(node, readOnly);
+    };
+    host.replaceChildren(...items.map((item, index) => {
+      const row = document.createElement("li");
+      row.className = "gate-item-edit";
+      const title = document.createElement("wa-input");
+      title.label = "第 " + (index + 1) + " 项";
+      title.placeholder = "例如：接口向后兼容";
+      title.value = item.title;
+      title.disabled = readOnly;
+      title.addEventListener("input", () => {
+        item.title = (title.value || "").trim();
+        renderBoard();
+      });
+      const hint = document.createElement("wa-input");
+      hint.placeholder = "说明（可空）：核对什么、看哪份产物";
+      hint.value = item.hint || "";
+      hint.disabled = readOnly;
+      hint.addEventListener("input", () => {
+        const text = (hint.value || "").trim();
+        if (text) item.hint = text;
+        else delete item.hint;
+        renderBoard();
+      });
+      const tools = document.createElement("div");
+      tools.className = "gate-item-edit-tools";
+      const required = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = item.required !== false;
+      box.disabled = readOnly;
+      box.addEventListener("change", () => {
+        if (box.checked) delete item.required;
+        else item.required = false;
+        renderBoard();
+      });
+      required.append(box, " 必答");
+      tools.appendChild(required);
+      if (!readOnly) {
+        const move = (label, delta) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "linkish";
+          button.textContent = label;
+          const to = index + delta;
+          button.disabled = to < 0 || to >= items.length;
+          button.addEventListener("click", () => {
+            items.splice(to, 0, items.splice(index, 1)[0]);
+            changed();
+          });
+          return button;
+        };
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "linkish";
+        remove.textContent = "删除";
+        remove.addEventListener("click", () => {
+          items.splice(index, 1);
+          changed();
+        });
+        tools.append(move("上移", -1), move("下移", 1), remove);
+      }
+      row.append(title, hint, tools);
+      return row;
+    }));
+    const rule = $("flowGateRule");
+    rule.hidden = !items.length;
+    if (items.length) {
+      const current = node.pass_rule === "manual" ? "manual" : "all";
+      const found = PASS_RULES.find((item) => item.id === current);
+      const label = document.createElement("label");
+      label.textContent = "汇总规则";
+      if (readOnly) {
+        label.append(" " + found.label);
+      } else {
+        const select = document.createElement("select");
+        PASS_RULES.forEach((item) => select.appendChild(new Option(item.label, item.id, false, item.id === current)));
+        select.addEventListener("change", () => {
+          if (select.value === "manual") node.pass_rule = "manual";
+          else delete node.pass_rule;
+          changed();
+        });
+        label.appendChild(select);
+      }
+      const hint = document.createElement("span");
+      hint.className = "branch-join-hint";
+      hint.textContent = found.hint;
+      rule.replaceChildren(label, hint);
+    }
+  }
+
+  function joinRow(node, locked) {
+    const row = document.createElement("p");
+    row.className = "branch-join";
+    const label = document.createElement("label");
+    label.textContent = "汇合方式";
+    const current = node.join === "compare" ? "compare" : "merge";
+    if (locked) {
+      label.append(" " + JOINS.find((item) => item.id === current).label);
+    } else {
+      const select = document.createElement("select");
+      JOINS.forEach((item) => select.appendChild(new Option(item.label, item.id, false, item.id === current)));
+      select.addEventListener("change", () => {
+        if (select.value === "compare") node.join = "compare";
+        else delete node.join;
+        renderParallel(node);
+        renderBoard();
+      });
+      label.appendChild(select);
+    }
+    const hint = document.createElement("span");
+    hint.className = "branch-join-hint";
+    hint.textContent = current === "compare"
+      ? "各路改动先不合并，汇合处生成两路对照；后面的「择一」决策点由人选定采用哪一路。"
+      : "各路完成后合并改动，冲突时升级。";
+    row.append(label, hint);
+    return row;
+  }
+
   function renderParallel(node) {
     const host = $("flowParallelBox");
     host.replaceChildren();
     const locked = Boolean(graph.builtin);
+    host.appendChild(joinRow(node, locked));
     (node.branches || []).forEach((branch, index) => {
       const block = document.createElement("div");
       block.className = "branch-block";
@@ -1950,9 +2553,7 @@
           open.textContent = "打开子图";
           open.addEventListener("click", () => {
             if (!confirmLeave()) return;
-            const url = "/workflow?workflow=" + encodeURIComponent(step.subgraph_id) + "#edit";
-            history.pushState({}, "", url);
-            window.applyWorkflowLocation();
+            enterOpen(step.subgraph_id, false, [...trail, loadedId]);
           });
           li.appendChild(open);
         }
@@ -1962,11 +2563,21 @@
           remove.className = "linkish";
           remove.textContent = "删除";
           remove.addEventListener("click", () => {
+            const removed = step.id;
             branch.nodes.splice(stepIndex, 1);
+            branch.nodes.forEach((other) => {
+              if (other.returns_to === removed) {
+                other.returns_to = "";
+                delete other.max_loops;
+              }
+            });
             renderParallel(node);
+            renderBoard();
           });
           li.appendChild(remove);
         }
+        const earlier = branch.nodes.slice(0, stepIndex).filter((other) => other.kind === "activity");
+        if (step.kind === "activity" && earlier.length) li.appendChild(branchReturnRow(node, step, earlier, locked));
         steps.appendChild(li);
       });
       block.appendChild(steps);
@@ -2086,9 +2697,39 @@
     writeUrl("new", "", replace);
   }
 
-  async function enterOpen(id, replace) {
+  function renderTrail() {
+    const nav = $("flowTrail");
+    if (mode !== "open" || !loadedId || !trail.length) {
+      nav.hidden = true;
+      return;
+    }
+    const titleOf = (id) => (workflows.find((item) => item.workflow_id === id) || {}).title || id;
+    const parts = [];
+    trail.forEach((id, index) => {
+      const link = document.createElement("a");
+      link.href = "/workflow?workflow=" + encodeURIComponent(id) + (index ? "&trail=" + trail.slice(0, index).map(encodeURIComponent).join(",") : "") + "#edit";
+      link.textContent = titleOf(id);
+      link.addEventListener("click", async (event) => {
+        event.preventDefault();
+        if (!confirmLeave()) return;
+        const back = trail.slice(0, index);
+        await enterOpen(id, false, back);
+      });
+      parts.push(link, document.createTextNode(" › "));
+    });
+    const here = document.createElement("span");
+    here.textContent = titleOf(loadedId);
+    here.setAttribute("aria-current", "page");
+    parts.push(here);
+    nav.replaceChildren(...parts);
+    nav.hidden = false;
+  }
+
+  async function enterOpen(id, replace, parents) {
     mode = "open";
+    const nextTrail = (parents || []).filter((item) => item && item !== id && workflows.some((flow) => flow.workflow_id === item));
     if (!id) {
+      trail = [];
       loadedId = "";
       selectedId = "";
       setGraph(blankGraph("", ""), "");
@@ -2110,18 +2751,29 @@
       return;
     }
     loadedId = id;
+    trail = nextTrail;
     selectedId = "";
     setGraph(data.workflow, data.yaml);
     ignorePick = true;
     $("flowPick").value = id;
     ignorePick = false;
     $("flowHint").hidden = true;
+    usage = null;
+    problems = null;
+    checkedSnap = "";
     showPieces();
     markClean();
     writeUrl("open", id, replace);
+    loadUsage(id);
+    loadVersions(id);
+    stats = null;
+    renderStatsNote();
+    loadStats(id);
+    runCheck();
   }
 
   async function requestWorkflowMode(nextMode) {
+    showSaved("");
     if (nextMode === "import") {
       if (!confirmLeave()) return;
       const input = $("flowImport");
@@ -2135,19 +2787,24 @@
   }
 
   window.requestWorkflowMode = requestWorkflowMode;
+  window.clearWorkflowNotice = () => showSaved("");
 
   window.applyWorkflowLocation = async () => {
+    showSaved("");
     await loadLists();
-    const opened = new URLSearchParams(location.search).get("workflow") || "";
-    if (opened) await enterOpen(opened, true);
+    const params = new URLSearchParams(location.search);
+    const opened = params.get("workflow") || "";
+    if (opened) await enterOpen(opened, true, (params.get("trail") || "").split(","));
     else if (location.hash === "#new") await enterNew(true);
     else if (location.hash === "#edit" || location.hash === "#open") await enterOpen("", true);
     else if ((await fetch("/api/workflows").then((response) => response.json())).workflows.length) await enterOpen("", true);
     else await enterNew(true);
   };
 
+  $("flowPick").addEventListener("wa-show", () => showSaved(""));
   $("flowPick").addEventListener("change", async () => {
     if (ignorePick) return;
+    showSaved("");
     const id = ($("flowPick").value || "").trim();
     if (id === (loadedId || "")) return;
     if (!confirmLeave()) {
@@ -2311,7 +2968,7 @@
         const saved = await fetch("/api/workflows/" + encodeURIComponent(id), {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(graph),
+          body: JSON.stringify(wire(graph)),
         });
         const savedData = await saved.json();
         if (!saved.ok) {
@@ -2351,7 +3008,7 @@
     const response = await fetch("/api/workflows/" + encodeURIComponent(loadedId), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(graph),
+      body: JSON.stringify(wire(graph)),
     });
     const data = await response.json();
     if (!response.ok) {
@@ -2364,6 +3021,7 @@
     showPieces();
     markClean();
     showSaved("已保存 " + loadedId + "。");
+    loadVersions(loadedId);
   };
 
   $("btnSaveSubgraph").onclick = async () => {
@@ -2382,7 +3040,7 @@
       body: JSON.stringify({
         title,
         description: graph.description || "",
-        nodes: graph.nodes,
+        nodes: wireNodes(graph.nodes),
       }),
     });
     const data = await response.json();
@@ -2400,9 +3058,7 @@
     const node = selectedNode();
     if (!node || node.kind !== "subgraph" || !node.subgraph_id) return;
     if (!confirmLeave()) return;
-    const url = "/workflow?workflow=" + encodeURIComponent(node.subgraph_id) + "#edit";
-    history.pushState({}, "", url);
-    window.applyWorkflowLocation();
+    enterOpen(node.subgraph_id, false, [...trail, loadedId]);
   };
 
   if ($("btnAddInput")) {
@@ -2412,6 +3068,18 @@
       materializeContract(node);
       node.inputs.push("");
       renderContract(node);
+    };
+  }
+  if ($("btnAddGateItem")) {
+    $("btnAddGateItem").onclick = () => {
+      const node = selectedNode();
+      if (!node || node.kind !== "gate") return;
+      node.items = node.items || [];
+      node.items.push({ id: nextItemId(node), title: "" });
+      renderBoard();
+      renderGateItemsEditor(node, locked());
+      const inputs = $("flowGateItemsList").querySelectorAll("wa-input");
+      if (inputs.length >= 2) inputs[inputs.length - 2].focus();
     };
   }
   if ($("btnAddOutput")) {
@@ -2493,6 +3161,30 @@
       event.preventDefault();
       deleteNode(selectedNode());
     }
+  });
+
+  $("btnFlowCheck").onclick = () => {
+    if (selectedId || selectedEdge) selectNode("");
+    $("flowProblems").scrollIntoView({ block: "nearest" });
+  };
+  $("btnFlowUndo").onclick = () => stepHistory(-1);
+  $("btnFlowRedo").onclick = () => stepHistory(1);
+  document.addEventListener("keydown", (event) => {
+    if (location.pathname !== "/workflow" || !(event.ctrlKey || event.metaKey) || event.altKey) return;
+    const key = event.key.toLowerCase();
+    if (key === "s") {
+      if ($("btnSaveFlow").hidden || nameEdit) return;
+      event.preventDefault();
+      $("btnSaveFlow").click();
+      return;
+    }
+    if (key !== "z" && key !== "y") return;
+    // 文本框里的撤销交给浏览器，只撤销正在输入的文字。
+    const target = event.composedPath()[0];
+    if (target && target.closest && target.closest("input, textarea, [contenteditable='true']")) return;
+    if (nameEdit || document.querySelector(".role-menu-wrap")) return;
+    event.preventDefault();
+    stepHistory(key === "y" || event.shiftKey ? 1 : -1);
   });
 
   const flowView = document.querySelector('.app-view[data-route="workflow"]');

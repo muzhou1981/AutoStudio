@@ -117,10 +117,19 @@ class DeleteRunBody(BaseModel):
     confirm_name: str = ""
 
 
+class ItemDecision(BaseModel):
+    id: str = Field(max_length=128)
+    decision: Literal["approved", "rejected"]
+    note: str = Field(default="", max_length=4000)
+
+
 class HitlSubmitBody(BaseModel):
     gate_decision: Literal["approved", "rejected"] | None = None
     human_reply: str = ""
     escalation_choice: Literal["continue", "pause", "abort"] | None = None
+    branch_choice: str = Field(default="", max_length=128)
+    attachments: list[AttachmentRef] = Field(default_factory=list)
+    item_decisions: list[ItemDecision] = Field(default_factory=list, max_length=30)
 
 
 def _static_html(name: str) -> str:
@@ -229,6 +238,18 @@ def api_run_role_defaults(project_id: str = "", thread_id: str = "") -> dict:
         return run_service().role_defaults(project_id=project_id, thread_id=thread_id)
     except (ConfigError, HitlError, ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/workflows/{workflow_id}/stats")
+def api_workflow_stats(workflow_id: str) -> dict:
+    from geni_studio.config.workflow_defs import get_workflow
+
+    try:
+        nodes = get_workflow(workflow_id)["workflow"].get("nodes") or []
+    except ConfigError as exc:
+        raise http_error(exc) from exc
+    node_ids = [str(node.get("id")) for node in nodes if isinstance(node, dict) and node.get("id")]
+    return run_service().workflow_node_stats(workflow_id, node_ids)
 
 
 @app.get("/api/runs")
@@ -596,6 +617,8 @@ def api_stop_run(thread_id: str) -> dict:
 
 @app.post("/api/runs/{thread_id}/hitl")
 def api_submit_hitl(thread_id: str, body: HitlSubmitBody) -> dict:
+    from geni_studio.hitl.attachments import clean_attachment_ids
+
     try:
         run_service().request_hitl(
             thread_id,
@@ -604,6 +627,9 @@ def api_submit_hitl(thread_id: str, body: HitlSubmitBody) -> dict:
             channel="web",
             escalation_choice=body.escalation_choice,
             actor=web_operator(),
+            branch_choice=body.branch_choice,
+            attachments=clean_attachment_ids(body.attachments),
+            item_decisions=[item.model_dump() for item in body.item_decisions],
         )
     except HitlError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e

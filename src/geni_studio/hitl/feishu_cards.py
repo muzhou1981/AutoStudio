@@ -39,11 +39,15 @@ def build_gate_interactive_card(
     excerpt: str = "",
     choices: list[dict[str, Any]] | None = None,
     choice_groups: list[dict[str, Any]] | None = None,
+    pick_options: list[dict[str, str]] | None = None,
+    items: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     title = "软件工厂 · 项目经理"
     shown = node_label.strip() or _node_label(gate_id)
     body_md = _awaiting_lines(kind="gate", node_label=shown)
-    if reject_label.strip():
+    if pick_options:
+        body_md += "\n请从下面各路中采用一路；都不采用时，未合并的改动留作补丁。"
+    elif reject_label.strip():
         body_md += f"\n不通过将前往「{reject_label.strip()}」，然后继续。"
     else:
         body_md += "\n不通过将结束本轮。"
@@ -59,6 +63,13 @@ def build_gate_interactive_card(
             "text_align": "left",
         },
     ]
+    if pick_options:
+        elements.extend(_pick_elements(thread_id=thread_id, options=pick_options))
+        elements.append(_open_web_button(web_url))
+        return _gate_card(title, shown, elements)
+    if items:
+        elements.extend(_items_elements(thread_id=thread_id, web_url=web_url, items=items))
+        return _gate_card(title, shown, elements)
     elements.extend(
         _hitl_choice_elements(
             thread_id=thread_id,
@@ -120,17 +131,46 @@ def build_gate_interactive_card(
                         },
                     ],
                 },
-                {
-                    "tag": "button",
-                    "text": {"tag": "plain_text", "content": "在 Web 中打开"},
-                    "type": "primary_text",
-                    "width": "fill",
-                    "behaviors": [
-                        {"type": "open_url", "default_url": web_url},
-                    ],
-                },
+                _open_web_button(web_url),
         ]
     )
+    return _gate_card(title, shown, elements)
+
+
+def _items_elements(*, thread_id: str, web_url: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """逐项审批的决策点：卡片只列条目，提供「全部通过」与去网页逐项处理，见 ADR 0032。"""
+    required = sum(1 for item in items if item.get("required", True))
+    lines = [f"共 {len(items)} 项待逐项审批，其中 {required} 项必答；有不通过的项请在网页逐项处理。"]
+    lines += [f"- {_short(str(item.get('title') or ''))}" for item in items[:8]]
+    if len(items) > 8:
+        lines.append(f"- 另有 {len(items) - 8} 项")
+    approve = {
+        "tag": "button",
+        "text": {"tag": "plain_text", "content": "全部通过"},
+        "type": "primary_filled",
+        "width": "fill",
+        "behaviors": [
+            {"type": "callback", "value": gate_card_action_value(thread_id=thread_id, gate_decision="approved")}
+        ],
+    }
+    return [
+        {"tag": "markdown", "content": "\n".join(lines), "text_align": "left"},
+        approve,
+        _open_web_button(web_url, "在网页逐项处理"),
+    ]
+
+
+def _open_web_button(web_url: str, label: str = "在 Web 中打开") -> dict[str, Any]:
+    return {
+        "tag": "button",
+        "text": {"tag": "plain_text", "content": label},
+        "type": "primary_text",
+        "width": "fill",
+        "behaviors": [{"type": "open_url", "default_url": web_url}],
+    }
+
+
+def _gate_card(title: str, shown: str, elements: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "schema": "2.0",
         "config": {"update_multi": True, "width_mode": "default"},
@@ -145,6 +185,38 @@ def build_gate_interactive_card(
             "elements": elements,
         },
     }
+
+
+def _pick_elements(*, thread_id: str, options: list[dict[str, str]]) -> list[dict[str, Any]]:
+    def button(label: str, kind: str, value: dict[str, str]) -> dict[str, Any]:
+        return {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": label},
+                    "type": kind,
+                    "width": "fill",
+                    "behaviors": [{"type": "callback", "value": value}],
+                }
+            ],
+        }
+
+    columns = [
+        button(
+            f"采用「{_short(item['name'] or item['id'])}」",
+            "primary_filled",
+            {**gate_card_action_value(thread_id=thread_id, gate_decision="approved"), "branch_choice": item["id"]},
+        )
+        for item in options
+    ]
+    columns.append(button("都不采用", "danger", gate_card_action_value(thread_id=thread_id, gate_decision="rejected")))
+    return [
+        {"tag": "column_set", "flex_mode": "stretch", "columns": columns[index : index + 3]}
+        for index in range(0, len(columns), 3)
+    ]
 
 
 def build_pm_clarification_interactive_card(
@@ -339,6 +411,10 @@ def _open_button(web_url: str) -> dict[str, Any]:
         "width": "fill",
         "behaviors": [{"type": "open_url", "default_url": web_url}],
     }
+
+
+def _short(label: str) -> str:
+    return label if len(label) <= _CHOICE_BTN_LABEL_MAX else label[: _CHOICE_BTN_LABEL_MAX - 1] + "…"
 
 
 def _choice_button_label(choice: dict[str, Any]) -> str:

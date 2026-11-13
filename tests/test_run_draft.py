@@ -56,5 +56,5 @@ def test_save_lists_and_deletes_a_draft(tmp_path, monkeypatch) -> None:
 
     page = client.get("/").text
     assert 'id="btnSaveRun"' in page
-    assert 'class="run-composer"' in page
+    assert 'class="run-composer" id="region-prompt"' in page
     assert page.index('id="region-rail"') < page.index('id="region-prompt"')

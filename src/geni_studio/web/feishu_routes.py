@@ -29,6 +29,7 @@ from geni_studio.hitl.feishu_notify import (
 )
 from geni_studio.hitl.feishu_session import bound_thread_ids
 from geni_studio.hitl.feishu_status import answer_status_query, is_status_query
+from geni_studio.hitl.presenter import gate_items, gate_pick
 from geni_studio.hitl.service import GraphRunService, HitlError, NotAwaiting
 
 router = APIRouter(tags=["feishu"])
@@ -207,10 +208,17 @@ def _handle_event(body: dict) -> dict[str, Any]:
             before = None
         if before is not None and before.awaiting_human is not None and before.awaiting_human.kind == "gate":
             label, reject_label = gate_presentation(before.values, before.awaiting_human.gate_id or "")
-            if action.get("gate_decision") == "rejected" and reject_label:
+            pick = gate_pick(before.values, before.awaiting_human.gate_id or "")
+            if pick is not None:
+                names = {item["id"]: item["name"] for item in pick["branches"]}
+                chosen = names.get(action.get("branch_choice") or "")
+                line = f"已记录：采用「{chosen}」。" if chosen else "已记录：都不采用。"
+            elif action.get("gate_decision") == "rejected" and reject_label:
                 line = f"已记录：不通过，前往「{reject_label}」。"
             elif action.get("gate_decision") == "rejected":
                 line = "已记录：不通过，本轮结束。"
+            elif gate_items(before.values, before.awaiting_human.gate_id or "") is not None:
+                line = "已记录：全部通过。"
             else:
                 line = "已记录：批准。"
             settled = build_settled_gate_card(node_label=label, decision_line=line)
@@ -236,6 +244,7 @@ def _handle_event(body: dict) -> dict[str, Any]:
                 gate_decision=action["gate_decision"],  # type: ignore[arg-type]
                 human_reply=action.get("human_reply") or "",
                 actor=actor,
+                branch_choice=action.get("branch_choice") or "",
             )
     except HitlError as e:
         if isinstance(e, NotAwaiting):

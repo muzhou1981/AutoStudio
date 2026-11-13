@@ -38,6 +38,8 @@ def record_decision(
     actor: str,
     questions: list[str] | None = None,
     reject_label: str = "",
+    picked: str = "",
+    items: list[dict[str, str]] | None = None,
     workspace_path: str = "",
 ) -> None:
     path = decisions_path(thread_id, workspace_path)
@@ -51,6 +53,8 @@ def record_decision(
         "review": review,
         "decision": decision,
         "reject_label": reject_label,
+        **({"picked": picked} if picked else {}),
+        **({"items": items} if items else {}),
         "reply": reply,
         "channel": channel,
         "actor": actor,

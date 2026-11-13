@@ -139,8 +139,16 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert "roundedOrth" in text
     assert "layoutSwimTimeline" in text
     assert "sideLink" in text
-    assert "swim-decision" in text
-    assert "/static/fork-sign.png" in text
+    assert 'if (kind === "gate") name.append(window.geniIcons.decisionIcon(cell.state === "done"));' in text
+    assert "fork-sign" not in text
+    assert "function syncGateItems(ah)" in text and "payload.item_decisions" in text
+    assert "其余全部通过" in text and "还差 " in text
+    html = TestClient(app).get("/").text
+    assert 'id="gateItems"' in html and 'id="flowGateItemsBox"' in html and 'id="btnAddGateItem"' in html
+    flow = TestClient(app).get("/static/workflow.js").text
+    assert "function renderGateItemsEditor(node, readOnly)" in flow and '"items", "pass_rule"' in flow
+    icons = TestClient(app).get("/static/icons.js")
+    assert icons.status_code == 200 and "decisionIcon" in icons.text
     css = TestClient(app).get("/static/hitl.css").text
     assert ".swim-lane:nth-child(odd)" in css
     assert "is-compact" not in text
@@ -174,7 +182,16 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert "focusRunRailView" in text
     assert "armStartPoll" in text
     assert 'id="region-setup"' not in text
-    assert 'id="btnStart" variant="brand">启动</wa-button>\n            <wa-button id="btnSaveRun"' in text
+    assert 'id="btnStart" variant="brand">启动</wa-button>\n                <wa-button id="btnSaveRun"' in text
+    # 交付目标与启动在右栏下方，只在看「启动」时出现；中栏底部只留续跑、暂停与停止
+    dock = text[text.index('id="region-todo"'):text.index('id="dockTodo"')]
+    assert 'id="req"' in dock and 'id="btnStart"' in dock and 'id="btnAttach"' in dock
+    controls = text[text.index('id="region-controls"'):text.index("</main>", text.index('id="region-controls"'))]
+    assert 'id="btnStop"' in controls and 'id="btnPause"' in controls and 'id="btnStart"' not in controls
+    assert "function syncDock(cell, data)" in text and "if ($(\"dockTodo\").hidden) viewRailCell(restingCellId);" in text
+    banner = text[text.index('id="banner"'):text.index('id="gateIdleHint"')]
+    assert 'id="btnReplyAttach"' in banner and 'id="replyAttachList"' in banner
+    assert "payload.attachments = replyAttachments.map" in text
     assert 'id="pendingAlert"' in text and 'id="stopConfirm"' in text
     assert 'class="sidebar-foot"' in text and "theme-fab" not in text
     assert "inspect-body-run" in text
@@ -203,7 +220,7 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     script = TestClient(app).get("/static/workflow.js").text
     assert '$("btnSaveFlow").hidden = on || !created || builtin' in script
     assert "!event.isComposing && event.keyCode !== 229" in script
-    assert 'title: "删除流程…", danger: true, onPick: openDeleteConfirm' in script
+    assert 'title: "删除流程…", danger: true, onPick: openDeleteConfirm, disabled: inUse' in script
     assert "删除后不能恢复。" in script
     assert 'fetch("/api/workflows/" + encodeURIComponent(id), { method: "DELETE" })' in script
     assert "/raw" not in script
@@ -214,6 +231,9 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert "if (!id || graph.builtin) return;" in script
     assert 'await enterOpen("", false);' in script
     assert 'showSaved("已删除 " + id + "。");' in script
+    # 删除等结果提示在切换页面、切换编辑档或点开选择框后消失
+    assert '$("flowPick").addEventListener("wa-show", () => showSaved(""));' in script
+    assert 'window.clearWorkflowNotice = () => showSaved("");' in script
     config = TestClient(app).get("/static/config.js").text
     assert "refreshWorkflowOptions" in config
 
@@ -433,3 +453,29 @@ def test_run_page_lanes_scroll_when_they_do_not_fit() -> None:
     assert "const STATE_MARK = {" in script and 'id="railLegend"' in client.get("/").text
     assert ".workspace-inspect { grid-column: 2 / -1; }" in shared
     assert 'current.kind === "end"' in script
+
+
+def test_workflow_editor_has_history_check_usage_and_trail() -> None:
+    client = TestClient(app)
+    text = client.get("/").text
+    script = client.get("/static/workflow.js").text
+    head = text[text.index('<div class="flow-head-row">'):text.index('id="flowEditor"')]
+    assert 'id="btnFlowUndo"' in head and 'id="btnFlowRedo"' in head and 'id="btnFlowCheck"' in head
+    assert 'id="flowTrail"' in text and 'id="flowProblems"' in text and 'id="flowUsage"' in text
+    assert "function recordHistory()" in script and "function stepHistory(delta)" in script
+    assert 'if (key !== "z" && key !== "y") return;' in script
+    assert '"/check"' in script and '"/usage"' in script
+    assert "[...trail, loadedId]" in script and 'params.get("trail")' in script
+    # 只写名称的角色默认产物与缺省的输入输出，保存与检查时都不能被改写
+    assert "item.plain && !item.template" in script and "function roleDefaultOutput(node, item)" in script
+    assert "body: JSON.stringify(graph)" not in script
+    assert 'id="flowVersions"' in text and "async function loadVersion(item)" in script
+    assert '"/versions/" + item.version' in script
+    assert 'id="flowStatsNote"' in text and 'showStats ? "隐藏运行数据" : "显示运行数据"' in script
+    assert '"/stats"' in script and "function markStats()" in script
+    assert "function branchReturnRow(node, step, earlier, locked)" in script
+    assert "function joinRow(node, locked)" in script and '{ id: "pick", label: "择一（两路对照）" }' in script
+    run_script = client.get("/static/hitl.js").text
+    assert 'id="branchChoice"' in text and "function syncBranchChoice(options)" in run_script
+    assert "payload.branch_choice = $(\"branchChoice\").value;" in run_script
+    assert '"采用「" + entry.picked + "」"' in run_script

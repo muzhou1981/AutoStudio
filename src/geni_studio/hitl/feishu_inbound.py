@@ -103,6 +103,7 @@ def parse_card_action_trigger(event: dict[str, Any]) -> dict[str, str]:
         "hitl_action": "gate",
         "gate_decision": gate_decision,
         "human_reply": str(data.get("human_reply") or "").strip(),
+        "branch_choice": str(data.get("branch_choice") or "").strip(),
     }
 
 

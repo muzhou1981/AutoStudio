@@ -312,6 +312,20 @@
     });
 
     let runAttachments = [];
+    let replyAttachments = [];
+    let replyAttachKey = "";
+    /** 逐项审批的决策点（ADR 0032）：条目、汇总规则与本次作答，换一个待办时清空。 */
+    let gateItems = [];
+    let gatePassRule = "";
+    let gateRejectLabel = "";
+    let itemAnswers = {};
+    let reqFromRun = false;
+
+    function forgetRunRequest() {
+      if (!reqFromRun) return;
+      reqFromRun = false;
+      $("req").value = "";
+    }
 
     function formatAttachSize(bytes) {
       const size = Number(bytes) || 0;
@@ -321,11 +335,18 @@
     }
 
     function renderAttachments() {
-      const box = $("attachList");
+      renderAttachList($("attachList"), runAttachments, (item) => {
+        runAttachments = runAttachments.filter((entry) => entry.id !== item.id);
+        renderAttachments();
+        scheduleDraftAutosave();
+      });
+    }
+
+    function renderAttachList(box, items, onRemove) {
       if (!box) return;
       box.replaceChildren();
-      box.hidden = !runAttachments.length;
-      runAttachments.forEach((item) => {
+      box.hidden = !items.length;
+      items.forEach((item) => {
         const row = document.createElement("div");
         row.className = "attach-chip";
         const name = document.createElement("span");
@@ -337,11 +358,8 @@
         const remove = document.createElement("button");
         remove.type = "button";
         remove.textContent = "删除";
-        remove.addEventListener("click", () => {
-          runAttachments = runAttachments.filter((entry) => entry.id !== item.id);
-          renderAttachments();
-          scheduleDraftAutosave();
-        });
+        remove.disabled = box.closest("[data-locked]") !== null;
+        remove.addEventListener("click", () => onRemove(item));
         row.append(name, size, remove);
         box.appendChild(row);
       });
@@ -353,16 +371,30 @@
     }
 
     async function uploadAttachmentFiles(fileList) {
+      await uploadInto(fileList, runAttachments, $("composeError"), () => {
+        renderAttachments();
+        scheduleDraftAutosave();
+      });
+    }
+
+    function renderReplyAttachments() {
+      renderAttachList($("replyAttachList"), replyAttachments, (item) => {
+        replyAttachments = replyAttachments.filter((entry) => entry.id !== item.id);
+        renderReplyAttachments();
+      });
+    }
+
+    async function uploadInto(fileList, items, errorEl, onAdded) {
       const files = [...(fileList || [])];
       if (!files.length) return;
-      if (runAttachments.length + files.length > 8) {
-        showError($("startError"), "一次最多 8 个附件。");
+      if (items.length + files.length > 8) {
+        showError(errorEl, "一次最多 8 个附件。");
         return;
       }
-      showError($("startError"), "");
+      showError(errorEl, "");
       for (const file of files) {
-        if (runAttachments.some((item) => item.name === file.name)) {
-          showError($("startError"), "已经添加过「" + file.name + "」。");
+        if (items.some((item) => item.name === file.name)) {
+          showError(errorEl, "已经添加过「" + file.name + "」。");
           continue;
         }
         try {
@@ -373,14 +405,13 @@
           });
           const { ok, data } = await readFetchResponse(r);
           if (!ok) {
-            showError($("startError"), apiErrorMessage(data, "附件没有上传。"));
+            showError(errorEl, apiErrorMessage(data, "附件没有上传。"));
             return;
           }
-          runAttachments.push({ id: data.id, name: data.name, size: data.size });
-          renderAttachments();
-          scheduleDraftAutosave();
+          items.push({ id: data.id, name: data.name, size: data.size });
+          onAdded();
         } catch (_) {
-          showError($("startError"), "附件没有上传。检查服务是否还在，然后重试。");
+          showError(errorEl, "附件没有上传。检查服务是否还在，然后重试。");
           return;
         }
       }
@@ -1435,6 +1466,8 @@
       syncUrlThread("");
       syncUrlDraft("");
       showRunSaved("");
+      showError($("composeError"), "");
+      forgetRunRequest();
       syncThreadChrome("");
       applyBoundRunName(null);
       if ($("runName")) $("runName").disabled = false;
@@ -1457,6 +1490,7 @@
     async function applyRunStartTemplate(data) {
       leaveDraftForm();
       showError($("startError"), "");
+      showError($("composeError"), "");
       showRunSaved("");
       stopPoll();
       $("thread").value = "";
@@ -1471,6 +1505,7 @@
       $("runName").disabled = false;
       if ($("project")) $("project").disabled = false;
       $("req").value = data.human_request || "";
+      reqFromRun = false;
       runAttachments = (data.attachments || []).map((item) => ({
         id: item.id,
         name: item.name,
@@ -1547,6 +1582,7 @@
         $("runName").value = data.run_name || "";
         $("runName").disabled = false;
         $("req").value = data.human_request || "";
+        reqFromRun = false;
         runAttachments = (data.attachments || []).map((item) => ({
           id: item.id,
           name: item.name,
@@ -1960,17 +1996,19 @@
       const viewing = nodeParam() || restingCellId;
       button.classList.toggle("is-viewed", cell.id === viewing);
       button.setAttribute("aria-pressed", cell.id === viewing ? "true" : "false");
-      button.addEventListener("click", () => {
-        setNodeParam(cell.id === restingCellId ? "" : cell.id);
-        const nextView = nodeParam() || restingCellId;
-        document.querySelectorAll("#region-rail .rail-cell").forEach((el) => {
-          const on = el.dataset.id === nextView;
-          el.classList.toggle("is-viewed", on);
-          el.setAttribute("aria-pressed", on ? "true" : "false");
-        });
-        renderInspect(lastStatus && lastStatus.rail ? lastStatus : null);
-      });
+      button.addEventListener("click", () => viewRailCell(cell.id));
       return button;
+    }
+
+    function viewRailCell(id) {
+      setNodeParam(id === restingCellId ? "" : id);
+      const nextView = nodeParam() || restingCellId;
+      document.querySelectorAll("#region-rail .rail-cell").forEach((el) => {
+        const on = el.dataset.id === nextView;
+        el.classList.toggle("is-viewed", on);
+        el.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      renderInspect(lastStatus && lastStatus.rail ? lastStatus : null);
     }
 
     function renderFlatRail(cells, current) {
@@ -2022,18 +2060,11 @@
           button.title = cell.label + "，" + (STATE_LABEL[cell.state] || cell.state);
           const name = document.createElement("span");
           name.className = "swim-name";
-          const mark = railMark(cell.state);
+          const mark = kind === "gate" && (cell.state === "done" || cell.state === "waiting") ? null : railMark(cell.state);
           if (mark) name.append(mark);
+          if (kind === "gate") name.append(window.geniIcons.decisionIcon(cell.state === "done"));
           name.append(cell.label);
-          if (kind === "gate") {
-            const mark = document.createElement("img");
-            mark.className = "swim-decision";
-            mark.src = "/static/fork-sign.png";
-            mark.alt = "";
-            button.append(mark, name);
-          } else {
-            button.append(name);
-          }
+          button.append(name);
           track.appendChild(button);
         });
         row.append(label, track);
@@ -2312,10 +2343,21 @@
       renderSwim(cells, current);
     }
 
+    function isStartCell(cell) {
+      return !!cell && (cell.id === "run_start" || cell.kind === "start");
+    }
+
+    function syncDock(cell, data) {
+      const compose = cell ? isStartCell(cell) : !(data && data.thread_id);
+      $("region-prompt").hidden = !compose;
+      $("dockTodo").hidden = compose;
+    }
+
     function renderInspect(data) {
       const box = $("statusHuman");
       const rail = data && data.rail;
       const cell = viewedCell(rail);
+      syncDock(cell, data);
       forgetRoleMenu(cell);
       $("inspectTitle").textContent = cell ? cell.label : "运行检视";
       if (!data || !data.thread_id) {
@@ -3606,7 +3648,7 @@
     function decisionLabel(entry) {
       if (entry.kind === "pm_clarification") return "已答复";
       if (entry.kind === "escalation") return (ESCALATION_CHOICES[entry.decision] || [entry.decision])[0];
-      if (entry.decision === "approved") return "批准";
+      if (entry.decision === "approved") return entry.picked ? "采用「" + entry.picked + "」" : "批准";
       return entry.reject_label ? "不通过 — 退回「" + entry.reject_label + "」" : "驳回 — 结束本轮";
     }
 
@@ -3682,10 +3724,28 @@
           label.textContent = "当时待审阅";
           li.append(label, reviewList(review));
         }
-        if (entry.reply && entry.reply !== entry.decision) {
+        const judged = (entry.items || []).filter((item) => item && item.title);
+        if (judged.length) {
+          const label = document.createElement("p");
+          label.className = "decision-entry-label";
+          label.textContent = "逐项结论";
+          const ul = document.createElement("ul");
+          ul.className = "decision-entry-items";
+          judged.forEach((item) => {
+            const row = document.createElement("li");
+            row.dataset.decision = item.decision;
+            row.textContent = (item.decision === "rejected" ? "不通过「" : "通过「") + item.title + "」" + (item.note ? "：" + item.note : "");
+            ul.appendChild(row);
+          });
+          li.append(label, ul);
+        }
+        const replyText = judged.length
+          ? String(entry.reply || "").replace(/(^|\n\n)逐项结论：\n(?:- [^\n]*(?:\n|$))+/, "$1").trim()
+          : entry.reply;
+        if (replyText && replyText !== entry.decision) {
           const reply = document.createElement("p");
           reply.className = "decision-entry-text";
-          reply.textContent = (entry.kind === "pm_clarification" ? "答复：" : "意见：") + entry.reply;
+          reply.textContent = (entry.kind === "pm_clarification" ? "答复：" : "意见：") + replyText;
           li.appendChild(reply);
         }
         if (entry.legacy) {
@@ -3701,10 +3761,168 @@
     }
 
     function syncGateDecision(ah) {
+      const approve = document.querySelector('#decision wa-option[value="approved"]');
       const reject = document.querySelector('#decision wa-option[value="rejected"]');
-      if (!reject) return;
+      if (!approve || !reject) return;
+      const options = (ah && ah.kind === "gate" && ah.pick_options) || [];
       const target = ah && ah.kind === "gate" ? ah.reject_label : "";
-      reject.textContent = target ? "不通过 — 退回「" + target + "」" : "驳回 — 结束本轮";
+      approve.textContent = options.length ? "采用所选一路 — 合并后继续" : "批准 — 继续流程";
+      if (options.length) reject.textContent = target ? "都不采用 — 前往「" + target + "」" : "都不采用 — 结束本轮";
+      else reject.textContent = target ? "不通过 — 退回「" + target + "」" : "驳回 — 结束本轮";
+      syncBranchChoice(options);
+    }
+
+    function syncGateItems(ah) {
+      const items = (ah && ah.kind === "gate" && ah.items) || [];
+      const rule = items.length ? ah.pass_rule || "all" : "";
+      const host = $("gateItems");
+      const key = JSON.stringify([items, rule]);
+      gateRejectLabel = (ah && ah.reject_label) || "";
+      if (host.dataset.key !== key) {
+        host.dataset.key = key;
+        gateItems = items;
+        gatePassRule = rule;
+        renderGateItems();
+      }
+      host.hidden = !items.length;
+      $("decision").hidden = rule === "all";
+      syncItemSummary();
+    }
+
+    function itemStats() {
+      const answered = gateItems.filter((item) => itemAnswers[item.id] && itemAnswers[item.id].decision);
+      const rejected = answered.filter((item) => itemAnswers[item.id].decision === "rejected");
+      const missing = gateItems.filter((item) => item.required && !answered.includes(item));
+      return { answered, rejected, missing };
+    }
+
+    function syncItemSummary() {
+      const submit = $("btnSubmit");
+      if (!gateItems.length) {
+        submit.textContent = "提交并续跑";
+        return;
+      }
+      const { answered, rejected, missing } = itemStats();
+      const summary = $("gateItems").querySelector(".gate-items-summary");
+      if (summary) {
+        summary.textContent = "已决 " + answered.length + "/" + gateItems.length
+          + (rejected.length ? " · " + rejected.length + " 项不通过" : "");
+      }
+      const rest = $("gateItems").querySelector(".gate-items-rest");
+      if (rest) rest.hidden = answered.length === gateItems.length;
+      if (gatePassRule !== "all") {
+        submit.textContent = "提交并续跑";
+        return;
+      }
+      submit.disabled = awaitingKind !== "gate" || missing.length > 0;
+      if (missing.length) {
+        submit.textContent = "还差 " + missing.length + " 个必答项";
+      } else if (rejected.length) {
+        submit.textContent = gateRejectLabel ? "不通过 — 退回「" + gateRejectLabel + "」" : "不通过 — 结束本轮";
+      } else {
+        submit.textContent = "全部通过 — 继续";
+      }
+    }
+
+    function renderGateItems() {
+      const host = $("gateItems");
+      const head = document.createElement("div");
+      head.className = "gate-items-head";
+      const title = document.createElement("p");
+      title.className = "section-title";
+      title.textContent = gatePassRule === "all" ? "逐项审批 · 全部通过才放行" : "核对清单 · 最后由你决定";
+      const summary = document.createElement("span");
+      summary.className = "gate-items-summary";
+      summary.setAttribute("aria-live", "polite");
+      const rest = document.createElement("button");
+      rest.type = "button";
+      rest.className = "linkish gate-items-rest";
+      rest.textContent = "其余全部通过";
+      rest.addEventListener("click", () => {
+        gateItems.forEach((item) => {
+          if (!itemAnswers[item.id] || !itemAnswers[item.id].decision) itemAnswers[item.id] = { decision: "approved", note: "" };
+        });
+        renderGateItems();
+      });
+      head.append(title, summary, rest);
+      const list = document.createElement("ol");
+      list.className = "gate-item-list";
+      gateItems.forEach((item) => list.appendChild(gateItemCard(item)));
+      host.replaceChildren(head, list);
+      syncItemSummary();
+    }
+
+    function gateItemCard(item) {
+      const answer = itemAnswers[item.id] || { decision: "", note: "" };
+      const li = document.createElement("li");
+      li.className = "gate-item";
+      if (answer.decision) li.dataset.decision = answer.decision;
+      const name = document.createElement("p");
+      name.className = "gate-item-title";
+      name.append(window.geniIcons.decisionIcon(answer.decision === "approved"), item.title);
+      if (!item.required) {
+        const optional = document.createElement("span");
+        optional.className = "gate-item-optional";
+        optional.textContent = "可选";
+        name.appendChild(optional);
+      }
+      li.appendChild(name);
+      if (item.hint) {
+        const hint = document.createElement("p");
+        hint.className = "gate-item-hint";
+        hint.textContent = item.hint;
+        li.appendChild(hint);
+      }
+      const seg = document.createElement("div");
+      seg.className = "gate-item-seg";
+      seg.setAttribute("role", "group");
+      seg.setAttribute("aria-label", item.title + "的结论");
+      [["approved", "通过"], ["rejected", "不通过"]].forEach(([value, label]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.value = value;
+        button.textContent = label;
+        button.setAttribute("aria-pressed", String(answer.decision === value));
+        button.addEventListener("click", () => {
+          const next = answer.decision === value ? "" : value;
+          itemAnswers[item.id] = { decision: next, note: answer.note || "" };
+          const card = gateItemCard(item);
+          li.replaceWith(card);
+          syncItemSummary();
+          if (next === "rejected") card.querySelector("wa-textarea").focus();
+        });
+        seg.appendChild(button);
+      });
+      li.appendChild(seg);
+      if (answer.decision === "rejected") {
+        const note = document.createElement("wa-textarea");
+        note.label = "不通过的原因";
+        note.hint = "必填；原样交给退回的活动";
+        note.rows = 2;
+        note.value = answer.note || "";
+        note.addEventListener("input", () => {
+          itemAnswers[item.id] = { decision: "rejected", note: note.value || "" };
+        });
+        li.appendChild(note);
+      }
+      return li;
+    }
+
+    function syncBranchChoice(options) {
+      const select = $("branchChoice");
+      const key = options.map((item) => item.id + "\u0000" + item.name).join("\u0001");
+      if (select.dataset.key !== key) {
+        select.dataset.key = key;
+        select.replaceChildren(...options.map((item) => {
+          const option = document.createElement("wa-option");
+          option.value = item.id;
+          option.textContent = item.name || item.id;
+          return option;
+        }));
+        select.value = "";
+      }
+      select.hidden = !options.length;
+      select.disabled = $("decision").value === "rejected";
     }
 
     function syncAgentLiveBanner(data) {
@@ -3787,6 +4005,17 @@
     function syncStartButton(phase) {
       const btn = $("btnStart");
       const open = roundIsOpen(phase);
+      const composer = $("region-prompt");
+      if (composer.hasAttribute("data-locked") !== open) {
+        composer.toggleAttribute("data-locked", open);
+        $("req").disabled = open;
+        $("btnAttach").disabled = open;
+        renderAttachments();
+      }
+      if (open && lastStatus && lastStatus.values && typeof lastStatus.values.human_request === "string") {
+        $("req").value = lastStatus.values.human_request;
+        reqFromRun = true;
+      }
       btn.disabled = open;
       btn.loading = false;
       btn.textContent = open ? "进行中" : "启动";
@@ -3875,6 +4104,7 @@
     }
 
     function goPending() {
+      if ($("dockTodo").hidden) viewRailCell(restingCellId);
       const dock = $("region-todo");
       const visible = (el) => !el.closest("[hidden]") && !el.disabled && el.getClientRects().length > 0;
       const target = [...dock.querySelectorAll("wa-select, wa-radio-group, wa-textarea")].find(visible)
@@ -3895,6 +4125,15 @@
     function ingestStatus(data) {
       if (data && data.thread_id && data.thread_id !== $("thread").value.trim()) return;
       showError($("startError"), "");
+      const pending = data.awaiting_human;
+      const attachKey = pending ? data.thread_id + "|" + (pending.since || "") : "";
+      if (attachKey !== replyAttachKey) {
+        replyAttachKey = attachKey;
+        replyAttachments = [];
+        renderReplyAttachments();
+        itemAnswers = {};
+        $("gateItems").dataset.key = "";
+      }
       applyStatus(data);
       applyBoundRunName(data);
       syncThreadChrome($("thread").value.trim(), data.values && data.values.run_name);
@@ -3914,6 +4153,7 @@
         $("bannerGate").hidden = !gateLabel;
         applyHitlFormMode(ah);
         syncGateDecision(ah);
+        syncGateItems(ah);
         renderReview(data.review);
         syncHumanChoices(data);
       } else {
@@ -3933,6 +4173,7 @@
           $("gateIdleHint").textContent = "暂无待办；需批复或澄清时表单会出现在此。";
         }
         applyHitlFormMode(null);
+        syncGateItems(null);
         renderReview([]);
         syncHumanChoices(null);
       }
@@ -4072,9 +4313,9 @@
     }
 
     $("btnStart").onclick = async () => {
-      showError($("startError"), "");
+      showError($("composeError"), "");
       const reasoningError = runReasoningError();
-      if (reasoningError) { showError($("startError"), reasoningError); return; }
+      if (reasoningError) { showError($("composeError"), reasoningError); return; }
       await settleDraftSaves();
       const body = {
         human_request: $("req").value.trim(),
@@ -4089,7 +4330,7 @@
         role_model_params: pendingRoleModelParams,
       };
       if (!body.project_id) {
-        showError($("startError"), "先选择项目。");
+        showError($("composeError"), "先选择项目。");
         $("project").focus();
         return;
       }
@@ -4098,11 +4339,11 @@
       const known = await fetch("/api/workflows").then((r) => r.json());
       const workflows = (known && known.workflows) || [];
       if (!chosen || !workflows.some((item) => item.workflow_id === chosen)) {
-        showError($("startError"), "这个项目还没有流程。");
+        showError($("composeError"), "这个项目还没有流程。");
         return;
       }
       if (!body.human_request) {
-        showError($("startError"), "请先填写交付目标。");
+        showError($("composeError"), "请先填写交付目标。");
         $("req").focus();
         return;
       }
@@ -4133,7 +4374,7 @@
           syncUrlThread(previousThread);
           syncThreadChrome(previousThread, "");
           if (!previousThread && draftId) syncUrlDraft(draftId);
-          showError($("startError"), apiErrorMessage(data, "启动失败，请检查项目配置与所选流程。"));
+          showError($("composeError"), apiErrorMessage(data, "启动失败，请检查项目配置与所选流程。"));
           syncStartButton(lastStatus && lastStatus.phase);
           syncStopButton(lastStatus && lastStatus.phase);
           return;
@@ -4167,7 +4408,7 @@
           syncThreadChrome(previousThread, "");
           if (!previousThread && draftId) syncUrlDraft(draftId);
         }
-        showError($("startError"), "启动没有返回。检查服务是否还在，然后重试。");
+        showError($("composeError"), "启动没有返回。检查服务是否还在，然后重试。");
         syncStartButton(lastStatus && lastStatus.phase);
         syncStopButton(lastStatus && lastStatus.phase);
       } finally {
@@ -4301,8 +4542,31 @@
       setLoading(btn, true);
       try {
         const payload = { human_reply: $("reply").value, channel: "web" };
-        if (awaitingKind === "gate") {
+        if (replyAttachments.length) payload.attachments = replyAttachments.map((item) => ({ id: item.id }));
+        if (awaitingKind === "gate" && gateItems.length) {
+          const { missing, rejected } = itemStats();
+          if (gatePassRule === "all" && missing.length) {
+            showError($("hitlError"), "还有必答项没有结论：" + missing.map((item) => "「" + item.title + "」").join("、") + "。");
+            return;
+          }
+          const blank = rejected.find((item) => !String(itemAnswers[item.id].note || "").trim());
+          if (blank) {
+            showError($("hitlError"), "「" + blank.title + "」不通过，要写明原因。");
+            return;
+          }
+          payload.item_decisions = gateItems
+            .filter((item) => itemAnswers[item.id] && itemAnswers[item.id].decision)
+            .map((item) => ({ id: item.id, decision: itemAnswers[item.id].decision, note: itemAnswers[item.id].note || "" }));
+          payload.gate_decision = gatePassRule === "all" ? (rejected.length ? "rejected" : "approved") : $("decision").value;
+        } else if (awaitingKind === "gate") {
           payload.gate_decision = $("decision").value;
+          if (!$("branchChoice").hidden && payload.gate_decision === "approved") {
+            payload.branch_choice = $("branchChoice").value;
+            if (!payload.branch_choice) {
+              showError($("hitlError"), "先选定采用哪一路。");
+              return;
+            }
+          }
         } else if (awaitingKind === "escalation") {
           payload.escalation_choice = $("escalationChoice").value;
         }
@@ -4317,6 +4581,8 @@
           return;
         }
         $("reply").value = "";
+        replyAttachments = [];
+        renderReplyAttachments();
         noteFeishu(data);
         await refresh();
       } finally {
@@ -4325,6 +4591,30 @@
     };
 
     $("btnRefresh").onclick = refresh;
+    $("btnReplyAttach").addEventListener("click", () => $("replyAttachInput").click());
+    $("replyAttachInput").addEventListener("change", () => {
+      uploadInto($("replyAttachInput").files, replyAttachments, $("hitlError"), renderReplyAttachments);
+      $("replyAttachInput").value = "";
+    });
+    const replyBox = $("replyBox");
+    ["dragenter", "dragover"].forEach((name) => {
+      replyBox.addEventListener(name, (event) => {
+        event.preventDefault();
+        replyBox.classList.add("is-dropping");
+      });
+    });
+    ["dragleave", "drop"].forEach((name) => {
+      replyBox.addEventListener(name, (event) => {
+        event.preventDefault();
+        replyBox.classList.remove("is-dropping");
+      });
+    });
+    replyBox.addEventListener("drop", (event) => {
+      uploadInto(event.dataTransfer && event.dataTransfer.files, replyAttachments, $("hitlError"), renderReplyAttachments);
+    });
+    $("decision").addEventListener("change", () => {
+      $("branchChoice").disabled = $("decision").value === "rejected";
+    });
 
     $("btnAttach").addEventListener("click", () => $("attachInput").click());
     $("attachInput").addEventListener("change", () => {
@@ -4351,16 +4641,16 @@
     }
 
     $("btnSaveRun").onclick = async () => {
-      showError($("startError"), "");
+      showError($("composeError"), "");
       showRunSaved("");
       const projectId = String($("project").value || "").trim();
       if (!projectId) {
-        showError($("startError"), "先选择项目。");
+        showError($("composeError"), "先选择项目。");
         $("project").focus();
         return;
       }
       const reasoningError = runReasoningError();
-      if (reasoningError) { showError($("startError"), reasoningError); return; }
+      if (reasoningError) { showError($("composeError"), reasoningError); return; }
       const btn = $("btnSaveRun");
       setLoading(btn, true);
       try {
@@ -4372,7 +4662,7 @@
         });
         const { ok, data } = await readFetchResponse(r);
         if (!ok) {
-          showError($("startError"), apiErrorMessage(data, "没有保存。"));
+          showError($("composeError"), apiErrorMessage(data, "没有保存。"));
           return;
         }
         draftId = data.draft_id;
@@ -4399,7 +4689,7 @@
         showRunSaved("已保存 " + (data.run_name || "") + "，尚未启动。");
         await loadRunList();
       } catch (_) {
-        showError($("startError"), "保存没有返回。检查服务是否还在，然后重试。");
+        showError($("composeError"), "保存没有返回。检查服务是否还在，然后重试。");
       } finally {
         setLoading(btn, false);
         syncStartButton(draftId ? "saved" : "idle");
@@ -4419,6 +4709,8 @@
       syncUrlThread("");
       syncUrlDraft("");
       showRunSaved("");
+      showError($("composeError"), "");
+      forgetRunRequest();
       pendingNodeTools = {};
       pendingRoleModels = {};
       pendingRoleReasoningEfforts = {};
@@ -4508,7 +4800,10 @@
       if (!$("thread").value.trim()) runNameTouched = true;
       scheduleDraftAutosave();
     });
-    $("req").addEventListener("input", scheduleDraftAutosave);
+    $("req").addEventListener("input", () => {
+      reqFromRun = false;
+      scheduleDraftAutosave();
+    });
 
     (function initFromUrl() {
       loadRunToolCatalog();
@@ -4805,6 +5100,9 @@
         help: "GeniStudio · 帮助",
       };
       const leavingRun = document.documentElement.dataset.route === "hitl" && route !== "hitl";
+      if (document.documentElement.dataset.route === "workflow" && route !== "workflow" && window.clearWorkflowNotice) {
+        window.clearWorkflowNotice();
+      }
       document.documentElement.dataset.route = route;
       document.title = titles[route];
       if (leavingRun) stopPoll();

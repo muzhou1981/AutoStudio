@@ -186,7 +186,7 @@ class CodexBackend:
             if is_stop_requested():
                 raise RunStopped("本轮已停止")
             if turn_path is not None:
-                finish_turn(turn_path, text)
+                finish_turn(turn_path, text, usage=_token_counts(usage))
             note_cost(_cost_line(role_name, chosen, usage))
             return text
         except Exception as exc:
@@ -274,18 +274,25 @@ def _interrupt(handle: Any) -> None:
         return
 
 
-def _cost_line(role_name: str, model: str, usage: Any) -> str:
-    prefix = f"role={role_name} backend=codex model={model or 'default'}"
+def _token_counts(usage: Any) -> dict[str, int] | None:
     last = usage.get("last") if isinstance(usage, dict) else getattr(usage, "last", None)
     if last is None:
-        return f"{prefix} usage=unknown"
+        return None
     if not isinstance(last, dict):
         last = last.model_dump()
     received = last.get("inputTokens", last.get("input_tokens"))
     sent = last.get("outputTokens", last.get("output_tokens"))
     if received is None or sent is None:
+        return None
+    return {"input_tokens": int(received), "output_tokens": int(sent)}
+
+
+def _cost_line(role_name: str, model: str, usage: Any) -> str:
+    prefix = f"role={role_name} backend=codex model={model or 'default'}"
+    counts = _token_counts(usage)
+    if counts is None:
         return f"{prefix} usage=unknown"
-    return f"{prefix} input_tokens={received} output_tokens={sent}"
+    return f"{prefix} input_tokens={counts['input_tokens']} output_tokens={counts['output_tokens']}"
 
 
 def _model_rows(listed: Any) -> list[dict[str, Any]]:

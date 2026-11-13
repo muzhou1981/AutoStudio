@@ -33,7 +33,7 @@
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css" />
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/utilities.css" />
   <link rel="stylesheet" href="/static/shared.css?v=20261112-run-ux" />
-  <link rel="stylesheet" href="/static/hitl.css?v=20261112-flow-review1" />
+  <link rel="stylesheet" href="/static/hitl.css?v=20261113-gate-items2" />
   <script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
 </head>
 <body>
@@ -220,26 +220,14 @@
             <span><b class="rail-mark">‖</b>已暂停</span>
             <span><b class="rail-mark">■</b>已停止</span>
             <span><i class="legend-swatch is-current"></i>当前步骤</span>
+            <span><i class="legend-swatch is-waiting"></i>等你批复</span>
             <span><i class="legend-swatch is-viewed"></i>右栏正在查看</span>
           </p>
           </div>
         </div>
-        <div class="run-composer" id="region-prompt">
-          <div class="prompt-box" id="promptBox">
-            <div id="attachList" class="attach-list" hidden></div>
-            <wa-textarea id="req" label="描述本轮交付目标" rows="3"></wa-textarea>
-            <div class="prompt-toolbar">
-              <button type="button" id="btnAttach" class="prompt-attach" aria-label="上传附件">
-                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></svg>
-                <span>上传附件</span>
-              </button>
-              <input id="attachInput" type="file" multiple hidden />
-            </div>
-          </div>
+        <div class="run-controls" id="region-controls">
           <wa-callout id="startError" class="run-action-error" variant="danger" hidden aria-live="polite"></wa-callout>
-          <div class="row-actions run-primary-actions">
-            <wa-button id="btnStart" variant="brand">启动</wa-button>
-            <wa-button id="btnSaveRun" appearance="outlined" variant="neutral">保存 Run 配置</wa-button>
+          <div class="row-actions run-control-actions">
             <wa-button id="btnContinueRun" appearance="outlined" variant="neutral" hidden>续跑</wa-button>
             <wa-button id="btnPause" appearance="outlined" variant="neutral" hidden>暂停</wa-button>
             <span class="run-actions-gap" aria-hidden="true"></span>
@@ -252,7 +240,6 @@
           </div>
           <p class="hint-block" id="pauseNote" hidden>本轮已暂停。已完成的节点不会重做。</p>
           <p class="hint-block" id="interruptHint" hidden>这一轮在中途中断。已完成的节点不会重做。</p>
-          <p class="save-note" id="runSaved" hidden aria-live="polite"></p>
           <p class="hint-block" id="feishuNote" hidden></p>
         </div>
       </main>
@@ -273,6 +260,26 @@
           </div>
           <div id="hitlDockResize" class="hitl-dock-resize" role="separator" aria-orientation="horizontal" aria-label="拖动调整人工待办区域高度" tabindex="0"></div>
           <div class="func-region inspect-hitl-dock" id="region-todo">
+            <div class="run-composer" id="region-prompt" hidden>
+              <div class="prompt-box" id="promptBox">
+                <div id="attachList" class="attach-list" hidden></div>
+                <wa-textarea id="req" label="描述本轮交付目标" rows="3"></wa-textarea>
+                <div class="prompt-toolbar">
+                  <button type="button" id="btnAttach" class="prompt-attach" aria-label="上传附件">
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></svg>
+                    <span>上传附件</span>
+                  </button>
+                  <input id="attachInput" type="file" multiple hidden />
+                </div>
+              </div>
+              <wa-callout id="composeError" class="run-action-error" variant="danger" hidden aria-live="polite"></wa-callout>
+              <div class="row-actions run-primary-actions">
+                <wa-button id="btnStart" variant="brand">启动</wa-button>
+                <wa-button id="btnSaveRun" appearance="outlined" variant="neutral">保存 Run 配置</wa-button>
+              </div>
+              <p class="save-note" id="runSaved" hidden aria-live="polite"></p>
+            </div>
+            <div class="dock-todo" id="dockTodo">
             <p class="section-title" id="hitlSectionTitle">人工待办</p>
             <p id="hitlAgentStatus" class="hitl-agent-live" hidden aria-live="polite"></p>
             <div id="hitlClarifyActions" class="hitl-clarify-actions" hidden></div>
@@ -283,10 +290,12 @@
               <article id="hitlReading" class="hitl-reading" hidden></article>
               <ul id="questionList" hidden class="question-list"></ul>
               <div id="fieldGateDecision">
+                <div id="gateItems" class="gate-items" hidden></div>
                 <wa-select id="decision" label="关卡决定" value="approved">
                   <wa-option value="approved">批准 — 继续流程</wa-option>
                   <wa-option value="rejected">驳回 — 结束本轮</wa-option>
                 </wa-select>
+                <wa-select id="branchChoice" label="采用哪一路" hint="对照写在上方；未采用的各路改动留作补丁" hidden></wa-select>
               </div>
               <div id="fieldEscalation" hidden>
                 <wa-select id="escalationChoice" label="升级决策" value="continue">
@@ -295,7 +304,17 @@
                   <wa-option value="abort">终止 — 结束本轮</wa-option>
                 </wa-select>
               </div>
-              <wa-textarea id="reply" label="附言" hint="可空" rows="3" placeholder="补充范围说明或驳回原因…"></wa-textarea>
+              <div class="prompt-box reply-box" id="replyBox">
+                <div id="replyAttachList" class="attach-list" hidden></div>
+                <wa-textarea id="reply" label="附言" hint="可空" rows="3" placeholder="补充范围说明或驳回原因…"></wa-textarea>
+                <div class="prompt-toolbar">
+                  <button type="button" id="btnReplyAttach" class="prompt-attach" aria-label="上传附件">
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></svg>
+                    <span>上传附件</span>
+                  </button>
+                  <input id="replyAttachInput" type="file" multiple hidden />
+                </div>
+              </div>
               <div class="row-actions">
                 <wa-button id="btnSubmit" variant="brand" disabled>提交并续跑</wa-button>
                 <wa-button id="btnRefresh" appearance="outlined" variant="neutral">刷新状态</wa-button>
@@ -303,6 +322,7 @@
               <wa-callout id="hitlError" variant="danger" hidden></wa-callout>
             </wa-card>
             <p class="status-empty gate-idle-hint" id="gateIdleHint" title="暂无待办；需批复或澄清时表单会出现在此。">暂无待办；需批复或澄清时表单会出现在此。</p>
+            </div>
           </div>
         </div>
       </aside>
@@ -313,6 +333,7 @@
           <p class="section-title" id="flowHeading">编排</p>
           <input id="flowImport" type="file" accept=".yaml,.yml,text/yaml,text/x-yaml" hidden />
           <div id="flowOpen" hidden>
+            <nav class="flow-trail" id="flowTrail" aria-label="子图所在的上层流程" hidden></nav>
             <div class="flow-head-row">
               <wa-select id="flowPick" label="选择流程" placeholder="选择流程"></wa-select>
               <button type="button" class="role-menu-chip flow-tool-chip" id="btnFlowAdd" aria-haspopup="menu" aria-expanded="false" hidden>
@@ -320,6 +341,9 @@
                 <span id="btnFlowAddLabel">添加节点</span>
                 <span class="role-chip-caret" aria-hidden="true"></span>
               </button>
+              <button type="button" class="role-menu-chip flow-tool-chip flow-history-btn" id="btnFlowUndo" aria-label="撤销" title="撤销（Ctrl+Z）" hidden disabled>↶</button>
+              <button type="button" class="role-menu-chip flow-tool-chip flow-history-btn" id="btnFlowRedo" aria-label="重做" title="重做（Ctrl+Shift+Z）" hidden disabled>↷</button>
+              <button type="button" class="flow-check" id="btnFlowCheck" hidden></button>
               <span class="flow-dirty" id="flowDirty" hidden>未保存</span>
               <wa-button id="btnSaveFlow" variant="brand" hidden>保存</wa-button>
               <button type="button" class="role-menu-chip flow-tool-chip" id="btnFlowMore" aria-haspopup="menu" aria-expanded="false" hidden>
@@ -363,6 +387,7 @@
             <ol class="flow-column" id="flowColumn"></ol>
             <ul class="flow-legend" aria-label="连线图例">
               <li><span class="flow-legend-line" aria-hidden="true"></span>顺序</li>
+              <li><svg class="decision-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.5 2h7A2.5 2.5 0 0 1 14 4.5v7a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 2 11.5v-7A2.5 2.5 0 0 1 4.5 2Z"/></svg>决策点：由人批复</li>
               <li><span class="flow-legend-line is-return" aria-hidden="true"></span>回退：未通过时回到更早的节点</li>
               <li><span class="flow-legend-line is-reject" aria-hidden="true"></span>不通过：决策点不批准时的去向</li>
             </ul>
@@ -381,6 +406,16 @@
             <wa-textarea id="flowDescription" label="说明" rows="6" hidden></wa-textarea>
             <p class="hint-block" id="flowIdHint">标识按标题自动生成。中文标题会译成英文。创建后不再改变。</p>
             <p class="hint-block" id="flowIdLine" hidden></p>
+            <div class="flow-problems" id="flowProblems" hidden>
+              <p class="flow-problems-title">运行前待补</p>
+              <ul id="flowProblemList"></ul>
+            </div>
+            <div class="hint-block flow-usage" id="flowUsage" hidden></div>
+            <p class="flow-stats-note" id="flowStatsNote" hidden></p>
+            <details class="flow-versions" id="flowVersions" hidden>
+              <summary id="flowVersionSummary">版本记录</summary>
+              <ol class="flow-version-list" id="flowVersionList"></ol>
+            </details>
             <p class="hint-block" id="flowMetaHint">点空白处回到这里。点一个节点或一条虚线，在右侧修改它。</p>
           </div>
           <div id="flowInspectNode" hidden>
@@ -389,6 +424,15 @@
               <p class="section-title">设置</p>
               <div class="role-menu-shell" id="flowNodeMenuShell"></div>
               <p class="hint-block" id="flowNodeRouteHint" hidden></p>
+            </div>
+            <div id="flowGateItemsBox" hidden>
+              <p class="section-title">决策项 <span class="flow-io-count" id="flowGateItemsCount"></span></p>
+              <p class="hint-block" id="flowGateItemsEmpty">没有决策项时，人对整个决策点批准或不通过。需要逐项核对时，在这里列出条目。</p>
+              <ol id="flowGateItemsList" class="gate-item-edit-list"></ol>
+              <p class="branch-join" id="flowGateRule" hidden></p>
+              <div class="row-actions">
+                <wa-button id="btnAddGateItem" size="s" appearance="outlined" variant="neutral">添加决策项</wa-button>
+              </div>
             </div>
             <div id="flowSubgraphBox" hidden>
               <p class="hint-block" id="flowSubgraphNote" hidden></p>
@@ -812,7 +856,8 @@
           </article>
           <article class="help-copy" data-help-article="run" hidden>
             <ul>
-              <li>先选择项目，再填写交付目标并启动。</li>
+              <li>先选择项目，再填写交付目标并启动。交付目标、附件与「启动」在右栏下方，点「启动」格子时出现；尚未启动时默认就是这一格。点其它格子时，右栏下方是人工待办。</li>
+              <li>人工待办的附言下方可以上传附件，随批复一并提交；附件放进本轮目录，之后的活动可以直接读取。</li>
               <li>名称默认是项目标识加递增序号，启动前可以改。</li>
               <li>未启动的 Run 改动后自动保存为草稿：交付目标、附件、各节点的 Skill、各角色的模型、推理强度、Fast 与上下文，停笔约 1 秒即存到服务端，切换 Run、新建或关闭页面前也会先存。「保存 Run 配置」立即保存一次。之后可从 Run 列表打开，修改后再启动。</li>
               <li>中栏是这一轮的泳道，只列出当轮会走到的节点。</li>
@@ -825,12 +870,19 @@
           <article class="help-copy" data-help-article="workflow" hidden>
             <ul>
               <li>可以新建、编辑或导入一份流程。新建只写标题，标识按标题生成。编辑时选中一份就载入，选择框保持可用。导入读取 workflow.yaml，内置标记不会带入。</li>
-              <li>载入非内置流程后，删除在选择框右侧的「更多」里，删除前要确认。内置流程只能查看和复制，不能删除。</li>
+              <li>载入非内置流程后，删除在选择框右侧的「更多」里，删除前要确认。内置流程只能查看和复制，不能删除。仍被项目选用或被别的流程当作子图时不能删除，右栏列出引用方。</li>
+              <li>↶、↷ 撤销与重做画布上的修改；Ctrl+Z、Ctrl+Shift+Z 与 Ctrl+S 分别对应撤销、重做与保存。</li>
+              <li>选择框右侧的标记写着「可以运行」或「N 处待补」：按启动时的规则检查当前画布，待补项列在右栏，相关节点带红点。</li>
+              <li>从上层流程打开子图后，标题下方的路径可以回到上层流程。</li>
+              <li>「更多」里的「显示运行数据」在各节点下方叠加历次运行的执行次数、耗时、回退、升级与驳回，悬停查看全部。</li>
+              <li>每次保存都会留下一版，右栏「版本记录」列出各版的改动。「载入到画布」把旧版放回画布，保存后才生效。</li>
               <li>宽屏用泳道排列活动和决策点。右栏左缘可以拖动，改变右栏宽度。</li>
               <li>「添加节点」或连线中点的「+」可以插入活动、决策点、并行或子图。回退和不通过画成虚线，点虚线可以改去向或删除。</li>
               <li>活动要写出输入和输出。每项输出要有模板。</li>
               <li>模板是服务进程能读取的本地文件，或一个 http、https 链接。</li>
-              <li>决策点目前的决定类型是批准或驳回。</li>
+              <li>决策点可以列出几个决策项，运行时逐项给「通过」或「不通过」。默认全部通过才放行，任一项不通过即退回，并把原因交给退回的活动；也可以设成只作核对清单，最后由人决定。</li>
+              <li>决策点的决定类型有「批准或驳回」与「择一」。并行的汇合方式选「对照择一」时，各路改动先不合并，汇合处写出两路对照；紧随其后的「择一」决策点由人选定采用哪一路，未采用的改动留作补丁。</li>
+              <li>并行支路里的活动可以回退到同一支路里更早的活动。</li>
               <li>把这份流程选进项目后，下一轮按这些节点执行。</li>
               <li>活动没有输出，或某项输出没有模板时，不能启动。</li>
             </ul>
@@ -895,7 +947,8 @@
   </div>
 
   <script src="/static/api-utils.js?v=20261110-web-ui"></script>
-  <script src="/static/hitl.js?v=20261112-run-list2"></script>
+  <script src="/static/icons.js?v=20261113-gate-icon3"></script>
+  <script src="/static/hitl.js?v=20261113-gate-items1"></script>
   <div id="filePicker" class="dir-picker" hidden>
     <div class="dir-picker-card" role="dialog" aria-modal="true" aria-labelledby="filePickerTitle">
       <p class="section-title" id="filePickerTitle">选择模板文件</p>
@@ -935,7 +988,7 @@
     </div>
   </div>
   <script src="/static/config.js?v=20261112-project-form"></script>
-  <script src="/static/workflow.js?v=20261112-flow-review1"></script>
+  <script src="/static/workflow.js?v=20261113-gate-items2"></script>
   <script src="/static/role.js?v=20261112-role-pick-top"></script>
 </body>
 </html>

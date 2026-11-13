@@ -947,6 +947,9 @@ class GraphRunService:
         channel: str = "web",
         escalation_choice: EscalationChoice | None = None,
         actor: str = "",
+        branch_choice: str = "",
+        attachments: list[str] | None = None,
+        item_decisions: list[dict[str, Any]] | None = None,
     ) -> RunStatus:
         """写入人的决定并在当前线程推进到下一个停点（命令行与测试使用）。"""
         advance = self._apply_hitl(
@@ -956,6 +959,9 @@ class GraphRunService:
             channel=channel,
             escalation_choice=escalation_choice,
             actor=actor,
+            branch_choice=branch_choice,
+            attachments=attachments,
+            item_decisions=item_decisions,
         )
         if advance:
             self._invoke(thread_id, None)
@@ -970,6 +976,9 @@ class GraphRunService:
         channel: str = "web",
         escalation_choice: EscalationChoice | None = None,
         actor: str = "",
+        branch_choice: str = "",
+        attachments: list[str] | None = None,
+        item_decisions: list[dict[str, Any]] | None = None,
     ) -> RunStatus:
         """写入人的决定并入队推进任务，立即返回（Web 与飞书使用）。"""
         job = self._apply_hitl_and_enqueue(
@@ -979,6 +988,9 @@ class GraphRunService:
             channel=channel,
             escalation_choice=escalation_choice,
             actor=actor,
+            branch_choice=branch_choice,
+            attachments=attachments,
+            item_decisions=item_decisions,
         )
         self._kick(job)
         return self.status(thread_id)
@@ -999,6 +1011,9 @@ class GraphRunService:
         channel: str = "web",
         escalation_choice: EscalationChoice | None = None,
         actor: str = "",
+        branch_choice: str = "",
+        attachments: list[str] | None = None,
+        item_decisions: list[dict[str, Any]] | None = None,
     ) -> bool:
         """写入人的决定；返回是否需要继续推进图。"""
         st = self.status(thread_id)
@@ -1008,6 +1023,27 @@ class GraphRunService:
         if channel == "feishu":
             _check_feishu_approver(str(st.values.get("project_id") or ""), actor)
         awaiting = st.awaiting_human
+        extra: dict[str, Any] = {}
+        judged: list[dict[str, str]] = []
+        checklist = presenter.gate_items(st.values, awaiting.gate_id or "") if awaiting.kind == "gate" else None
+        if checklist is not None:
+            from geni_studio.hitl.gate_items import (
+                ItemsError,
+                items_section,
+                judge_items,
+            )
+
+            try:
+                gate_decision, judged = judge_items(checklist, item_decisions, gate_decision)
+            except ItemsError as exc:
+                raise HitlError(str(exc)) from exc
+            human_reply = "\n\n".join(part for part in (human_reply.strip(), items_section(judged)) if part)
+        if attachments:
+            from geni_studio.hitl.attachments import reply_section
+
+            paths = _stage_reply_attachments(thread_id, st.values, attachments)
+            human_reply = "\n\n".join(part for part in (human_reply.strip(), reply_section(paths)) if part)
+            extra["attachments"] = [*(st.values.get("attachments") or []), *paths]
         cfg = self._config(thread_id)
         audit = audit_patch(
             st.values,
@@ -1027,10 +1063,19 @@ class GraphRunService:
                 "gate_decision": gate_decision,
                 "human_reply": human_reply,
                 **audit,
+                **extra,
             }
+            pick = presenter.gate_pick(st.values, awaiting.gate_id or "")
+            picked = ""
+            if pick is not None and gate_decision == "approved":
+                names = {item["id"]: item["name"] for item in pick["branches"]}
+                if branch_choice not in names:
+                    raise HitlError("择一决策点要指定采用哪一路。")
+                picked = names[branch_choice]
+                patch["branch_artifacts"] = {f"{pick['from']}:__picked__": branch_choice}
             self._write_values(thread_id, patch)
             _note_answer(thread_id, st, human_reply, gate_decision, channel, actor)
-            _note_decision(thread_id, st, human_reply, gate_decision, channel, actor)
+            _note_decision(thread_id, st, human_reply, gate_decision, channel, actor, picked=picked, items=judged)
             return True
 
         if awaiting.kind == "pm_clarification":
@@ -1048,6 +1093,7 @@ class GraphRunService:
                 "hitl_clarification_resolved": True,
                 **self._clear_pending_patch(),
                 **audit,
+                **extra,
             }
             self._write_values(thread_id, patch)
             _note_answer(thread_id, st, human_reply, "replied", channel, actor)
@@ -1073,6 +1119,7 @@ class GraphRunService:
                 "escalation_choice": choice,
                 **self._clear_pending_patch(),
                 **audit,
+                **extra,
             }
             self._write_values(thread_id, patch)
             _note_answer(thread_id, st, human_reply, str(choice), channel, actor)
@@ -1110,6 +1157,7 @@ class GraphRunService:
         human_reply: str = "",
         escalation_choice: EscalationChoice | None = None,
         actor: str = "",
+        branch_choice: str = "",
     ) -> RunStatus:
         """飞书卡片回调：写入决定后入队推进，立即返回。"""
         if escalation_choice is not None:
@@ -1128,6 +1176,7 @@ class GraphRunService:
             human_reply=human_reply,
             channel="feishu",
             actor=actor,
+            branch_choice=branch_choice,
         )
 
     def stop(self, thread_id: str, *, channel: str = "web", actor: str = "") -> RunStatus:
@@ -1270,6 +1319,11 @@ class GraphRunService:
     def taken_run_names(self, project_id: str) -> set[str]:
         self._ensure_index()
         return self.runtime_store().taken_names(project_id)
+
+    def workflow_node_stats(self, workflow_id: str, node_ids: list[str]) -> dict[str, Any]:
+        from geni_studio.hitl.node_stats import workflow_node_stats
+
+        return workflow_node_stats(latest_run_records(self._graph), workflow_id, node_ids)
 
     def _ensure_index(self) -> None:
         """首次使用运行索引时，从检查点回填一次。"""
@@ -1666,8 +1720,36 @@ def _predecessors(graph: CompiledStateGraph, targets: set[str]) -> list[str]:
     return [node for node in found if node in graph.nodes and node != START]
 
 
+def _stage_reply_attachments(thread_id: str, values: dict[str, Any], upload_ids: list[str]) -> list[str]:
+    """答复附件放进本轮目录；在工作区内时写相对路径，否则写绝对路径。"""
+    from geni_studio.hitl.attachments import stage_reply_attachments
+    from geni_studio.workspace.layout import run_dir_for_workspace
+
+    workspace = str(values.get("workspace_path") or "")
+    run_dir = run_dir_for_workspace(workspace, thread_id) if workspace else None
+    if run_dir is None:
+        from geni_studio.config.context import factory_root
+
+        run_dir = factory_root() / "runs" / "inbox" / thread_id
+    staged = stage_reply_attachments(upload_ids, run_dir / "attachments")
+    root = Path(workspace).resolve() if workspace else None
+    out: list[str] = []
+    for path in staged:
+        resolved = path.resolve()
+        out.append(str(resolved.relative_to(root)) if root and resolved.is_relative_to(root) else str(resolved))
+    return out
+
+
 def _note_decision(
-    thread_id: str, st: RunStatus, reply: str, decision: str, channel: str, actor: str
+    thread_id: str,
+    st: RunStatus,
+    reply: str,
+    decision: str,
+    channel: str,
+    actor: str,
+    *,
+    picked: str = "",
+    items: list[dict[str, str]] | None = None,
 ) -> None:
     """记下停点当时给人看的内容与人的选择，记在待办所在的格子名下；写失败不影响批复本身。"""
     from geni_studio.hitl.decision_log import record_decision
@@ -1694,6 +1776,8 @@ def _note_decision(
             reply=reply,
             channel=channel,
             actor=actor,
+            picked=picked,
+            items=items,
             workspace_path=str(st.values.get("workspace_path") or ""),
         )
     except OSError:

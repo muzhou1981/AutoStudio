@@ -19,8 +19,12 @@ from geni_studio.workflows.default import (
 )
 
 _OPTIONAL_OUTPUTS = frozenset({"change_request"})
-DECISIONS = {"approve": "批准或驳回"}
+DECISIONS = {"approve": "批准或驳回", "pick": "择一（两路对照）"}
+_COMPARISON = "branch_comparison"
+_PICKED = "__picked__"
 _ESCALATE = "workflow_escalate"
+# 支路内回退的修复说明记在 branch_artifacts 的保留键下，汇合时不当作产物。
+_BRANCH_FEEDBACK = "__return_feedback__"
 
 
 def resolve_executable(workflow: dict[str, Any], *, root: Any = None) -> dict[str, Any]:
@@ -81,6 +85,25 @@ def compile_for_project(
     return compiled, {**run_state(flat), "workflow_definition_ref": put(flat)}
 
 
+def check_workflow(workflow: dict[str, Any], workflow_id: str, *, root: Any = None) -> list[str]:
+    """按启动时的同一套规则检查草稿能否运行，只编译不执行。返回待补的问题，空表示可以运行。"""
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from geni_studio.config.context import factory_root
+    from geni_studio.config.workflow_defs import validate_workflow
+
+    root = root or factory_root()
+    try:
+        data = validate_workflow(workflow, root=root, workflow_id=workflow_id)
+        flat = _prepare_flat(resolve_executable(data, root=root), root)
+        compile_workflow(flat, checkpointer=MemorySaver())
+    except ConfigError as exc:
+        return [line for line in str(exc).splitlines() if line.strip()]
+    except OSError as exc:
+        return [f"读不到模板文件：{exc.filename or exc}"]
+    return []
+
+
 def compile_workflow(workflow: dict[str, Any], *, checkpointer: BaseCheckpointSaver) -> Any:
     nodes = deepcopy(workflow["nodes"])
     executable = [node for node in nodes if node["kind"] not in {"start", "end"}]
@@ -129,6 +152,8 @@ def step_callable(step: dict[str, Any], *, builtin: bool = False):
             fn = skip_if_disabled(str(step["id"]))(fn)
     elif step["kind"] == "system":
         fn = _system(step)
+    elif step.get("decision") == "pick":
+        fn = _pick_gate(step)
     else:
         fn = _gate(step)
     return _when(step, fn)
@@ -139,15 +164,29 @@ def _validate_parallel(nodes):
         if node.get("kind") != "parallel":
             continue
         for branch in node["branches"]:
+            earlier: set[str] = set()
             for step in branch["steps"]:
-                if (
-                    step["kind"] != "activity"
-                    or step.get("returns_to")
-                    or step.get("routes")
-                    or step.get("next")
-                    or step.get("effect")
-                ):
-                    raise ConfigError("并行支路暂不支持人工关卡、回退、条件去向、内置后处理或嵌套并行，请拆为顺序流程")
+                if step["kind"] == "gate":
+                    reason = "人工关卡"
+                elif step["kind"] == "parallel":
+                    reason = "嵌套并行"
+                elif step["kind"] != "activity":
+                    reason = "系统节点"
+                elif step.get("returns_to") and str(step["returns_to"]) not in earlier:
+                    reason = "回退到支路以外的节点"
+                elif step.get("routes") or step.get("next"):
+                    reason = "条件去向"
+                elif step.get("effect"):
+                    reason = "内置后处理"
+                else:
+                    earlier.add(str(step["id"]))
+                    continue
+                where = f"「{node.get('name') or node['id']}」的支路「{branch.get('name') or branch['id']}」"
+                step_name = step.get("name") or step["id"]
+                raise ConfigError(
+                    f"并行{where}里有{reason}「{step_name}」。"
+                    "并行支路暂不支持人工关卡、越出支路的回退、条件去向、内置后处理或嵌套并行，请拆为顺序流程"
+                )
 
 
 def _fork(node):
@@ -274,6 +313,8 @@ def run_state(workflow: dict[str, Any]) -> dict[str, Any]:
                 "kind": node["kind"],
                 "artifacts": list(outputs) if node["kind"] == "activity" else [],
                 "reject_to": str(node.get("reject_to") or "") if node["kind"] == "gate" else "",
+                **({"pick_from": node["pick_from"], "pick_branches": node["pick_branches"]} if node.get("pick_from") else {}),
+                **({"items": node["items"], "pass_rule": node.get("pass_rule") or "all"} if node.get("items") else {}),
             }
         )
     return {
@@ -426,7 +467,11 @@ def _activity_run(node: dict[str, Any]):
         attached = prompt_section(state.get("attachments"))
         if attached:
             sections.append(attached)
-        feedback = str(state.get("return_feedback") or "")
+        if node.get("parallel_id"):
+            local = f"{node['parallel_id']}:{node['branch_id']}:{_BRANCH_FEEDBACK}"
+            feedback = str((state.get("branch_artifacts") or {}).get(local) or "")
+        else:
+            feedback = str(state.get("return_feedback") or "")
         if feedback:
             sections.append(f"## 需要修复的问题\n上一轮未通过，原因如下，请逐条修复：\n{feedback}")
         for key in inputs:
@@ -508,6 +553,9 @@ def _activity_update(
             f"{node['parallel_id']}:{node['branch_id']}:{key}": value
             for key, value in values.items()
         }
+        feedback_key = f"{node['parallel_id']}:{node['branch_id']}:{_BRANCH_FEEDBACK}"
+        if (state.get("branch_artifacts") or {}).get(feedback_key) and not failed:
+            bucket[feedback_key] = ""
         update: dict[str, Any] = {"branch_artifacts": bucket}
     else:
         update = {}
@@ -528,11 +576,15 @@ def _activity_update(
             origin = node["id"]
         else:
             target = str(node.get("graph_return") or node["returns_to"])
-        if not parallel:
-            update["return_feedback"] = f"「{node.get('label') or node['name']}」未通过：\n{body}"
+        message = f"「{node.get('label') or node['name']}」未通过：\n{body}"
+        if parallel:
+            update["branch_artifacts"][f"{node['parallel_id']}:{node['branch_id']}:{_BRANCH_FEEDBACK}"] = message
+        else:
+            update["return_feedback"] = message
     if parallel:
         update["return_counts"] = {node["id"]: counts[node["id"]]} if target else {}
-        if target:
+        if node.get("returns_to"):
+            # 通过时也要写空串，否则上一次的回退去向留在按键合并的通道里，路由会再次退回。
             update["return_decisions"] = {node["id"]: target}
         if origin:
             update["escalated_from"] = origin
@@ -624,11 +676,13 @@ def _escalate(state: FactoryState) -> dict[str, Any]:
     }
 
 
-def _gate_route(nxt: str, reject: str = ""):
+def _gate_route(nxt: str, reject: str = "", *, pick: bool = False):
     key = _edge_key(nxt)
     reject_key = reject or "__end__"
 
     def route(state: FactoryState) -> str:
+        if pick and state.get("hitl_pending_kind") == "escalation":
+            return "__end__"
         if state.get("last_gate_decision") == "rejected":
             return reject_key
         return key
@@ -689,6 +743,7 @@ def _prepare_flat(workflow: dict[str, Any], root: Any) -> dict[str, Any]:
             mapped = id_map.get(f"{prefix}{target}") or id_map.get(target)
             if mapped:
                 node[key] = mapped
+    _bind_picks(nodes)
     _bind_contracts(nodes, root)
     _check_artifact_flow(nodes)
     from pathlib import Path
@@ -764,6 +819,7 @@ def _flatten_node(
             "fork_id": parallel_id + "__fork",
             "join_id": parallel_id + "__join",
             "branches": branches,
+            "join": "compare" if node.get("join") == "compare" else "merge",
         }
         id_map[parallel_id] = str(folded["fork_id"])
         return [folded]
@@ -788,9 +844,30 @@ def _name_problems(activity: str, names: list[str]) -> list[str]:
     return [f"活动「{activity}」的产物名不合法：{'、'.join(bad)}。自定义产物名只能用小写字母、数字和下划线，并以字母开头。"]
 
 
+def _bind_picks(nodes: list[dict[str, Any]]) -> None:
+    """展开后，把每个「择一」决策点绑定到它前面最近的对照并行，见 ADR 0031。"""
+    pending: dict[str, Any] | None = None
+    for node in nodes:
+        if node.get("kind") == "parallel":
+            if pending is not None:
+                raise ConfigError(f"并行「{pending['name']}」选了对照择一，要先放一个「择一」决策点，再开下一个并行。")
+            if node.get("join") == "compare":
+                pending = node
+        elif node.get("kind") == "gate" and node.get("decision") == "pick":
+            if pending is None:
+                raise ConfigError(f"「{node.get('name') or node['id']}」是择一决策点，但前面没有选了对照择一的并行。")
+            node["pick_from"] = pending["id"]
+            node["pick_branches"] = [{"id": str(b["id"]), "name": str(b["name"])} for b in pending["branches"]]
+            pending = None
+    if pending is not None:
+        raise ConfigError(f"并行「{pending['name']}」选了对照择一，后面要有一个「择一」决策点。")
+
+
 def _check_artifact_flow(nodes: list[dict[str, Any]]) -> None:
     """自定义产物须由流程中的某个活动产出，才能被其他活动读取。"""
     produced: set[str] = set()
+    if any(node.get("kind") == "parallel" and node.get("join") == "compare" for node in nodes):
+        produced.add(_COMPARISON)
     for node in _iter_steps(nodes):
         if node.get("kind") == "activity":
             produced.update(str(item) for item in node.get("outputs") or [])
@@ -897,7 +974,9 @@ def _link_one(builder, node, nxt, nodes, by_id, executable) -> None:
         paths = {_edge_key(nxt): nxt, "__end__": END}
         if reject_key != "__end__":
             paths[reject_key] = _node_or_end(reject_key, by_id, executable)
-        builder.add_conditional_edges(node["id"], _gate_route(nxt, reject_key), paths)
+        builder.add_conditional_edges(
+            node["id"], _gate_route(nxt, reject_key, pick=node.get("decision") == "pick"), paths
+        )
         return
     if returns:
         target = _graph_target(returns, nodes, executable)
@@ -975,6 +1054,138 @@ def _merge_branches(node: dict[str, Any], state: FactoryState, order: list[str],
     return update
 
 
+def _comparison(
+    node: dict[str, Any],
+    state: FactoryState,
+    order: list[str],
+    names: dict[str, str],
+    grouped: dict[str, list[tuple[str, str]]],
+) -> str:
+    """对照模式汇合时不合并，逐路写出产物与改动，供择一决策点与其前的评审阅读。"""
+    from pathlib import Path
+
+    from geni_studio.workspace.branches import branch_changes
+    from geni_studio.workspace.layout import WorkspaceError
+
+    spaces = state.get("branch_workspaces") or {}
+    base = str(spaces.get(f"{node['id']}:__base__") or "")
+    lines = [f"# 两路对照：{node['name']}", "", "各路改动尚未合并。择一决策点选定后，只把选中的一路合并回本轮工作区。"]
+    for branch_id in order:
+        lines += ["", f"## {names[branch_id]}"]
+        produced = [key for key, pairs in grouped.items() if any(title == names[branch_id] for title, _ in pairs)]
+        lines.append("产物：" + ("、".join(f"`{key}`" for key in produced) if produced else "无"))
+        path = str(spaces.get(f"{node['id']}:{branch_id}") or "")
+        if not (base and path):
+            continue
+        try:
+            _patch, stats = branch_changes(Path(path), base)
+        except WorkspaceError as exc:
+            lines.append(f"读取改动失败：{exc}")
+            continue
+        if not stats:
+            lines.append("没有改动文件。")
+        else:
+            added = sum(item[1] for item in stats)
+            removed = sum(item[2] for item in stats)
+            lines.append(f"改动 {len(stats)} 个文件，新增 {added} 行，删除 {removed} 行：")
+            lines.extend(f"- `{name}` +{plus} −{minus}" for name, plus, minus in stats[:30])
+            if len(stats) > 30:
+                lines.append(f"- 另有 {len(stats) - 30} 个文件")
+        lines.append(f"工作树：`{path}`")
+    return "\n".join(lines)
+
+
+def _pick_gate(node: dict[str, Any]):
+    """择一决策点：批准时采用选中的一路（产物取该路版本，改动合并回本轮工作区）；驳回时都不采用。"""
+    parallel_id = str(node["pick_from"])
+    names = {str(item["id"]): str(item["name"]) for item in node.get("pick_branches") or []}
+
+    def fn(state: FactoryState) -> dict[str, Any]:
+        from geni_studio.hitl.gate import apply_gate_node
+
+        found = state.get("branch_artifacts") or {}
+        chosen = str(found.get(f"{parallel_id}:{_PICKED}") or "")
+        update = apply_gate_node(str(node["id"]), state)
+        update["return_target"] = ""
+        adopt = chosen if update.get("last_gate_decision") == "approved" and chosen in names else ""
+        bucket: dict[str, str] = {f"{parallel_id}:{_PICKED}": ""}
+        update["branch_artifacts"] = bucket
+        if adopt:
+            prefix = f"{parallel_id}:{adopt}:"
+            for key, text in found.items():
+                artifact = str(key)[len(prefix) :] if str(key).startswith(prefix) else ""
+                if artifact and not artifact.startswith("__"):
+                    artifacts.put(update, artifact, str(text))
+        update.update(_settle_branches(parallel_id, names, adopt, state, str(node["id"])))
+        return update
+
+    fn.__name__ = f"pick_{node['id']}"
+    return fn
+
+
+def _settle_branches(
+    parallel_id: str, names: dict[str, str], adopt: str, state: FactoryState, gate_id: str
+) -> dict[str, Any]:
+    """合并选中的一路，其余各路的改动另存为补丁，然后删除全部支路工作树。"""
+    spaces = state.get("branch_workspaces") or {}
+    base = str(spaces.get(f"{parallel_id}:__base__") or "")
+    if not base:
+        return {}
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    from geni_studio.hitl.conversation import conversation_dir
+    from geni_studio.workspace.branches import (
+        branch_changes,
+        merge_back,
+        remove_branch_worktree,
+    )
+    from geni_studio.workspace.layout import WorkspaceError, workspace_lock_root
+
+    workspace = Path(str(state.get("workspace_path") or ""))
+    repo = workspace_lock_root(str(workspace))
+    keep = conversation_dir(_thread_id() or workspace.name, str(workspace)).parent / "branches"
+    conflicts: list[str] = []
+    for branch_id, name in names.items():
+        path = str(spaces.get(f"{parallel_id}:{branch_id}") or "")
+        if not path:
+            continue
+        if branch_id == adopt:
+            found = merge_back(workspace, Path(path), base)
+            if found:
+                conflicts.append(f"「{name}」：{'、'.join(found)}")
+        else:
+            try:
+                patch, _stats = branch_changes(Path(path), base)
+            except WorkspaceError:
+                patch = ""
+            if patch.strip():
+                keep.mkdir(parents=True, exist_ok=True)
+                (keep / f"{parallel_id}__{branch_id}.patch").write_text(patch, encoding="utf-8")
+        if repo is not None:
+            remove_branch_worktree(repo, Path(path))
+    update: dict[str, Any] = {
+        "branch_workspaces": {key: "" for key in spaces if key.startswith(f"{parallel_id}:")}
+    }
+    if conflicts:
+        summary = (
+            "采用选中的一路时有改动冲突，已在本轮工作区写入冲突标记："
+            + "；".join(conflicts)
+            + "。请处理冲突后选择继续，或暂停、终止。"
+        )
+        update.update(
+            {
+                "hitl_pending_kind": "escalation",
+                "hitl_summary": summary,
+                "hitl_questions": [],
+                "hitl_pending_since": datetime.now(UTC).isoformat(),
+                "escalated_from": gate_id,
+                "return_feedback": summary,
+            }
+        )
+    return update
+
+
 def _noop(state: FactoryState) -> dict[str, Any]:
     return {}
 
@@ -992,6 +1203,8 @@ def _join(node: dict[str, Any]):
                 if not str(key).startswith(branch_prefix):
                     continue
                 artifact = str(key)[len(branch_prefix) :]
+                if artifact == _BRANCH_FEEDBACK:
+                    continue
                 grouped.setdefault(artifact, []).append((names[branch_id], str(text)))
         update: dict[str, Any] = {}
         for artifact, pairs in grouped.items():
@@ -999,7 +1212,10 @@ def _join(node: dict[str, Any]):
                 artifacts.put(update, artifact, pairs[0][1])
             else:
                 artifacts.put(update, artifact, "\n\n".join(f"## {title}\n{text}" for title, text in pairs))
-        update.update(_merge_branches(node, state, order, names))
+        if node.get("join") == "compare":
+            artifacts.put(update, _COMPARISON, _comparison(node, state, order, names, grouped))
+        else:
+            update.update(_merge_branches(node, state, order, names))
         return update
 
     fn.__name__ = f"join_{node['id']}"

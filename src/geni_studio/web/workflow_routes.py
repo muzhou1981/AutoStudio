@@ -15,12 +15,15 @@ from geni_studio.config.workflow_defs import (
     create_workflow,
     delete_workflow,
     get_workflow,
+    get_workflow_version,
     import_workflow,
     list_role_lanes,
+    list_workflow_versions,
     list_workflows,
     save_as_subgraph,
     save_workflow,
     workflow_activity_roles,
+    workflow_usage,
 )
 from geni_studio.web.errors import http_error
 
@@ -132,6 +135,43 @@ def api_copy_workflow(workflow_id: str, body: CopyWorkflowBody) -> dict:
 def api_workflow_activity_roles(workflow_id: str) -> dict:
     try:
         return {"roles": workflow_activity_roles(workflow_id)}
+    except ConfigError as exc:
+        raise _http(exc) from exc
+
+
+@router.post("/{workflow_id}/check")
+def api_check_workflow(workflow_id: str, body: SaveWorkflowBody) -> dict:
+    from geni_studio.workflows.executable import check_workflow
+
+    try:
+        get_workflow(workflow_id)
+    except ConfigError as exc:
+        raise _http(exc) from exc
+    problems = check_workflow(body.model_dump(), workflow_id)
+    return {"ok": not problems, "problems": problems}
+
+
+@router.get("/{workflow_id}/usage")
+def api_workflow_usage(workflow_id: str) -> dict:
+    try:
+        get_workflow(workflow_id)
+    except ConfigError as exc:
+        raise _http(exc) from exc
+    return workflow_usage(workflow_id)
+
+
+@router.get("/{workflow_id}/versions")
+def api_workflow_versions(workflow_id: str) -> dict:
+    try:
+        return {"versions": list_workflow_versions(workflow_id)}
+    except ConfigError as exc:
+        raise _http(exc) from exc
+
+
+@router.get("/{workflow_id}/versions/{version}")
+def api_workflow_version(workflow_id: str, version: int) -> dict:
+    try:
+        return get_workflow_version(workflow_id, version)
     except ConfigError as exc:
         raise _http(exc) from exc
 
