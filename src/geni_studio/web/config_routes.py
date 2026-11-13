@@ -188,12 +188,7 @@ def api_create_project(body: CreateProjectBody) -> dict:
         )
     yaml_text = body.yaml.strip()
     if not yaml_text:
-        yaml_text = (
-            f"project_id: {project_id}\n"
-            f"title: {title or project_id}\n"
-            "workflow:\n"
-            "  profile_id: factory_default\n"
-        )
+        yaml_text = f"project_id: {project_id}\ntitle: {title or project_id}\n"
     try:
         save_project_yaml(project_id, yaml_text, create=True)
     except ConfigError as e:

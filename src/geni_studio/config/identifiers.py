@@ -1,64 +1,32 @@
-"""由项目名、流程名生成稳定标识。中文名称译成英文后再整理。"""
+"""由项目名、流程名、角色名生成稳定标识。
+
+英文名称整理成小写并用 `-` 连接；名称含中文时用 prefix-1、prefix-2 这类序号。
+不调用模型翻译：一次翻译要跑一轮 Agent，耗时十几秒到一分钟以上，会让“创建”长时间无响应。
+"""
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 
 _ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
-Translate = Callable[[str], str]
 
-
-def allocate_identifier(
-    name: str,
-    *,
-    prefix: str,
-    taken: Iterable[str],
-    translate: Translate | None = None,
-) -> str:
-    """生成尚未占用的标识。翻译失败时使用 prefix-1、prefix-2。"""
+def allocate_identifier(name: str, *, prefix: str, taken: Iterable[str]) -> str:
+    """生成尚未占用的标识。名称含中文或整理后为空时使用 prefix-1、prefix-2。"""
     used = {item.strip() for item in taken if item and item.strip()}
-    base = _base_from_name(name, translate if translate is not None else backend_translate)
+    base = _base_from_name(name)
     if not _ID_RE.match(base):
         return _serial(prefix, used)
     return _unique(base, used)
 
 
-def backend_translate(text: str) -> str:
-    """用当前配置的模型把名称译成英文单词。没有可用模型时返回空字符串。"""
-    from geni_studio.backends.base import StubBackend, get_default_backend
-
-    backend = get_default_backend()
-    if isinstance(backend, StubBackend):
-        return ""
-    try:
-        raw = backend.complete(
-            role_name="identifier",
-            system_prompt="把名称译成简短英文。只回复英文单词，词与词之间用空格。不要标点，不要解释。",
-            user_prompt=text.strip(),
-        )
-    except Exception:  # noqa: BLE001 模型调用失败时改用序号，不阻止创建
-        return ""
-    line = (raw or "").strip().splitlines()[0] if raw else ""
-    if not line or _CJK_RE.search(line):
-        return ""
-    return line
-
-
-def _base_from_name(name: str, translate: Translate) -> str:
+def _base_from_name(name: str) -> str:
     text = (name or "").strip()
     if _ID_RE.match(text):
         return text
     if _CJK_RE.search(text):
-        try:
-            translated = translate(text) or ""
-        except Exception:  # noqa: BLE001 翻译函数异常时改用序号
-            translated = ""
-        slug = _slugify(translated)
-        if slug:
-            return slug
         return ""
     return _slugify(text)
 

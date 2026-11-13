@@ -11,7 +11,7 @@
   const LOOP_OUT = 8;
   const LOOP_IN = 24;
   const LOOP_DY = 11;
-  /** 编辑器有控件的节点字段；其余字段（handler、routes、when、instruction 等）原样带回保存。 */
+  /** 编辑器有控件的节点字段；其余字段（handler、routes、when、instruction 等）原样带回保存；instruction 由“补充说明”直接改写。 */
   const MANAGED_KEYS = new Set([
     "id", "kind", "name", "role", "returns_to", "decision", "max_loops", "reject_to",
     "commits_on_branch", "subgraph_id", "branches", "join", "inputs", "outputs", "contractTouched",
@@ -107,7 +107,8 @@
     if (!Array.isArray(value)) return [];
     return value.map((item) => {
       if (typeof item === "string") return { name: item, source: "file", template: "", plain: true };
-      const source = item && item.source === "link" ? "link" : "file";
+      const link = item && (item.source === "link" || (!item.source && /^https?:\/\//i.test(item.template || "")));
+      const source = link ? "link" : "file";
       return { name: (item && item.name) || "", source, template: (item && item.template) || "" };
     }).filter((item) => item.name);
   }
@@ -193,7 +194,12 @@
       if (Array.isArray(node.outputs)) {
         copy.outputs = node.outputs.map((item) => (item.plain && !item.template
           ? item.name
-          : { name: item.name, source: item.source, template: item.template }));
+          : {
+            name: item.name,
+            source: item.source,
+            template: item.template,
+            ...(typeof item.content === "string" ? { content: item.content } : {}),
+          }));
       }
       if (Array.isArray(node.branches)) {
         copy.branches = node.branches.map((branch) => ({ ...branch, nodes: wireNodes(branch.nodes) }));
@@ -224,17 +230,134 @@
   }
 
   let templatePickIndex = -1;
+  const TEMPLATE_LIMIT_BYTES = 256 * 1024;
 
   function renderContract(node) {
     const inputs = viewInputs(node);
     const outputs = viewOutputs(node);
+    const readOnly = locked();
     $("flowInputEmpty").hidden = inputs.length > 0;
     $("flowOutputEmpty").hidden = outputs.length > 0;
+    $("btnAddInput").hidden = readOnly;
+    $("btnAddOutput").hidden = readOnly;
     $("flowInputList").replaceChildren();
     $("flowOutputList").replaceChildren();
-    inputs.forEach((name, index) => $("flowInputList").appendChild(inputRow(node, name, index)));
-    outputs.forEach((item, index) => $("flowOutputList").appendChild(outputRow(node, item, index)));
+    inputs.forEach((name, index) => $("flowInputList").appendChild(
+      readOnly ? readOnlyInputRow(name) : inputRow(node, name, index)));
+    outputs.forEach((item, index) => $("flowOutputList").appendChild(
+      readOnly ? readOnlyOutputRow(node, item, index) : outputRow(node, item, index)));
     refreshContractCounts(node);
+  }
+
+  function readOnlyField(value, label) {
+    const field = document.createElement("input");
+    field.value = value;
+    field.title = value;
+    field.readOnly = true;
+    field.setAttribute("aria-label", label);
+    return field;
+  }
+
+  function readOnlyInputRow(name) {
+    const row = document.createElement("div");
+    row.className = "io-row";
+    const line = document.createElement("div");
+    line.className = "io-line";
+    line.append(readOnlyField(name === "human_request" ? "人类需求" : name, "输入产物名"));
+    row.append(line);
+    return row;
+  }
+
+  // 只读流程：只看名称和模板，“查看”打开模板正文，链接可以“打开”。
+  function readOnlyOutputRow(node, item, index) {
+    const row = document.createElement("div");
+    row.className = "io-row";
+    const caption = (text) => {
+      const p = document.createElement("p");
+      p.className = "io-caption";
+      p.textContent = text;
+      return p;
+    };
+    const nameLine = document.createElement("div");
+    nameLine.className = "io-line";
+    nameLine.append(readOnlyField(item.name || "", "输出产物名"));
+    row.append(caption("产物名"), nameLine, caption("模板"));
+    const sourceLine = document.createElement("div");
+    sourceLine.className = "io-line";
+    const owned = item.source === "link" ? "" : ownedTemplateName(item.template);
+    if (owned) {
+      const chip = document.createElement("span");
+      chip.className = "io-template";
+      chip.title = templateLocation(item.template);
+      const fileName = document.createElement("span");
+      fileName.className = "io-template-name";
+      fileName.textContent = owned;
+      const tag = document.createElement("span");
+      tag.className = "io-template-tag";
+      tag.textContent = "随流程保存";
+      chip.append(fileName, tag);
+      const view = document.createElement("button");
+      view.type = "button";
+      view.textContent = "查看";
+      view.addEventListener("click", () => openTemplateDialog(node, index, false));
+      sourceLine.append(chip, view);
+    } else if (item.template) {
+      const field = readOnlyField(item.template, "模板地址");
+      sourceLine.append(field);
+      if (templateKind(item.template) === "link") {
+        const open = document.createElement("button");
+        open.type = "button";
+        open.textContent = "打开";
+        open.title = "在新标签页打开这个链接";
+        open.addEventListener("click", () => window.open(item.template, "_blank", "noopener"));
+        sourceLine.append(open);
+      }
+      requestAnimationFrame(() => { field.scrollLeft = field.scrollWidth; });
+    } else {
+      const note = document.createElement("p");
+      note.className = "hint-block";
+      note.textContent = "沿用角色的默认产物模板，按项目场景确定。";
+      sourceLine.append(note);
+    }
+    row.append(sourceLine);
+    return row;
+  }
+
+  const ARTIFACT_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+  const ARTIFACT_NAME_RULE = "产物名只能用小写字母、数字和下划线，并以字母开头。";
+
+  function removeButton(label) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "io-remove";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.innerHTML = (window.geniIcons && window.geniIcons.trashSvg) || "";
+    return button;
+  }
+
+  function focusLastRow(listId) {
+    const rows = $(listId).querySelectorAll(".io-row");
+    const last = rows.length ? rows[rows.length - 1] : null;
+    const field = last && (last.querySelector("input:not([hidden])") || last.querySelector("select"));
+    if (field) field.focus();
+  }
+
+  function addInput(node) {
+    if (!node || node.kind !== "activity") return;
+    materializeContract(node);
+    const choices = ["human_request", ...earlierOutputs(node)].filter((choice) => !node.inputs.includes(choice));
+    node.inputs.push(choices[0] || "");
+    renderContract(node);
+    focusLastRow("flowInputList");
+  }
+
+  function addOutput(node) {
+    if (!node || node.kind !== "activity") return;
+    materializeContract(node);
+    node.outputs.push({ name: "", source: "file", template: "" });
+    renderContract(node);
+    focusLastRow("flowOutputList");
   }
 
   function refreshContractCounts(node) {
@@ -247,54 +370,60 @@
     count.classList.toggle("is-warn", problems > 0 || !outputs.length);
   }
 
-  function inputChoices(node, current) {
-    const names = ["human_request", ...earlierOutputs(node)];
-    if (current && !names.includes(current)) names.push(current);
-    return names;
+  function inputChoices(node) {
+    return ["human_request", ...earlierOutputs(node)];
   }
 
+  // 先在下拉框里选已有产物；选“手写”时才出现名字编辑框。
   function inputRow(node, name, index) {
     const row = document.createElement("div");
     row.className = "io-row";
     const line = document.createElement("div");
     line.className = "io-line";
+    const choices = inputChoices(node);
+    const manual = !choices.includes(name);
     const field = document.createElement("input");
-    field.value = name === "human_request" ? "人类需求" : name;
+    field.value = name;
     field.spellcheck = false;
+    field.placeholder = "产物名，如 design_doc";
+    field.hidden = !manual;
     field.setAttribute("aria-label", "输入产物名");
     const pick = document.createElement("select");
-    pick.setAttribute("aria-label", "从已有产物选择");
-    const blank = document.createElement("option");
-    blank.value = "";
-    blank.textContent = "手写";
-    pick.appendChild(blank);
-    inputChoices(node, name).forEach((choice) => {
+    pick.className = "io-pick" + (manual ? " is-manual" : "");
+    pick.setAttribute("aria-label", "输入来源");
+    choices.forEach((choice) => {
       const option = document.createElement("option");
       option.value = choice;
       option.textContent = choice === "human_request" ? "人类需求" : choice;
       pick.appendChild(option);
     });
-    if (inputChoices(node, name).includes(name)) pick.value = name;
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.textContent = "移除";
+    const handwritten = document.createElement("option");
+    handwritten.value = "";
+    handwritten.textContent = "手写";
+    pick.appendChild(handwritten);
+    pick.value = manual ? "" : name;
+    const remove = removeButton("移除这项输入");
     field.addEventListener("input", () => {
       materializeContract(node);
-      node.inputs[index] = field.value.trim() === "人类需求" ? "human_request" : field.value.trim();
+      node.inputs[index] = field.value.trim();
       refreshContractErrors(node);
     });
     pick.addEventListener("change", () => {
-      if (!pick.value) return;
       materializeContract(node);
       node.inputs[index] = pick.value;
       renderContract(node);
+      if (!pick.value) {
+        const fresh = $("flowInputList").querySelectorAll(".io-row")[index];
+        const box = fresh && fresh.querySelector("input");
+        if (box) box.focus();
+      }
     });
     remove.addEventListener("click", () => {
       materializeContract(node);
       node.inputs.splice(index, 1);
       renderContract(node);
     });
-    line.append(field, pick, remove);
+    line.append(pick, field, remove);
     row.append(line, contractError(node, "input", index));
     return row;
   }
@@ -307,33 +436,46 @@
     const field = document.createElement("input");
     field.value = item.name || "";
     field.spellcheck = false;
+    field.placeholder = "如 design_doc";
     field.setAttribute("aria-label", "输出产物名");
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.textContent = "移除";
+    const remove = removeButton("移除这项输出");
+    const nameCaption = document.createElement("p");
+    nameCaption.className = "io-caption";
+    nameCaption.textContent = "产物名";
     const caption = document.createElement("p");
     caption.className = "io-caption";
     caption.textContent = "模板";
+    const kindTag = document.createElement("span");
+    kindTag.className = "io-caption-kind";
+    caption.appendChild(kindTag);
     const sourceLine = document.createElement("div");
     sourceLine.className = "io-line";
-    const source = document.createElement("select");
-    source.setAttribute("aria-label", "模板来源");
-    [["file", "本地文件"], ["link", "链接"]].forEach(([value, text]) => {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = text;
-      source.appendChild(option);
-    });
-    source.value = item.source === "link" ? "link" : "file";
     const template = document.createElement("input");
     template.value = item.template || "";
+    template.title = item.template || "";
     template.spellcheck = false;
-    template.placeholder = source.value === "link" ? "https://example.com/template.md" : "/path/to/template.md";
+    template.placeholder = "粘贴链接，或选择本地文件";
+    template.dataset.templateIndex = String(index);
     template.setAttribute("aria-label", "模板地址");
+    // 长路径的文件名在末尾，不编辑时让末尾可见。
+    const showTail = () => {
+      if (document.activeElement !== template) template.scrollLeft = template.scrollWidth;
+    };
+    requestAnimationFrame(showTail);
+    // 浏览器在失焦后才把滚动复位到开头，所以推迟一帧。
+    template.addEventListener("blur", () => requestAnimationFrame(showTail));
     const browse = document.createElement("button");
     browse.type = "button";
     browse.textContent = "选择文件";
-    browse.hidden = source.value === "link";
+    const openLink = document.createElement("button");
+    openLink.type = "button";
+    openLink.textContent = "打开";
+    openLink.title = "在新标签页打开这个链接";
+    const refreshKind = () => {
+      kindTag.textContent = templateKindTag(item);
+      openLink.hidden = templateKind(item.template) !== "link";
+    };
+    refreshKind();
     field.addEventListener("input", () => {
       materializeContract(node);
       node.outputs[index].name = field.value.trim();
@@ -344,23 +486,90 @@
       node.outputs.splice(index, 1);
       renderContract(node);
     });
-    source.addEventListener("change", () => {
-      materializeContract(node);
-      node.outputs[index].source = source.value;
-      node.outputs[index].template = "";
-      renderContract(node);
-    });
     template.addEventListener("input", () => {
       materializeContract(node);
-      node.outputs[index].template = template.value.trim();
+      item = node.outputs[index];
+      item.template = template.value.trim();
+      item.source = templateKind(item.template) === "link" ? "link" : "file";
+      item.fileError = "";
+      template.title = item.template;
+      refreshKind();
       refreshContractErrors(node);
     });
-    template.addEventListener("change", () => checkTemplate(node, index));
+    template.addEventListener("change", async () => {
+      await checkTemplate(node, index);
+      refreshKind();
+    });
     browse.addEventListener("click", () => openFilePicker(index));
+    openLink.addEventListener("click", () => window.open(item.template, "_blank", "noopener"));
     nameLine.append(field, remove);
-    sourceLine.append(source, template, browse);
-    row.append(nameLine, caption, sourceLine, contractError(node, "output", index));
+    const owned = item.source === "link" ? "" : ownedTemplateName(item.template);
+    if (!owned) {
+      sourceLine.append(template, openLink, browse);
+      row.append(nameCaption, nameLine, contractError(node, "output-name", index), caption, sourceLine, contractError(node, "output", index));
+      return row;
+    }
+    const chip = document.createElement("span");
+    chip.className = "io-template";
+    chip.title = templateLocation(item.template);
+    const fileName = document.createElement("span");
+    fileName.className = "io-template-name";
+    fileName.textContent = owned;
+    const tag = document.createElement("span");
+    tag.className = "io-template-tag";
+    tag.textContent = typeof item.content === "string" ? "已修改，保存后生效" : "随流程保存";
+    chip.append(fileName, tag);
+    sourceLine.append(chip);
+    const actions = document.createElement("div");
+    actions.className = "io-line io-template-actions";
+    [["查看", () => openTemplateDialog(node, index, false)],
+      ["编辑", () => openTemplateDialog(node, index, true)],
+      ["更换", () => replaceTemplate(node, index)]].forEach(([text, onClick]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      button.addEventListener("click", onClick);
+      actions.appendChild(button);
+    });
+    row.append(nameCaption, nameLine, contractError(node, "output-name", index), caption, sourceLine, actions, contractError(node, "output", index));
     return row;
+  }
+
+  function ownedTemplateName(template) {
+    const matched = /^templates\/([^/\\]+)$/.exec(String(template || "").trim());
+    return matched && !matched[1].startsWith(".") ? matched[1] : "";
+  }
+
+  function templateLocation(template) {
+    return "workflows/" + (loadedId || graph.workflow_id || "") + "/" + template;
+  }
+
+  // 类型由写法决定：http(s) 地址是链接；绝对路径或流程自带的 templates/ 是本地文件。
+  function templateKind(template) {
+    const text = String(template || "").trim();
+    if (!text) return "";
+    if (/^https?:\/\/\S+$/i.test(text)) return "link";
+    if (text.startsWith("/") || text.startsWith("~") || ownedTemplateName(text)) return "file";
+    return "";
+  }
+
+  function templateKindTag(item) {
+    const kind = templateKind(item.template);
+    if (kind === "link") return "链接";
+    if (kind === "file" && !ownedTemplateName(item.template)) return "外部文件，保存时收入流程";
+    return "";
+  }
+
+  function replaceTemplate(node, index) {
+    materializeContract(node);
+    const item = node.outputs[index];
+    item.source = "file";
+    item.template = "";
+    item.fileError = "";
+    delete item.content;
+    renderContract(node);
+    const input = document.querySelector('#flowOutputList input[data-template-index="' + index + '"]');
+    if (input) input.focus();
   }
 
   function contractError(node, kind, index) {
@@ -368,9 +577,15 @@
     note.className = "hint-block";
     note.dataset.ioError = kind + ":" + index;
     note.hidden = true;
-    note.textContent = kind === "input" ? inputProblem(node, index) : outputProblem(node, index);
+    note.textContent = contractProblem(node, kind, index);
     note.hidden = !note.textContent;
     return note;
+  }
+
+  function contractProblem(node, kind, index) {
+    if (kind === "input") return inputProblem(node, index);
+    if (kind === "output-name") return outputNameProblem(node, index);
+    return outputTemplateProblem(node, index);
   }
 
   function inputProblem(node, index) {
@@ -378,25 +593,37 @@
     const name = inputs[index] || "";
     if (!name) return "先写产物名。";
     if (inputs.indexOf(name) !== index) return "这个产物名重复了。";
+    if (!ARTIFACT_NAME.test(name)) return ARTIFACT_NAME_RULE;
     return "";
   }
 
   function outputProblem(node, index) {
+    return outputNameProblem(node, index) || outputTemplateProblem(node, index);
+  }
+
+  function outputNameProblem(node, index) {
     const item = viewOutputs(node)[index];
     if (!item || !item.name) return "先写产物名。";
     const inputs = viewInputs(node);
     const outputs = viewOutputs(node).map((output) => output.name);
     if (outputs.indexOf(item.name) !== index || inputs.includes(item.name)) return "这个产物名重复了。";
+    if (!ARTIFACT_NAME.test(item.name)) return ARTIFACT_NAME_RULE;
+    return "";
+  }
+
+  function outputTemplateProblem(node, index) {
+    const item = viewOutputs(node)[index];
+    if (!item) return "";
     if (!item.template && roleDefaultOutput(node, item)) return "";
-    if (!item.template) return item.source === "link" ? "先填写链接。" : "先选择本地文件。";
-    if (item.source === "link" && !/^https?:\/\//.test(item.template)) return "链接必须是 http 或 https。";
+    if (!item.template) return "先填写链接，或选择本地文件。";
+    if (!templateKind(item.template)) return "请填写以 http:// 或 https:// 开头的链接，或选择本地文件。";
     return item.fileError || "";
   }
 
   function refreshContractErrors(node) {
     document.querySelectorAll("[data-io-error]").forEach((note) => {
       const [kind, index] = note.dataset.ioError.split(":");
-      note.textContent = kind === "input" ? inputProblem(node, Number(index)) : outputProblem(node, Number(index));
+      note.textContent = contractProblem(node, kind, Number(index));
       note.hidden = !note.textContent;
     });
     refreshContractCounts(node);
@@ -404,11 +631,14 @@
 
   async function checkTemplate(node, index) {
     const item = (node.outputs || [])[index];
-    if (!item || item.source !== "file" || !item.template) {
+    if (!item || item.source !== "file" || !item.template || typeof item.content === "string") {
       refreshContractErrors(node);
       return;
     }
-    const response = await fetch("/api/config/files/check?path=" + encodeURIComponent(item.template));
+    const url = loadedId
+      ? "/api/workflows/" + encodeURIComponent(loadedId) + "/templates/check?path="
+      : "/api/config/files/check?path=";
+    const response = await fetch(url + encodeURIComponent(item.template));
     const data = await response.json();
     item.fileError = response.ok ? "" : (data.detail || "读不到这个文件。");
     refreshContractErrors(node);
@@ -459,9 +689,81 @@
       node.outputs[templatePickIndex].source = "file";
       node.outputs[templatePickIndex].template = path;
       node.outputs[templatePickIndex].fileError = "";
+      delete node.outputs[templatePickIndex].content;
       renderContract(node);
+      checkTemplate(node, templatePickIndex);
     }
     $("filePicker").hidden = true;
+  }
+
+  let templateEdit = null;
+
+  function showTemplateError(message) {
+    $("templateDialogError").textContent = message || "";
+    $("templateDialogError").hidden = !message;
+  }
+
+  async function openTemplateDialog(node, index, editable) {
+    const item = viewOutputs(node)[index];
+    if (!item) return;
+    const text = $("templateDialogText");
+    templateEdit = { node, index, original: null };
+    $("templateDialogTitle").textContent = editable ? "编辑模板" : "查看模板";
+    $("templateDialogPath").textContent = templateLocation(item.template);
+    $("templateDialogHint").hidden = !editable;
+    $("btnTemplateApply").hidden = !editable;
+    $("btnTemplateApply").disabled = true;
+    $("btnTemplateClose").textContent = editable ? "取消" : "关闭";
+    showTemplateError("");
+    text.readOnly = !editable;
+    text.value = "";
+    text.placeholder = "正在读取……";
+    $("templateDialog").hidden = false;
+    let content = typeof item.content === "string" ? item.content : null;
+    if (content === null) {
+      try {
+        const response = await fetch("/api/workflows/" + encodeURIComponent(loadedId)
+          + "/templates/content?path=" + encodeURIComponent(item.template));
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "读不到这份模板。");
+        content = data.content;
+      } catch (err) {
+        if (templateEdit && templateEdit.node === node && templateEdit.index === index) {
+          text.placeholder = "";
+          showTemplateError(err.message || "读不到这份模板。");
+        }
+        return;
+      }
+    }
+    if (!templateEdit || templateEdit.node !== node || templateEdit.index !== index) return;
+    templateEdit.original = content;
+    text.placeholder = "";
+    text.value = content;
+    $("btnTemplateApply").disabled = false;
+    if (editable) text.focus();
+  }
+
+  function closeTemplateDialog() {
+    templateEdit = null;
+    $("templateDialog").hidden = true;
+  }
+
+  function applyTemplateEdit() {
+    if (!templateEdit || templateEdit.original === null) return;
+    const value = $("templateDialogText").value;
+    if (new Blob([value]).size > TEMPLATE_LIMIT_BYTES) {
+      showTemplateError("模板超过 " + (TEMPLATE_LIMIT_BYTES / 1024) + " KB。");
+      return;
+    }
+    const { node, index, original } = templateEdit;
+    if (value !== original) {
+      materializeContract(node);
+      node.outputs[index].content = value;
+      node.outputs[index].fileError = "";
+      if (selectedNode() === node) renderContract(node);
+      refreshDirty();
+    }
+    closeTemplateDialog();
   }
 
   function snapshotNow() {
@@ -1476,7 +1778,10 @@
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showSaved(isDirty() ? "已导出上次保存的版本，未保存的修改不在其中。" : "已导出 " + loadedId + ".yaml。");
+    const done = isDirty() ? "已导出上次保存的版本，未保存的修改不在其中。" : "已导出 " + loadedId + ".yaml。";
+    showSaved(/^\s+template: templates\//m.test(yamlText)
+      ? done + "随流程保存的模板文件不在导出内容里，需要另行复制 workflows/" + loadedId + "/templates/。"
+      : done);
   }
 
   // 改名与复制都在选择框原位输入标题，保存或取消后换回选择框。
@@ -1643,6 +1948,7 @@
     if (changes.removed.length) parts.push("删除" + quote(changes.removed));
     if (changes.changed.length) parts.push("修改" + quote(changes.changed));
     if (changes.reordered) parts.push("调整了顺序");
+    (changes.templates || []).forEach((item) => parts.push("修改了“" + item.activity + "”输出“" + item.output + "”的模板"));
     return parts.length ? parts.join("，") + "。" : "只改了节点以外的设置。";
   }
 
@@ -2241,7 +2547,16 @@
     }
     const fixed = node.kind === "start" || node.kind === "end";
     const readOnly = locked();
-    setInspectHead(node.name, nodeHeading(node));
+    // 能改名的节点下面就有名称框，标题只写类型，避免同一个名字出现两次。
+    if (fixed) setInspectHead(node.name, nodeHeading(node));
+    else setInspectHead(nodeHeading(node), "");
+    $("flowNodeSettingsTitle").textContent = node.kind === "activity"
+      ? "类型、角色与回退"
+      : node.kind === "gate"
+        ? "类型、决定与去向"
+        : node.kind === "subgraph"
+          ? "类型与子图"
+          : "设置";
     $("flowNodeName").value = node.name;
     $("flowNodeName").hidden = fixed;
     $("flowNodeName").label = node.kind === "gate"
@@ -2260,8 +2575,12 @@
     const hint = routeHint(node);
     $("flowNodeRouteHint").hidden = !hint;
     $("flowNodeRouteHint").textContent = hint;
-    $("flowContract").hidden = readOnly || node.kind !== "activity";
-    if (!readOnly && node.kind === "activity") renderContract(node);
+    $("flowContract").hidden = node.kind !== "activity";
+    if (node.kind === "activity") renderContract(node);
+    const instruction = $("flowNodeInstruction");
+    instruction.hidden = node.kind !== "activity" || (readOnly && !node.instruction);
+    instruction.value = node.instruction || "";
+    instruction.readonly = readOnly;
     const itemized = node.kind === "gate" && node.decision !== "pick";
     $("flowGateItemsBox").hidden = !itemized || (readOnly && !(node.items || []).length);
     if (itemized) renderGateItemsEditor(node, readOnly);
@@ -2660,6 +2979,21 @@
     return "b" + (max + 1);
   }
 
+  /** 隐藏的流程只在正打开它时列出；返回列出的流程数。 */
+  function fillPick(selected) {
+    const pick = $("flowPick");
+    ignorePick = true;
+    pick.replaceChildren(option("", "请选择"));
+    const listed = workflows.filter((item) => !item.hidden || item.workflow_id === selected);
+    listed.forEach((item) => {
+      const prefix = item.builtin ? "内置 · " : "";
+      pick.appendChild(option(item.workflow_id, prefix + item.title));
+    });
+    if (selected) pick.value = selected;
+    ignorePick = false;
+    return listed.length;
+  }
+
   async function loadLists() {
     const [flowRes, roleRes] = await Promise.all([
       fetch("/api/workflows").then((response) => response.json()),
@@ -2667,17 +3001,7 @@
     ]);
     roles = roleRes.roles || [];
     workflows = flowRes.workflows || [];
-    const pick = $("flowPick");
-    const selected = pick.value || loadedId;
-    ignorePick = true;
-    pick.replaceChildren(option("", "请选择"));
-    workflows.forEach((item) => {
-      const prefix = item.builtin ? "内置 · " : "";
-      pick.appendChild(option(item.workflow_id, prefix + item.title));
-    });
-    if (selected) pick.value = selected;
-    ignorePick = false;
-    const none = !(flowRes.workflows || []).length;
+    const none = !fillPick($("flowPick").value || loadedId);
     $("flowEmpty").hidden = !none;
     $("flowEmptyAction").hidden = !none;
     $("flowPick").hidden = none;
@@ -2750,13 +3074,17 @@
       ignorePick = false;
       return;
     }
+    showLoaded(id, data, replace, nextTrail);
+  }
+
+  /** 打开或刚创建一份流程后，同步选择框、画布、地址栏与右栏的引用、版本、运行数据和检查结果。 */
+  function showLoaded(id, data, replace, nextTrail) {
+    mode = "open";
     loadedId = id;
     trail = nextTrail;
     selectedId = "";
     setGraph(data.workflow, data.yaml);
-    ignorePick = true;
-    $("flowPick").value = id;
-    ignorePick = false;
+    fillPick(id);
     $("flowHint").hidden = true;
     usage = null;
     problems = null;
@@ -2978,6 +3306,7 @@
         data.workflow = savedData.workflow;
         data.yaml = savedData.yaml;
       }
+      await loadLists().catch(() => {});
     } catch (err) {
       showError(err.message || "没能创建流程。");
       return;
@@ -2985,14 +3314,8 @@
       button.loading = false;
       button.disabled = false;
     }
-    await loadLists();
-    loadedId = id;
-    mode = "open";
-    setGraph(data.workflow, data.yaml);
-    showPieces();
-    markClean();
+    showLoaded(id, data, false, []);
     showSaved("已创建流程 " + id + "。");
-    writeUrl("open", id, false);
   };
 
   $("btnSaveFlow").onclick = async () => {
@@ -3061,15 +3384,18 @@
     enterOpen(node.subgraph_id, false, [...trail, loadedId]);
   };
 
-  if ($("btnAddInput")) {
-    $("btnAddInput").onclick = () => {
-      const node = selectedNode();
-      if (!node || node.kind !== "activity") return;
-      materializeContract(node);
-      node.inputs.push("");
-      renderContract(node);
-    };
-  }
+  // 按钮放在折叠标题里：点击不能顺带收起或展开分组。
+  [["btnAddInput", "flowInputGroup", addInput], ["btnAddOutput", "flowOutputGroup", addOutput]].forEach(([id, group, add]) => {
+    $(id).addEventListener("click", (event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      $(group).open = true;
+      add(selectedNode());
+    });
+    $(id).addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+    });
+  });
   if ($("btnAddGateItem")) {
     $("btnAddGateItem").onclick = () => {
       const node = selectedNode();
@@ -3082,15 +3408,6 @@
       if (inputs.length >= 2) inputs[inputs.length - 2].focus();
     };
   }
-  if ($("btnAddOutput")) {
-    $("btnAddOutput").onclick = () => {
-      const node = selectedNode();
-      if (!node || node.kind !== "activity") return;
-      materializeContract(node);
-      node.outputs.push({ name: "", source: "file", template: "" });
-      renderContract(node);
-    };
-  }
   if ($("btnFileCancel")) $("btnFileCancel").onclick = () => { $("filePicker").hidden = true; };
   if ($("btnFileUp")) {
     $("btnFileUp").onclick = () => loadFilePicker($("filePicker").dataset.parent || "");
@@ -3100,6 +3417,17 @@
       if (event.target === $("filePicker")) $("filePicker").hidden = true;
     });
   }
+  $("btnTemplateApply").onclick = applyTemplateEdit;
+  $("btnTemplateClose").onclick = closeTemplateDialog;
+  $("templateDialog").addEventListener("click", (event) => {
+    if (event.target === $("templateDialog") && $("templateDialogText").readOnly) closeTemplateDialog();
+  });
+  $("templateDialog").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      closeTemplateDialog();
+    }
+  });
 
   $("flowTitle").addEventListener("keydown", (event) => {
     if (mode === "new" && isSubmitKey(event)) $("btnCreateFlow").click();
@@ -3117,8 +3445,15 @@
     const node = selectedNode();
     if (!node || node.kind === "start" || node.kind === "end") return;
     node.name = $("flowNodeName").value.trim() || node.name;
-    $("flowInspectTitle").textContent = node.name;
     renderBoard();
+  });
+  $("flowNodeInstruction").addEventListener("input", () => {
+    const node = selectedNode();
+    if (!node || node.kind !== "activity" || locked()) return;
+    const text = $("flowNodeInstruction").value;
+    if (text.trim()) node.instruction = text;
+    else delete node.instruction;
+    refreshDirty();
   });
   $("btnFlowUp").onclick = () => moveSelected(-1);
   $("btnFlowDown").onclick = () => moveSelected(1);
@@ -3173,7 +3508,7 @@
     if (location.pathname !== "/workflow" || !(event.ctrlKey || event.metaKey) || event.altKey) return;
     const key = event.key.toLowerCase();
     if (key === "s") {
-      if ($("btnSaveFlow").hidden || nameEdit) return;
+      if ($("btnSaveFlow").hidden || nameEdit || !$("templateDialog").hidden) return;
       event.preventDefault();
       $("btnSaveFlow").click();
       return;

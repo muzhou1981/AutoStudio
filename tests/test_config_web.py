@@ -179,7 +179,7 @@ def test_settings_suggests_open_id_when_env_empty(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "geni_studio.hitl.lark_cli_client.auth_summary",
-        lambda: LarkCliAuthSummary(
+        lambda **_: LarkCliAuthSummary(
             True,
             True,
             True,
@@ -203,7 +203,7 @@ def test_settings_includes_lark_cli_user_open_id(monkeypatch):
 
     monkeypatch.setattr(
         "geni_studio.hitl.lark_cli_client.auth_summary",
-        lambda: LarkCliAuthSummary(
+        lambda **_: LarkCliAuthSummary(
             True,
             True,
             True,
@@ -565,7 +565,7 @@ def _ready_lark(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(
         "geni_studio.hitl.lark_cli_client.auth_summary",
-        lambda: LarkCliAuthSummary(True, True, True, "ok"),
+        lambda **_: LarkCliAuthSummary(True, True, True, "ok"),
     )
 
 

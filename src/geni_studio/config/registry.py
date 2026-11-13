@@ -298,9 +298,11 @@ def template_file_error(raw: str) -> str:
     text = (raw or "").strip()
     if not text:
         return "还没有选择本地文件。"
+    from geni_studio.config.workflow_templates import template_text
+
     path = Path(text).expanduser()
     if not path.is_absolute():
-        return "本地文件要写绝对路径。"
+        return "本地文件要写绝对路径，或者是本流程 templates/ 下的文件。"
     try:
         if not path.exists():
             return "文件不存在。"
@@ -308,6 +310,9 @@ def template_file_error(raw: str) -> str:
             return "要选择文件，不能是目录。"
         if not os.access(path, os.R_OK):
             return "没有权限读取这个文件。"
+        template_text(path.read_bytes())
+    except ConfigError as exc:
+        return str(exc)
     except OSError:
         return "读不到这个文件。"
     return ""
@@ -523,10 +528,12 @@ def apply_project_form(
     if require_profile and not profile_id:
         raise ConfigError("先选择流程。")
     if profile_id:
-        from geni_studio.config.workflow_defs import workflow_exists
+        from geni_studio.config.workflow_defs import workflow_exists, workflow_hidden
 
         if not workflow_exists(profile_id, root):
             raise ConfigError("流程不存在。")
+        if profile_id != str(workflow.get("profile_id") or "") and workflow_hidden(profile_id, root):
+            raise ConfigError("这个流程已停止选用，请选择其他流程。")
         workflow["profile_id"] = profile_id
     else:
         workflow.pop("profile_id", None)

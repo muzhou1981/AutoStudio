@@ -30,3 +30,7 @@ workflows/*
 !workflows/npu_operator_dev/**
 !workflows/self_improve/
 !workflows/self_improve/**
+!workflows/spec_kit/
+!workflows/spec_kit/**
+!workflows/npu_kernel_kda/
+!workflows/npu_kernel_kda/**

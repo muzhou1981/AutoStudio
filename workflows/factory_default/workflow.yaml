@@ -2,6 +2,7 @@ workflow_id: factory_default
 title: 通用软件开发
 description: 工厂内置的通用软件开发流程。调用 Agent 的步骤是活动，提示词按通用活动拼装，判定与状态写入由 effect 指向的内置后处理完成；不调用 Agent 的步骤是系统节点。路由与可选分支在本文件声明。要改，先复制一份。
 builtin: true
+hidden: true
 rail: builtin
 profile:
   features:

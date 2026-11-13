@@ -264,6 +264,7 @@ function fillOneWorkflowSelect(el, selected) {
   }
   el.replaceChildren(waOption("", "选择流程"));
   for (const item of workflows) {
+    if (item.hidden && item.workflow_id !== value) continue;
     const prefix = item.builtin ? "内置 · " : "";
     el.appendChild(waOption(item.workflow_id, prefix + item.title));
   }

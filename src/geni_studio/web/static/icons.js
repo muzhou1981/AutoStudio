@@ -18,5 +18,7 @@
     return svg;
   }
 
-  window.geniIcons = { decisionIcon };
+  const trashSvg = '<svg class="run-delete-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M6.1 1.8h3.8l.35 1.15H13.2v1.25H2.8V2.95h2.95L6.1 1.8zM4.15 5.2h7.7l-.62 8.15c-.04.45-.42.8-.87.8H5.64c-.45 0-.83-.35-.87-.8L4.15 5.2zM6.55 6.7v5.15h1.2V6.7H6.55zm2.7 0v5.15h1.2V6.7H9.25z"/></svg>';
+
+  window.geniIcons = { decisionIcon, trashSvg };
 })();

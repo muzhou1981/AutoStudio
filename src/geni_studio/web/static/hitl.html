@@ -33,7 +33,7 @@
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css" />
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/utilities.css" />
   <link rel="stylesheet" href="/static/shared.css?v=20261112-run-ux" />
-  <link rel="stylesheet" href="/static/hitl.css?v=20261113-punct" />
+  <link rel="stylesheet" href="/static/hitl.css?v=20261113-sk" />
   <script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
 </head>
 <body>
@@ -224,6 +224,14 @@
           <p class="section-title" id="railHeading">运行状态<a class="help-tip" href="/help#run/rail" target="_blank" rel="noopener" title="在新标签页查看帮助" aria-label="帮助：读懂泳道">?</a></p>
           <p id="railCount" class="rail-count" hidden></p>
           <p id="railEmpty" class="hint-block rail-empty">选择项目后，这里显示本轮要走的流程。</p>
+          <div id="railLoading" class="rail-loading" role="status" hidden>
+            <div class="rail-skeleton" aria-hidden="true">
+              <span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span>
+            </div>
+            <p class="rail-loading-text">正在读取这一轮……</p>
+          </div>
           <div id="swimRail" class="swim-rail" aria-label="运行泳道"></div>
           <ol id="nodeRail" class="node-rail"></ol>
           <p id="railLegend" class="rail-legend" hidden>
@@ -417,7 +425,7 @@
           <div class="inspect-body">
           <div id="flowInspectMeta">
             <wa-textarea id="flowDescription" label="说明" rows="6" hidden></wa-textarea>
-            <p class="hint-block" id="flowIdHint">标识按标题自动生成。中文标题会译成英文。创建后不再改变。</p>
+            <p class="hint-block" id="flowIdHint">标识按标题自动生成，中文标题使用序号。创建后不再改变。</p>
             <p class="hint-block" id="flowIdLine" hidden></p>
             <div class="flow-problems" id="flowProblems" hidden>
               <p class="flow-problems-title">运行前待补<a class="help-tip" href="/help#workflow/check" target="_blank" rel="noopener" title="在新标签页查看帮助" aria-label="帮助：运行前检查">?</a></p>
@@ -434,7 +442,7 @@
           <div id="flowInspectNode" hidden>
             <wa-input id="flowNodeName" label="名称" spellcheck="false"></wa-input>
             <div id="flowNodeSettings">
-              <p class="section-title">设置</p>
+              <p class="section-title" id="flowNodeSettingsTitle">设置</p>
               <div class="role-menu-shell" id="flowNodeMenuShell"></div>
               <p class="hint-block" id="flowNodeRouteHint" hidden></p>
             </div>
@@ -458,22 +466,17 @@
             <div id="flowParallelBox" hidden></div>
             <div id="flowContract" hidden>
               <wa-details class="flow-io-group" id="flowInputGroup" open>
-                <span slot="summary" class="flow-io-summary"><span>输入</span><span class="flow-io-count" id="flowInputCount"></span></span>
+                <span slot="summary" class="flow-io-summary"><span>输入</span><span class="flow-io-count" id="flowInputCount"></span><button type="button" class="io-add" id="btnAddInput" aria-label="添加输入">添加</button></span>
                 <p class="hint-block" id="flowInputEmpty" hidden>这个活动不读取已有产物。</p>
                 <div id="flowInputList" class="io-list"></div>
-                <div class="row-actions">
-                  <wa-button id="btnAddInput" size="s" appearance="outlined" variant="neutral">添加输入</wa-button>
-                </div>
               </wa-details>
               <wa-details class="flow-io-group" id="flowOutputGroup" open>
-                <span slot="summary" class="flow-io-summary"><span>输出</span><span class="flow-io-count" id="flowOutputCount"></span></span>
+                <span slot="summary" class="flow-io-summary"><span>输出</span><span class="flow-io-count" id="flowOutputCount"></span><button type="button" class="io-add" id="btnAddOutput" aria-label="添加输出">添加</button></span>
                 <p class="hint-block" id="flowOutputEmpty" hidden>这个活动还没有输出。</p>
                 <div id="flowOutputList" class="io-list"></div>
-                <div class="row-actions">
-                  <wa-button id="btnAddOutput" size="s" appearance="outlined" variant="neutral">添加输出</wa-button>
-                </div>
               </wa-details>
             </div>
+            <wa-textarea id="flowNodeInstruction" label="补充说明" rows="3" resize="auto" hint="运行时附在这个活动的提示词末尾，写方法约束或注意事项。" hidden></wa-textarea>
             <p class="hint-block" id="flowNodeNeighbors"></p>
             <p class="hint-block" id="flowNodeFixed" hidden>启动和结束不能改名，也不能删除，也不能跳过。</p>
             <div class="row-actions flow-node-actions" id="flowNodeActions">
@@ -558,7 +561,7 @@
             <h2>角色说明</h2>
           </div>
           <div class="inspect-body">
-            <p class="hint-block" id="roleIdHint">标识按标题自动生成。中文标题会译成英文。创建后不再改变。</p>
+            <p class="hint-block" id="roleIdHint">标识按标题自动生成，中文标题使用序号。创建后不再改变。</p>
             <p class="hint-block" id="roleIdLine" hidden></p>
             <p class="hint-block" id="roleUsage" hidden></p>
           </div>
@@ -590,14 +593,14 @@
               <p class="hint-block">服务进程能读取的 git 目录绝对路径。选定后直接打开，手填时按回车打开。</p>
               <div id="dirMatches" class="choice-grid" hidden></div>
               <div id="dirCreate" hidden>
-                <p class="hint-block">项目标识按目录名自动生成。中文目录名会译成英文。</p>
+                <p class="hint-block">项目标识按目录名自动生成，中文目录名使用序号。</p>
                 <wa-select id="fieldDirProfile" label="流程"></wa-select>
                 <div class="row-actions">
                   <wa-button id="btnCreateFromDir" variant="brand">创建并打开</wa-button>
                 </div>
               </div>
             </div>
-            <p class="hint-block" id="newIdHint">标识按标题自动生成。中文标题会译成英文。创建后不再改变。</p>
+            <p class="hint-block" id="newIdHint">标识按标题自动生成，中文标题使用序号。创建后不再改变。</p>
             <div id="projectFields">
               <wa-input id="fieldTitle" label="标题"></wa-input>
               <wa-input id="fieldDescription" label="说明"></wa-input>
@@ -776,8 +779,8 @@
   </div>
 
   <script src="/static/api-utils.js?v=20261110-web-ui"></script>
-  <script src="/static/icons.js?v=20261113-gate-icon3"></script>
-  <script src="/static/hitl.js?v=20261113-punct"></script>
+  <script src="/static/icons.js?v=20261113-io"></script>
+  <script src="/static/hitl.js?v=20261113-io"></script>
   <div id="filePicker" class="dir-picker" hidden>
     <div class="dir-picker-card" role="dialog" aria-modal="true" aria-labelledby="filePickerTitle">
       <p class="section-title" id="filePickerTitle">选择模板文件</p>
@@ -789,6 +792,19 @@
       <div id="filePickerList" class="dir-picker-list"></div>
       <p class="hint-block" id="filePickerNote" hidden></p>
       <wa-callout id="filePickerError" variant="danger" hidden></wa-callout>
+    </div>
+  </div>
+  <div id="templateDialog" class="dir-picker" hidden>
+    <div class="dir-picker-card template-dialog-card" role="dialog" aria-modal="true" aria-labelledby="templateDialogTitle">
+      <p class="section-title" id="templateDialogTitle">查看模板</p>
+      <p class="dir-picker-path" id="templateDialogPath"></p>
+      <textarea id="templateDialogText" class="template-dialog-text" spellcheck="false" aria-label="模板正文"></textarea>
+      <p class="hint-block" id="templateDialogHint" hidden>应用后改动先存入草稿；保存流程时另存为新文件，原文件留给历史版本。</p>
+      <wa-callout id="templateDialogError" variant="danger" hidden></wa-callout>
+      <div class="row-actions">
+        <wa-button id="btnTemplateApply" variant="brand">应用</wa-button>
+        <wa-button id="btnTemplateClose" appearance="outlined" variant="neutral">关闭</wa-button>
+      </div>
     </div>
   </div>
   <div id="apiKeyDialog" class="dir-picker" hidden>
@@ -816,8 +832,8 @@
       <wa-callout id="dirPickerError" variant="danger" hidden></wa-callout>
     </div>
   </div>
-  <script src="/static/config.js?v=20261113-punct"></script>
-  <script src="/static/workflow.js?v=20261113-punct"></script>
-  <script src="/static/role.js?v=20261113-punct"></script>
+  <script src="/static/config.js?v=20261113-hide"></script>
+  <script src="/static/workflow.js?v=20261113-hide2"></script>
+  <script src="/static/role.js?v=20261113-load2"></script>
 </body>
 </html>

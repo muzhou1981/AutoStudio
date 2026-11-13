@@ -144,6 +144,8 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert 'id="gateItems"' in html and 'id="flowGateItemsBox"' in html and 'id="btnAddGateItem"' in html
     flow = TestClient(app).get("/static/workflow.js").text
     assert "function renderGateItemsEditor(node, readOnly)" in flow and '"items", "pass_rule"' in flow
+    assert 'id="flowNodeInstruction"' in html and "node.instruction = text" in flow
+    assert "function readOnlyOutputRow(node, item, index)" in flow and 'readOnly ? readOnlyInputRow(name)' in flow
     icons = TestClient(app).get("/static/icons.js")
     assert icons.status_code == 200 and "decisionIcon" in icons.text
     css = TestClient(app).get("/static/hitl.css").text
@@ -158,7 +160,7 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert "is-spin" in text
     assert 'key === "awaiting_human"' in text
     assert "fill-rule" in text
-    assert "run-delete-icon" in text
+    assert "run-delete-icon" in client.get("/static/icons.js").text
     assert 'del.textContent = "删除"' not in text
     assert 'id="sidebarResize"' in text
     assert 'class="inspect-resize"' in text

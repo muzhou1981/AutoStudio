@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from geni_studio.config.context import ConfigError
+from geni_studio.config.context import ConfigError, factory_root
 from geni_studio.config.identifiers import allocate_identifier
+from geni_studio.config.registry import template_file_error
 from geni_studio.config.workflow_defs import (
     copy_workflow,
     create_workflow,
@@ -25,6 +27,7 @@ from geni_studio.config.workflow_defs import (
     workflow_activity_roles,
     workflow_usage,
 )
+from geni_studio.config.workflow_templates import owned_name, owned_path, read_owned
 from geni_studio.web.errors import http_error
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -107,7 +110,7 @@ def api_save_as_subgraph(workflow_id: str, body: SaveSubgraphBody) -> dict:
     except ConfigError as exc:
         raise _http(exc) from exc
     try:
-        return save_as_subgraph(body.title, body.nodes, body.description)
+        return save_as_subgraph(body.title, body.nodes, body.description, source_id=workflow_id)
     except ConfigError as exc:
         raise _http(exc) from exc
 
@@ -123,7 +126,6 @@ def api_copy_workflow(workflow_id: str, body: CopyWorkflowBody) -> dict:
         re.sub(r"-copy(-\d+)?$", "", workflow_id) + "-copy",
         prefix="workflow",
         taken=[item["workflow_id"] for item in list_workflows()],
-        translate=lambda _text: "",
     )
     try:
         return copy_workflow(workflow_id, new_id, title)
@@ -149,6 +151,37 @@ def api_check_workflow(workflow_id: str, body: SaveWorkflowBody) -> dict:
         raise _http(exc) from exc
     problems = check_workflow(body.model_dump(), workflow_id)
     return {"ok": not problems, "problems": problems}
+
+
+def _workflow_folder(workflow_id: str) -> Path:
+    try:
+        get_workflow(workflow_id)
+    except ConfigError as exc:
+        raise _http(exc) from exc
+    return factory_root() / "workflows" / workflow_id
+
+
+@router.get("/{workflow_id}/templates/check")
+def api_check_workflow_template(workflow_id: str, path: str = Query("")) -> dict:
+    folder = _workflow_folder(workflow_id)
+    text = path.strip()
+    if owned_name(text):
+        located = owned_path(folder, text)
+        message = template_file_error(str(located)) if located else "模板路径不合规。"
+    else:
+        message = template_file_error(text)
+    if message:
+        raise HTTPException(status_code=400, detail=message)
+    return {"path": text, "ok": True}
+
+
+@router.get("/{workflow_id}/templates/content")
+def api_workflow_template_content(workflow_id: str, path: str = Query("")) -> dict:
+    folder = _workflow_folder(workflow_id)
+    try:
+        return {"path": path.strip(), "content": read_owned(folder, path.strip())}
+    except ConfigError as exc:
+        raise _http(exc) from exc
 
 
 @router.get("/{workflow_id}/usage")

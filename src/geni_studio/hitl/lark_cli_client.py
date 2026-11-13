@@ -6,6 +6,8 @@ import json
 import os
 import shutil
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -99,7 +101,26 @@ def _user_identity_from_auth(data: dict[str, Any]) -> tuple[str, str]:
     return open_id, user_name
 
 
-def auth_summary() -> LarkCliAuthSummary:
+_AUTH_TTL_SECONDS = 30.0
+_auth_cache: dict[str, Any] = {"at": 0.0, "value": None}
+_auth_lock = threading.Lock()
+
+
+def auth_summary(*, fresh: bool = False) -> LarkCliAuthSummary:
+    """lark-cli 登录状态。每次查询要起子进程并联网核验，约 0.7 秒，短时内复用上一次结果。
+
+    并发请求共用同一次查询；fresh=True 时总是重新查询。
+    """
+    with _auth_lock:
+        cached = _auth_cache["value"]
+        if not fresh and cached is not None and time.monotonic() - _auth_cache["at"] < _AUTH_TTL_SECONDS:
+            return cached
+        value = _query_auth_summary()
+        _auth_cache.update(at=time.monotonic(), value=value)
+        return value
+
+
+def _query_auth_summary() -> LarkCliAuthSummary:
     if not lark_cli_installed():
         return LarkCliAuthSummary(
             installed=False,

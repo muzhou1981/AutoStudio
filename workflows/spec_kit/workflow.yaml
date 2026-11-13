@@ -1,0 +1,135 @@
+workflow_id: spec_kit
+title: Spec Kit 规格驱动开发
+description: 按 github/spec-kit 的规格驱动开发方法：先写只讲做什么与为什么的规格，经人审核与澄清后制定技术方案、拆分任务，自动做一致性分析，再由人审方案；实现后对照规格核对缺口并补齐，最后由人验收。模板改编自 spec-kit（MIT License）。要改，先复制一份。
+builtin: true
+nodes:
+- id: start
+  kind: start
+  name: 启动
+  role: human
+  returns_to: ''
+- id: specify
+  kind: activity
+  name: 起草规格
+  role: project_manager
+  returns_to: ''
+  inputs:
+  - human_request
+  outputs:
+  - name: feature_spec
+    source: file
+    template: templates/spec.md
+  instruction: 只写做什么和为什么，不写技术实现。有把握的地方按常理给出默认值并写进“假设”；只有会显著影响范围、安全或体验且没有合理默认值的问题，才标注 [待澄清]，全文最多 3 处，并在“待澄清问题”中列出最多 5 个问题和推荐答案。若这是退回重做，附言中的答复是人对待澄清问题的回答，要落到相应章节，并记入“澄清记录”。
+- id: review_spec
+  kind: gate
+  name: 审规格
+  role: human
+  returns_to: ''
+  decision: approve
+  reject_to: specify
+  items:
+  - id: stories
+    title: 用户故事有优先级，并且可以独立测试
+  - id: requirements
+    title: 功能需求可检验、无歧义
+  - id: success
+    title: 成功标准可度量，并且与技术无关
+  - id: clarified
+    title: 待澄清问题已答复或确认不需要
+    hint: 要回答问题时选不通过，在附言中逐条作答
+  pass_rule: manual
+- id: plan
+  kind: activity
+  name: 制定方案
+  role: architect
+  returns_to: ''
+  inputs:
+  - feature_spec
+  outputs:
+  - name: impl_plan
+    source: file
+    template: templates/plan.md
+  instruction: 先阅读目标仓库的现有代码与文档，再填写技术背景。若仓库中有 .specify/memory/constitution.md、AGENTS.md、CONTRIBUTING.md 等项目原则文件，必须遵守，并在“项目原则检查”中逐条对照；违反且必须保留的，写进“复杂度说明”。规格中仍标注待澄清的项，在“调研与决策”中给出结论。
+- id: tasks
+  kind: activity
+  name: 拆分任务
+  role: architect
+  returns_to: ''
+  inputs:
+  - feature_spec
+  - impl_plan
+  outputs:
+  - name: task_list
+    source: file
+    template: templates/tasks.md
+  instruction: 任务按用户故事分阶段组织，每个故事都能独立实现和测试；每条任务写确切的文件路径，可并行的标 [P]。每条功能需求至少对应一个任务，在“覆盖对照”中列出。
+- id: analyze
+  kind: activity
+  name: 一致性分析
+  role: qa
+  returns_to: plan
+  max_loops: 2
+  inputs:
+  - feature_spec
+  - impl_plan
+  - task_list
+  outputs:
+  - name: analysis_report
+    source: file
+    template: templates/analysis.md
+  instruction: 只读分析，不改写规格、方案与任务。违反目标仓库项目原则中“必须”的条款一律判为严重。存在严重问题时结论为 fail，并在 summary 中写明要修改的内容；只有中、低问题时结论为 pass。
+- id: review_plan
+  kind: gate
+  name: 审方案
+  role: human
+  returns_to: ''
+  decision: approve
+  reject_to: plan
+  items:
+  - id: principles
+    title: 方案通过项目原则检查，复杂度有说明
+  - id: coverage
+    title: 每个用户故事和功能需求都有对应任务
+  - id: analysis
+    title: 一致性分析没有遗留的严重或高等级问题
+  pass_rule: manual
+- id: implement
+  kind: activity
+  name: 实现
+  role: developer
+  returns_to: ''
+  inputs:
+  - feature_spec
+  - impl_plan
+  - task_list
+  outputs:
+  - code_change
+  instruction: 按任务清单逐阶段实现：先完成准备与基础阶段，再按优先级完成各用户故事；需要测试的任务先写测试并确认失败，再写实现。遵守目标仓库的项目原则文件。若这是退回重做，优先完成“需要修复的问题”中列出的补充任务。code_change 中按任务编号列出完成情况。
+- id: converge
+  kind: activity
+  name: 核对实现
+  role: tester
+  returns_to: implement
+  max_loops: 3
+  inputs:
+  - feature_spec
+  - impl_plan
+  - task_list
+  - code_change
+  outputs:
+  - name: convergence_report
+    source: file
+    template: templates/convergence.md
+  instruction: 运行项目已有的测试与方案中的快速验证，再对照规格、方案与任务核对当前代码。存在严重或高等级缺口，或测试失败时结论为 fail，在 summary 中列出补充任务；否则为 pass。结论块的 ac 按 FR- 与 SC- 编号逐条给出 pass、fail 或 untested。
+- id: accept
+  kind: gate
+  name: 验收
+  role: human
+  returns_to: ''
+  decision: approve
+  reject_to: implement
+- id: end
+  kind: end
+  name: 结束
+  role: human
+  returns_to: ''

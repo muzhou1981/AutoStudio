@@ -692,7 +692,7 @@
       }
     }
 
-    const TRASH_ICON = '<svg class="run-delete-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M6.1 1.8h3.8l.35 1.15H13.2v1.25H2.8V2.95h2.95L6.1 1.8zM4.15 5.2h7.7l-.62 8.15c-.04.45-.42.8-.87.8H5.64c-.45 0-.83-.35-.87-.8L4.15 5.2zM6.55 6.7v5.15h1.2V6.7H6.55zm2.7 0v5.15h1.2V6.7H9.25z"/></svg>';
+    const TRASH_ICON = (window.geniIcons && window.geniIcons.trashSvg) || "";
 
     const EFFORT_LABELS = {
       none: "不推理", minimal: "极低", low: "低", medium: "中", high: "高",
@@ -2532,7 +2532,20 @@
       swimLaying = false;
     }
 
+    /** 打开或切换到某一轮、数据还没到时，泳道区显示骨架，而不是空状态提示或上一轮的泳道。 */
+    function showRailLoading(on) {
+      $("railLoading").hidden = !on;
+      if (!on) return;
+      showPendingAlert(null);
+      $("railEmpty").hidden = true;
+      $("railLegend").hidden = true;
+      $("railCount").hidden = true;
+      $("nodeRail").replaceChildren();
+      $("swimRail").replaceChildren();
+    }
+
     function renderRail(rail) {
+      $("railLoading").hidden = true;
       const count = $("railCount");
       count.hidden = true;
       const cells = (rail && rail.cells) || [];
@@ -4477,6 +4490,7 @@
         return;
       }
       syncThreadChrome(tid, lastStatus && lastStatus.values && lastStatus.values.run_name);
+      if (!lastStatus || lastStatus.thread_id !== tid) showRailLoading(true);
       if (!quiet) setLoading($("btnRefresh"), true);
       try {
         const r = await fetch("/api/runs/" + encodeURIComponent(tid));
@@ -4486,6 +4500,7 @@
           if (startInFlight && (status === 404 || status === 503)) {
             return;
           }
+          showRailLoading(false);
           void loadRunList();
           showError(
             $("startError"),
@@ -4512,6 +4527,7 @@
         refreshRunRoleModels();
       } catch (err) {
         if ($("thread").value.trim() !== tid) return;
+        showRailLoading(false);
         showError($("startError"), "读不到这一轮的状态。检查服务是否还在，然后刷新。");
         void loadRunList();
       } finally {
@@ -5013,11 +5029,15 @@
     });
 
     (function initFromUrl() {
+      const startParams = new URLSearchParams(window.location.search);
+      if (startParams.get("thread_id") || startParams.get("thread")) showRailLoading(true);
       loadRunToolCatalog();
       customElements.whenDefined("wa-select")
-        .then(() => loadRoleTitles())
-        .then(() => loadRunConfigOptions())
-        .then(() => (typeof window.syncRunBackendModels === "function" ? window.syncRunBackendModels() : null))
+        .then(() => {
+          // 模型目录只供右栏角色设置使用，由 refreshRunRoleModels 自行等待，不挡住打开这一轮。
+          if (typeof window.syncRunBackendModels === "function") void window.syncRunBackendModels();
+          return Promise.all([loadRoleTitles(), loadRunConfigOptions()]);
+        })
         .then(() => {
         const params = new URLSearchParams(window.location.search);
         const tid = params.get("thread_id") || params.get("thread");

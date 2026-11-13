@@ -77,7 +77,7 @@ def compile_for_project(
 
     root = root or factory_root()
     loaded = get_workflow(workflow_id, root=root)
-    prepared = resolve_executable(loaded["workflow"], root=root)
+    prepared = resolve_executable(_anchored(loaded["workflow"], workflow_id, root), root=root)
     flat = _prepare_flat(prepared, root)
     compiled = compile_workflow(flat, checkpointer=checkpointer)
     from geni_studio.runtime.snapshots import put
@@ -95,13 +95,22 @@ def check_workflow(workflow: dict[str, Any], workflow_id: str, *, root: Any = No
     root = root or factory_root()
     try:
         data = validate_workflow(workflow, root=root, workflow_id=workflow_id)
-        flat = _prepare_flat(resolve_executable(data, root=root), root)
+        flat = _prepare_flat(resolve_executable(_anchored(data, workflow_id, root), root=root), root)
         compile_workflow(flat, checkpointer=MemorySaver())
     except ConfigError as exc:
         return [line for line in str(exc).splitlines() if line.strip()]
     except OSError as exc:
         return [f"读不到模板文件：{exc.filename or exc}"]
     return []
+
+
+def _anchored(workflow: dict[str, Any], workflow_id: str, root: Any) -> dict[str, Any]:
+    """流程自带模板的相对路径按这份流程自己的目录解析。"""
+    from pathlib import Path
+
+    from geni_studio.config.workflow_templates import anchor_templates
+
+    return anchor_templates(workflow, Path(root) / "workflows" / workflow_id)
 
 
 def compile_workflow(workflow: dict[str, Any], *, checkpointer: BaseCheckpointSaver) -> Any:
@@ -783,7 +792,7 @@ def _flatten_node(
         loaded = get_workflow(subgraph_id, root=root)
         inner_prefix = f"{prefix}{node['id']}__"
         inner: list[dict[str, Any]] = []
-        for child in loaded["workflow"]["nodes"]:
+        for child in _anchored(loaded["workflow"], subgraph_id, root)["nodes"]:
             inner.extend(
                 _flatten_node(child, inner_prefix, root, stack | {subgraph_id}, id_map, branch)
             )

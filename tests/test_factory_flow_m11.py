@@ -65,6 +65,31 @@ def test_factory_default_is_listed_and_locked():
     assert loaded["nodes"][-1]["kind"] == "end"
     with pytest.raises(ConfigError, match="先复制"):
         save_workflow("factory_default", loaded)
+    assert found[0]["hidden"] is True
+    assert not any(item["hidden"] for item in list_workflows() if item["workflow_id"] != "factory_default")
+
+
+def test_hidden_workflow_cannot_be_newly_chosen_but_stays_for_existing_projects(tmp_path, monkeypatch):
+    monkeypatch.setattr("geni_studio.config.registry.factory_root", lambda: tmp_path)
+    monkeypatch.setattr("geni_studio.config.workflow_defs.factory_root", lambda: tmp_path)
+    for flow_id, extra in (("old", "hidden: true\n"), ("alpha", "")):
+        (tmp_path / "workflows" / flow_id).mkdir(parents=True)
+        (tmp_path / "workflows" / flow_id / "workflow.yaml").write_text(
+            f"workflow_id: {flow_id}\ntitle: {flow_id}\n{extra}nodes:\n"
+            "- {id: start, kind: start, name: 启动, role: human}\n- {id: end, kind: end, name: 结束, role: human}\n",
+            encoding="utf-8",
+        )
+    save_project_yaml("fresh", "project_id: fresh\ntitle: fresh\n", root=tmp_path, create=True)
+    with pytest.raises(ConfigError, match="停止选用"):
+        apply_project_form("fresh", {"title": "fresh", "profile_id": "old"}, root=tmp_path, require_profile=True)
+    save_project_yaml(
+        "legacy", "project_id: legacy\ntitle: legacy\nworkflow:\n  profile_id: old\n", root=tmp_path, create=True
+    )
+    text = apply_project_form("legacy", {"title": "改名", "profile_id": "old"}, root=tmp_path, require_profile=True)
+    assert "profile_id: old" in text
+    assert "profile_id: alpha" in apply_project_form(
+        "legacy", {"title": "改名", "profile_id": "alpha"}, root=tmp_path, require_profile=True
+    )
 
 
 def test_self_improve_is_builtin_and_executable():

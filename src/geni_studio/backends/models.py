@@ -193,13 +193,15 @@ def cursor_effort_param(model: str, effort: str) -> str:
     return str(row["reasoning_param"])
 
 
-def _cursor_rows() -> list[dict[str, Any]]:
+def _cached_cursor_rows() -> list[dict[str, Any]]:
     key = os.environ.get("CURSOR_API_KEY", "").strip()
     with _cursor_catalog_lock:
         fresh = _cursor_catalog["key"] == key and time.monotonic() - _cursor_catalog["at"] < _CATALOG_TTL_SECONDS
-        if fresh and _cursor_catalog["rows"]:
-            return list(_cursor_catalog["rows"])
-    return _list_cursor_models()["models"]
+        return list(_cursor_catalog["rows"]) if fresh else []
+
+
+def _cursor_rows() -> list[dict[str, Any]]:
+    return _cached_cursor_rows() or _list_cursor_models()["models"]
 
 
 def list_backend_models(*, backend: str | None = None) -> dict:
@@ -214,5 +216,8 @@ def list_backend_models(*, backend: str | None = None) -> dict:
 
         return list_codex_models()
     if mode == "cursor":
+        cached = _cached_cursor_rows()
+        if cached:
+            return {"models": cached, "source": "cursor", "detail": ""}
         return _list_cursor_models()
     return {"models": [], "source": mode, "detail": "未知 Agent 后端。"}

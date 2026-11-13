@@ -33,7 +33,7 @@ def test_create_lists_and_rejects_bad_graph(tmp_path: Path, monkeypatch: pytest.
     created = create_workflow("demo", "演示", root=tmp_path)
     assert [node["name"] for node in created["workflow"]["nodes"]] == ["启动", "结束"]
     assert list_workflows(tmp_path) == [
-        {"workflow_id": "demo", "title": "演示", "builtin": False, "subgraph": False},
+        {"workflow_id": "demo", "title": "演示", "builtin": False, "subgraph": False, "hidden": False},
     ]
     with pytest.raises(ConfigError, match="已有同名流程"):
         create_workflow("demo", root=tmp_path)
@@ -92,10 +92,10 @@ def test_copy_derives_id_from_source_without_model(tmp_path: Path, monkeypatch: 
     """复制流程时标识由原标识派生，不调用模型翻译标题。"""
     _root(tmp_path, monkeypatch)
 
-    def fail(_text: str) -> str:
+    def fail():
         raise AssertionError("复制流程不应调用模型")
 
-    monkeypatch.setattr("geni_studio.config.identifiers.backend_translate", fail)
+    monkeypatch.setattr("geni_studio.backends.base.get_default_backend", fail)
     client = TestClient(app)
     assert client.post("/api/workflows", json={"workflow_id": "demo", "title": "演示"}).status_code == 200
     first = client.post("/api/workflows/demo/copy", json={"title": "副本 · 演示"})

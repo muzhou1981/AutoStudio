@@ -1,0 +1,181 @@
+workflow_id: npu_kernel_kda
+title: NPU 算子开发（KDA）
+description: 按 NVIDIA Kernel Design Agents 的循证迭代方法，适配 NX9031 NPU：先写算子合同、做方案草案，经人审核后每轮只实现一个候选，分层验证正确性，在 SVB 板端用 nxperf 与基线做 A/B，记入候选台账后决定保留、修改或否决；达到晋升标准后接入 OPLIB/AOM，写算子报告，由人做晋升评审。模板改编自 NVlabs/kda（CC BY 4.0）与 ncu-report-skill（MIT License）。要改，先复制一份。
+builtin: true
+profile:
+  features:
+    design_track: false
+  limits:
+    max_dev_retries: 3
+nodes:
+- id: start
+  kind: start
+  name: 启动
+  role: human
+  returns_to: ''
+- id: contract
+  kind: activity
+  name: 算子合同
+  role: architect
+  returns_to: ''
+  inputs:
+  - human_request
+  outputs:
+  - name: kernel_contract
+    source: file
+    template: templates/contract.md
+  instruction: 先阅读目标仓库的现有实现、测试与构建脚本，再填写合同。目标型号（N93X 即 V20，或 N93P 即 V21）、目标核（Fermat 或 Cayley）与编程路线（CCA、Hauk 或 AOM 图级接入）必须明确，不得写“视情况而定”。代表性形状要覆盖真实网络中的取值，并给出基线实现与基线数据的来源；没有基线时写明首轮先测基线。验证命令与评测命令要能直接复制执行。若这是退回重做，按附言修改相应章节。
+- id: confirm_contract
+  kind: gate
+  name: 确认合同
+  role: human
+  returns_to: ''
+  decision: approve
+  reject_to: contract
+  items:
+  - id: target
+    title: 目标型号、目标核与编程路线已明确
+  - id: shapes
+    title: 代表性形状与基线来源可信
+  - id: oracle
+    title: 正确性判据与容差可执行
+  - id: promotion
+    title: 晋升标准可度量，并给出了噪声阈值
+  pass_rule: manual
+- id: draft
+  kind: activity
+  name: 方案草案
+  role: architect
+  returns_to: ''
+  inputs:
+  - kernel_contract
+  outputs:
+  - name: kernel_draft
+    source: file
+    template: templates/draft.md
+  instruction: 草案完成前不改任何代码。先定位算子的调用链与现有 kernel，再做静态诊断：估算算术强度，按合同中目标型号的实测带宽上限判断受访存还是受计算限制，不得跨型号套用数据。逐条核对平台资源门槛，候选方向按预期收益与风险排序，每个方向写明要改什么、验证命令和接受所需的证据。涉及硬件规格、Hauk 或 OPLIB 约束时，先检索 geni-wiki，用原始实体名作查询，并在“依据”中注明来源。
+- id: review_draft
+  kind: gate
+  name: 审方案
+  role: human
+  returns_to: ''
+  decision: approve
+  reject_to: draft
+  items:
+  - id: diagnosis
+    title: 静态诊断有依据，带宽与算力上限对应目标型号
+  - id: constraints
+    title: 平台资源门槛逐条核对，没有违反项
+  - id: candidates
+    title: 候选方向排序合理，每个都写明了接受证据
+  pass_rule: manual
+- id: implement
+  kind: activity
+  name: 实现候选
+  role: developer
+  returns_to: ''
+  inputs:
+  - kernel_contract
+  - kernel_draft
+  outputs:
+  - code_change
+  instruction: 每轮只实现一个候选，只做这一项改动，并在 code_change 开头写明候选编号、父候选与改动内容。首轮若合同要求先测基线，只补齐基线测量所需的独立测试程序，不做优化。提交验证前先用 npcc++ 编译通过，并查看汇编确认寄存器与 Shared Memory 用量没有超限。若这是退回重做，“需要修复的问题”中若指定了下一个候选，按它实现；若是正确性问题，先修复，不换候选。
+- id: verify
+  kind: activity
+  name: 分层验证
+  role: tester
+  returns_to: implement
+  max_loops: 3
+  inputs:
+  - kernel_contract
+  - kernel_draft
+  - code_change
+  outputs:
+  - name: verification_report
+    source: file
+    template: templates/verification.md
+  instruction: 按静态检查、独立编译、runtime、libop.so、SVB 板端的顺序逐层验证，低层没过不跑高层；不把产物目录生成当成板卡已跑通。ESL 仿真只有在合同中写明已获授权时才运行，且只作参考。所有代表性形状都要对照正确性判据，记录最大误差。任何一层失败或任何形状超出容差时结论为 fail，在 summary 中写明失败层级、复现命令和日志位置。
+- id: measure
+  kind: activity
+  name: 诊断与取舍
+  role: architect
+  returns_to: implement
+  max_loops: 4
+  inputs:
+  - kernel_contract
+  - kernel_draft
+  - code_change
+  - verification_report
+  outputs:
+  - name: perf_evidence
+    source: file
+    template: templates/perf_evidence.md
+  instruction: 先剖析、再诊断、后计划，不凭猜测下结论。在 SVB 上用 nxperf 计时模式，与父候选在同一会话、同一板卡、同一形状下做 A/B，每组至少 100 次迭代并记录离散程度；需要定位热点时再用逐核模式。按模板的六个维度诊断，把本轮候选记入台账并给出保留、修改或否决及理由，已否决的候选不得删除。只有板端数据可以作为接受依据。达到合同的晋升标准时结论为 pass；否则为 fail，在 summary 中写明下一个候选的编号与要做的改动；没有值得尝试的候选时也判 fail，并写明阻塞原因，交由人决定。
+- id: integrate
+  kind: activity
+  name: 接入算子库
+  role: developer
+  returns_to: ''
+  inputs:
+  - kernel_contract
+  - code_change
+  - perf_evidence
+  outputs:
+  - name: integration_change
+    source: file
+    template: templates/integration.md
+  instruction: 按合同的编程路线接入 OPLIB/AOM：登记算子、补齐约束检查、按 lib_op_type 写 manual_config。graph_cut 的键必须用编译后的 Call 名，不得用注册表中的算子名。合同写明不需要接入时，在接入说明中写明理由，不改代码。若这是退回重做，按“需要修复的问题”修改。
+- id: integration_check
+  kind: activity
+  name: 集成核对
+  role: tester
+  returns_to: integrate
+  max_loops: 2
+  inputs:
+  - kernel_contract
+  - code_change
+  - integration_change
+  outputs:
+  - name: integration_report
+    source: file
+    template: templates/integration_check.md
+  instruction: 编译一个包含该算子的代表用例，确认走到新实现，并核对 graph_cut 与 manual_config 是否生效。再在板端回归合同中的正确性判据。接入说明写明无需接入的，只核对理由是否成立。任何一项不满足时结论为 fail，在 summary 中写明问题与复现命令。
+- id: report
+  kind: activity
+  name: 算子报告
+  role: architect
+  returns_to: ''
+  inputs:
+  - kernel_contract
+  - kernel_draft
+  - verification_report
+  - perf_evidence
+  - integration_change
+  - integration_report
+  outputs:
+  - name: kernel_report
+    source: file
+    template: templates/report.md
+  instruction: 只引用前面各环节已有的证据，不补测、不推测。核心数据写明型号、形状、迭代次数与离散程度；带宽数据写明口径是有效带宽还是峰值。列出被否决的候选与理由，以及后续优化方向的排序和置信度。复现命令要能直接复制执行。
+- id: promote
+  kind: gate
+  name: 晋升评审
+  role: human
+  returns_to: ''
+  decision: approve
+  reject_to: implement
+  items:
+  - id: correct
+    title: 所有代表性形状在板端通过正确性判据
+  - id: gain
+    title: 板端 A/B 的收益达到晋升标准，且大于噪声
+  - id: ledger
+    title: 候选台账完整，否决的候选写明了理由
+  - id: integrated
+    title: 已接入算子库并核对生效，或无需接入的理由成立
+  pass_rule: manual
+- id: end
+  kind: end
+  name: 结束
+  role: human
+  returns_to: ''

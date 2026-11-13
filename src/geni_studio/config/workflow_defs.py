@@ -12,9 +12,15 @@ import yaml
 
 from geni_studio.config.context import ConfigError, ConfigNotFound, factory_root
 from geni_studio.config.identifiers import allocate_identifier
+from geni_studio.config.workflow_templates import (
+    absorb_templates,
+    import_from,
+    prune_templates,
+)
 from geni_studio.roles.loader import role_contract, role_title
 
 _WORKFLOW_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+_LINK_RE = re.compile(r"^https?://", re.IGNORECASE)
 _ROLE_ORDER = (
     "project_manager",
     "config_manager",
@@ -49,10 +55,10 @@ def _output_items(value: object) -> list[dict[str, str]]:
             name, source, template = item.strip(), "file", ""
         elif isinstance(item, dict):
             name = str(item.get("name") or "").strip()
-            source = str(item.get("source") or "file").strip()
             template = str(item.get("template") or "").strip()
+            source = str(item.get("source") or "").strip()
             if source not in {"file", "link"}:
-                source = "file"
+                source = "link" if _LINK_RE.match(template) else "file"
         else:
             continue
         if name:
@@ -124,10 +130,18 @@ def list_workflows(root: Path | None = None) -> list[dict[str, Any]]:
                 "title": str(data.get("title") or workflow_id),
                 "builtin": bool(data.get("builtin")),
                 "subgraph": bool(data.get("subgraph")),
+                "hidden": bool(data.get("hidden")),
             }
         )
     items.sort(key=lambda item: (not item["builtin"], item["title"]))
     return items
+
+
+def workflow_hidden(workflow_id: str, root: Path | None = None) -> bool:
+    """隐藏的流程不出现在选择列表里，已选用它的项目照常运行。"""
+    if not workflow_id.strip() or not workflow_exists(workflow_id, root):
+        return False
+    return bool(_read_yaml(_workflow_path(workflow_id, root, must_exist=True)).get("hidden"))
 
 
 def uses_current_branch(workflow_id: str, root: Path | None = None) -> bool:
@@ -217,7 +231,7 @@ def import_workflow(text: str, root: Path | None = None) -> dict[str, Any]:
     if requested and _WORKFLOW_ID_RE.match(requested) and requested not in set(taken):
         workflow_id = requested
     else:
-        workflow_id = allocate_identifier(title, prefix="workflow", taken=taken, translate=lambda _text: "")
+        workflow_id = allocate_identifier(title, prefix="workflow", taken=taken)
     payload: dict[str, Any] = {
         "workflow_id": workflow_id,
         "title": title,
@@ -228,8 +242,9 @@ def import_workflow(text: str, root: Path | None = None) -> dict[str, Any]:
         payload["subgraph"] = True
     if str(loaded.get("workspace") or "") == "current_branch":
         payload["workspace"] = "current_branch"
-    data = validate_workflow(payload, root=root, workflow_id=workflow_id)
+    validate_workflow(payload, root=root, workflow_id=workflow_id)
     path = _workflow_path(workflow_id, root, must_exist=False)
+    data = validate_workflow(absorb_templates(payload, path.parent), root=root, workflow_id=workflow_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_dump(data), encoding="utf-8")
     return {"workflow": data, "yaml": _dump(data)}
@@ -264,10 +279,15 @@ def copy_workflow(
         payload["subgraph"] = True
     if str(source.get("workspace") or "") == "current_branch":
         payload["workspace"] = "current_branch"
+    if source.get("profile"):
+        payload["profile"] = source["profile"]
     path = _workflow_path(workflow_id, root, must_exist=False)
     if path.is_file():
         raise ConfigError(f"已有同名流程：{workflow_id}")
-    data = validate_workflow(payload, root=root, workflow_id=workflow_id)
+    validate_workflow(payload, root=root, workflow_id=workflow_id)
+    source_folder = _workflow_path(source_id, root, must_exist=True).parent
+    payload["nodes"] = import_from(source_folder, payload["nodes"])
+    data = validate_workflow(absorb_templates(payload, path.parent), root=root, workflow_id=workflow_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_dump(data), encoding="utf-8")
     return {"workflow": data, "yaml": _dump(data)}
@@ -278,7 +298,8 @@ def save_workflow(workflow_id: str, payload: dict[str, Any], root: Path | None =
     current = _read_yaml(path)
     if current.get("builtin"):
         raise ConfigError("这是内置流程。要改，先复制一份。")
-    data = validate_workflow(payload, root=root, workflow_id=workflow_id)
+    validate_workflow(payload, root=root, workflow_id=workflow_id)
+    data = validate_workflow(absorb_templates(payload, path.parent), root=root, workflow_id=workflow_id)
     if current.get("subgraph"):
         data["subgraph"] = True
     try:
@@ -290,6 +311,7 @@ def save_workflow(workflow_id: str, payload: dict[str, Any], root: Path | None =
             original["subgraph"] = True
     _record_version(path, original, data)
     path.write_text(_dump(data), encoding="utf-8")
+    prune_templates(path.parent)
     return {"workflow": data, "yaml": _dump(data)}
 
 
@@ -351,7 +373,34 @@ def _version_changes(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]
         "removed": [_node_label(node) for key, node in before.items() if key not in after],
         "changed": [_node_label(after[key]) for key in common if before[key] != after[key]],
         "reordered": [key for key in before if key in after] != common,
+        "templates": _template_changes(old.get("nodes"), new.get("nodes")),
     }
+
+
+def _template_refs(nodes: Any) -> dict[tuple[str, str], tuple[str, str]]:
+    refs: dict[tuple[str, str], tuple[str, str]] = {}
+    for node in nodes if isinstance(nodes, list) else []:
+        if not isinstance(node, dict):
+            continue
+        if node.get("kind") == "parallel":
+            for branch in node.get("branches") or []:
+                if isinstance(branch, dict):
+                    refs.update(_template_refs(branch.get("nodes")))
+            continue
+        for item in _output_items(node.get("outputs")):
+            if item["template"]:
+                refs[(str(node.get("id") or ""), item["name"])] = (_node_label(node), item["template"])
+    return refs
+
+
+def _template_changes(old: Any, new: Any) -> list[dict[str, str]]:
+    """前后都有模板、但引用的文件或链接变了的输出。"""
+    before, after = _template_refs(old), _template_refs(new)
+    return [
+        {"activity": label, "output": key[1]}
+        for key, (label, template) in after.items()
+        if key in before and before[key][1] != template
+    ]
 
 
 def list_workflow_versions(workflow_id: str, root: Path | None = None) -> list[dict[str, Any]]:
@@ -625,9 +674,10 @@ def save_as_subgraph(
     description: str = "",
     *,
     workflow_id: str = "",
+    source_id: str = "",
     root: Path | None = None,
 ) -> dict[str, Any]:
-    """把当前流程另存成可插入的子图。原流程不改。"""
+    """把当前流程另存成可插入的子图。原流程不改；原流程自带的模板复制到子图目录。"""
     title = title.strip()
     if not title:
         raise ConfigError("先写子图标题。")
@@ -641,17 +691,17 @@ def save_as_subgraph(
     path = _workflow_path(workflow_id, root, must_exist=False)
     if path.is_file():
         raise ConfigError(f"已有同名流程：{workflow_id}")
-    data = validate_workflow(
-        {
-            "workflow_id": workflow_id,
-            "title": title,
-            "description": description,
-            "nodes": nodes,
-            "subgraph": True,
-        },
-        root=root,
-        workflow_id=workflow_id,
-    )
+    payload = {
+        "workflow_id": workflow_id,
+        "title": title,
+        "description": description,
+        "nodes": nodes,
+        "subgraph": True,
+    }
+    validate_workflow(payload, root=root, workflow_id=workflow_id)
+    if source_id:
+        payload["nodes"] = import_from(_workflow_path(source_id, root, must_exist=True).parent, nodes)
+    data = validate_workflow(absorb_templates(payload, path.parent), root=root, workflow_id=workflow_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_dump(data), encoding="utf-8")
     return {"workflow": data, "yaml": _dump(data)}

@@ -180,7 +180,7 @@ def _feishu(backend: str) -> tuple[str, str]:
     if backend == "lark_cli":
         from geni_studio.hitl.lark_cli_client import auth_summary
 
-        summary = auth_summary()
+        summary = auth_summary(fresh=True)
         if summary.bot_ready:
             return "ok", "本机 lark-cli 可用。"
         hint = summary.hint or "本机 lark-cli 不可用。"
