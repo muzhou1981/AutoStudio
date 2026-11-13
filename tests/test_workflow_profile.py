@@ -74,7 +74,7 @@ def test_legacy_scenario_still_runs_and_reports_migration(tmp_path):
     assert ctx.feature_design_track_default() is False
     assert ctx.max_dev_retries == 7
     summary = effective_config_summary(project_id="p", root=root)
-    assert any("场景「legacy」" in note and "profiled" in note for note in summary["notices"])
+    assert any("场景“legacy”" in note and "profiled" in note for note in summary["notices"])
 
 
 def test_unknown_profile_id_is_reported(tmp_path):

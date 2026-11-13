@@ -192,7 +192,7 @@ def test_delete_refuses_while_a_project_or_parent_still_uses_it(
         "projects": [],
         "workflows": [{"workflow_id": "parent", "title": "父流程"}],
     }
-    with pytest.raises(ConfigError, match="流程「父流程」"):
+    with pytest.raises(ConfigError, match="流程“父流程”"):
         delete_workflow("child", root=tmp_path)
     assert (tmp_path / "workflows" / "child" / "workflow.yaml").is_file()
 
@@ -201,7 +201,7 @@ def test_delete_refuses_while_a_project_or_parent_still_uses_it(
     assert usage == {"projects": [{"project_id": "demo", "title": "演示项目"}], "workflows": []}
     refused_parent = client.delete("/api/workflows/parent")
     assert refused_parent.status_code == 400
-    assert "项目「演示项目」" in refused_parent.json()["detail"]
+    assert "项目“演示项目”" in refused_parent.json()["detail"]
     (project / "project.yaml").write_text("project_id: demo\ntitle: 演示项目\n", encoding="utf-8")
     removed = client.delete("/api/workflows/parent")
     assert removed.status_code == 200
@@ -238,7 +238,7 @@ def test_check_reports_start_time_problems_without_running(
         ],
     }
     problems = client.post("/api/workflows/demo/check", json=draft).json()["problems"]
-    assert problems == ["活动「开发」的输出「plan_doc」没有模板。"]
+    assert problems == ["活动“开发”的输出“plan_doc”没有模板。"]
     assert client.post("/api/workflows/missing/check", json=draft).status_code == 404
     assert len(get_workflow("demo", root=tmp_path)["workflow"]["nodes"]) == 2
 

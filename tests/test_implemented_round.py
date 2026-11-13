@@ -98,22 +98,19 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert 'textContent = "产物"' not in text
     assert "renderMarkdown" in text
     assert 'id="swimRail"' in text
-    assert ">运行状态</p>" in text
+    assert 'id="railHeading">运行状态<a class="help-tip" href="/help#run/rail"' in text
     assert "从目录打开" in text
     assert 'href="/#region-rail"' not in text
     assert 'href="/#region-todo"' not in text
     assert 'href="/workflow#new"' in text
-    assert 'href="/help#overview"' in text
+    assert 'href="/help#quickstart"' in text
     assert 'href="/help#architecture"' in text
-    assert 'href="/help#guide"' in text
-    assert "安装步骤写在仓库的 README" in text
+    assert 'href="/help#guide"' not in text
     assert 'id="btnContinueRun"' in text
     assert "这一轮在中途中断" in text
     assert 'id="flowNodeMenuShell"' in text and 'id="flowInspectEdge"' in text
-    assert "合规管理负责隐私、网络安全和知识产权" in text
-    assert "入门指南" in text
-    assert 'data-help-article="workflow"' in text
-    assert "帮助只读。" in text
+    assert 'id="helpArticles"' in text and 'id="helpTocList"' in text and 'id="helpSearch"' in text
+    assert "帮助只读。" not in text
     assert 'id="flowHeading"' in text
     assert 'class="sidebar-svg"' in text
     assert "M88.7 223.8" in text
@@ -183,7 +180,7 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert "armStartPoll" in text
     assert 'id="region-setup"' not in text
     assert 'id="btnStart" variant="brand">启动</wa-button>\n                <wa-button id="btnSaveRun"' in text
-    # 交付目标与启动在右栏下方，只在看「启动」时出现；中栏底部只留续跑、暂停与停止
+    # 交付目标与启动在右栏下方，只在看“启动”时出现；中栏底部只留续跑、暂停与停止
     dock = text[text.index('id="region-todo"'):text.index('id="dockTodo"')]
     assert 'id="req"' in dock and 'id="btnStart"' in dock and 'id="btnAttach"' in dock
     controls = text[text.index('id="region-controls"'):text.index("</main>", text.index('id="region-controls"'))]
@@ -200,7 +197,7 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     assert 'id="out"' not in text
     assert '$("out")' not in text
     assert "这一步还没有指定 " not in text
-    # 口径 A：保留分组标题与「增加」，仅去掉未选项空态提示；后端空目录提示仍在
+    # 口径 A：保留分组标题与“增加”，仅去掉未选项空态提示；后端空目录提示仍在
     assert 'label.textContent = title;' in text
     assert 'button.textContent = "增加";' in text
     assert '"后端没有列出 " + title + "。"' in text
@@ -209,9 +206,10 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     todo_at = text.index('id="region-todo"')
     inspect_run_at = text.index("inspect-body-run")
     assert inspect_run_at < todo_at
-    # 流程编辑：删除流程移入「更多」并在原位确认，不与保存相邻；只保留一个复制入口；不再显示原文 YAML
+    # 流程编辑：删除流程移入“更多”并在原位确认，不与保存相邻；只保留一个复制入口；不再显示原文 YAML
     assert 'id="flowDeleteConfirm"' in text and 'id="btnDeleteFlow" variant="danger">删除流程</wa-button>' in text
-    assert "删除在选择框右侧的「更多」里" in text
+    help_workflow = Path(__file__).resolve().parents[1] / "docs" / "help" / "workflow.md"
+    assert "删除在“更多”→“删除流程……”" in help_workflow.read_text(encoding="utf-8")
     toolbar = text[text.index('<div class="flow-head-row">'):text.index('id="flowEditor"')]
     assert 'id="btnSaveFlow" variant="brand"' in toolbar and "btnDeleteFlow" not in toolbar
     assert 'id="flowToolbar"' not in text
@@ -220,7 +218,7 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     script = TestClient(app).get("/static/workflow.js").text
     assert '$("btnSaveFlow").hidden = on || !created || builtin' in script
     assert "!event.isComposing && event.keyCode !== 229" in script
-    assert 'title: "删除流程…", danger: true, onPick: openDeleteConfirm, disabled: inUse' in script
+    assert 'title: "删除流程……", danger: true, onPick: openDeleteConfirm, disabled: inUse' in script
     assert "删除后不能恢复。" in script
     assert 'fetch("/api/workflows/" + encodeURIComponent(id), { method: "DELETE" })' in script
     assert "/raw" not in script
@@ -248,7 +246,7 @@ def test_run_prompt_has_no_example_placeholder() -> None:
     assert "例如：为 npu_operator 场景实现 Mul 算子，含单测与性能基线" not in text
     assert 'id="runName" label="Run 命名" placeholder="先选择项目"' in text
     assert "project.disabled = bound" in text
-    assert 'placeholder="补充范围说明或驳回原因…"' in text
+    assert 'placeholder="补充范围说明或驳回原因……"' in text
 
 
 def test_role_model_settings_live_in_the_inspect_panel() -> None:
@@ -478,4 +476,4 @@ def test_workflow_editor_has_history_check_usage_and_trail() -> None:
     run_script = client.get("/static/hitl.js").text
     assert 'id="branchChoice"' in text and "function syncBranchChoice(options)" in run_script
     assert "payload.branch_choice = $(\"branchChoice\").value;" in run_script
-    assert '"采用「" + entry.picked + "」"' in run_script
+    assert '"采用“" + entry.picked + "”"' in run_script

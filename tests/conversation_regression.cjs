@@ -47,7 +47,7 @@ const live = context.formatConversation({ turns: [{ seq: 2, events: cursorTurn.e
 assert.match(live, /<summary>思考 2 秒<\/summary>/, '进行中的轮次里，已有回复之前的过程收起');
 assert.ok(!live.includes('工具调用 2 次'), '最新的过程直接展开');
 assert.match(live, /读取<\/span> <span class="conv-tool-target">design\/ui-ux.md/);
-assert.match(live, /思考中…<\/p><\/details>$/);
+assert.match(live, /思考中……<\/p><\/details>$/);
 assert.match(live, /^<details class="conv-turn" data-key="turn-2" open><summary><h4>第 2 次<\/h4><\/summary>/);
 
 const multi = context.formatConversation({ turns: [cursorTurn, { seq: 2, events: cursorTurn.events }] }, { live: false });

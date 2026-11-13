@@ -299,7 +299,7 @@ async function loadLists() {
   if ($("fieldScenario")) fillScenarioOptions($("fieldScenario"), window.__scenarios, $("fieldScenario").value);
   const pp = $("projectPick");
   const selected = (pp.value || "").trim();
-  pp.replaceChildren(waOption("", "— 选择 —"));
+  pp.replaceChildren(waOption("", "请选择"));
   window.__projects = pr.projects || [];
   window.__nodes = pr.nodes || [];
   for (const p of window.__projects) {
@@ -484,7 +484,7 @@ async function saveRuntime() {
     }
     btn.disabled = false;
     btn.loading = false;
-    showSaved($("runtimeSaved"), "已写入 .env，正在检测连通性…");
+    showSaved($("runtimeSaved"), "已写入 .env，正在检测连通性……");
     const probe = await fetch("/api/config/settings/probe", { method: "POST" });
     const pdata = await probe.json();
     await loadSettings();
@@ -730,7 +730,7 @@ function refreshReasoningPick(selected) {
     el.appendChild(waOption(value, `${value}（当前设置，未确认支持）`));
   }
   el.value = value;
-  if (reasoningCatalog.status === "loading") el.hint = "正在读取模型的推理级别…";
+  if (reasoningCatalog.status === "loading") el.hint = "正在读取模型的推理级别……";
   else if (reasoningCatalog.status === "error") el.hint = "读不到推理级别；当前设置已保留，请刷新配置页重试。";
   else if (!($("modelPick") || $("modelInput"))?.value) el.hint = "先明确选择模型以读取支持的推理级别；默认模式沿用 Codex 配置。";
   else if (!model || !Array.isArray(model.reasoning_efforts)) el.hint = "模型未返回推理能力；当前设置已保留。";
@@ -854,7 +854,7 @@ function fillRuntime(data) {
     if (savedOpen && !isFeishuOpenId(rawHint)) {
       savedOpen = false;
       setWaControlValue(feishuOpenEl, "");
-      feishuOpenEl.hint = `当前 .env 中「${open.value_hint}」不是 open_id；应填 ou_… 或留空后由 lark-cli 自动填入`;
+      feishuOpenEl.hint = `当前 .env 中“${open.value_hint}”不是 open_id；应填 ou_… 或留空后由 lark-cli 自动填入`;
     } else if (savedOpen) {
       setWaControlValue(feishuOpenEl, rawHint);
       feishuOpenEl.hint = "项目未填 open_id 时使用";
@@ -863,8 +863,8 @@ function fillRuntime(data) {
       setWaControlValue(feishuOpenEl, ou);
       const who = cli.user_name ? `（${cli.user_name}）` : "";
       feishuOpenEl.hint = suggestedOpen
-        ? `已从 lark-cli 预填${who}；点「写入 .env」后才会保存`
-        : `已从 lark-cli 读取当前登录用户${who}；点「写入 .env」后才会保存`;
+        ? `已从 lark-cli 预填${who}；点“写入 .env”后才会保存`
+        : `已从 lark-cli 读取当前登录用户${who}；点“写入 .env”后才会保存`;
     } else {
       const stale = (feishuOpenEl.value || "").trim();
       if (isAgentBackendToken(stale) || (stale && !isFeishuOpenId(stale))) {
@@ -1442,7 +1442,7 @@ if ($("btnDeleteProject")) {
     const title = ($("fieldTitle").value || "").trim() || id;
     if (
       !window.confirm(
-        "确定删除项目「" + title + "」（" + id + "）？将永久删除 projects/" + id + "/，无法恢复。",
+        "确定删除项目“" + title + "”（" + id + "）？将永久删除 projects/" + id + "/，无法恢复。",
       )
     ) {
       return;

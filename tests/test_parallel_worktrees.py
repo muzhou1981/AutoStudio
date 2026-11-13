@@ -191,7 +191,7 @@ def test_compare_needs_a_pick_gate_and_the_other_way_round(tmp_path, monkeypatch
 
     data = yaml.safe_load(_COMPARE)
     lonely = {**data, "nodes": [node for node in data["nodes"] if node["id"] != "gate"]}
-    with pytest.raises(ConfigError, match="后面要有一个「择一」决策点"):
+    with pytest.raises(ConfigError, match="后面要有一个“择一”决策点"):
         validate_workflow(lonely, root=tmp_path, workflow_id="sample")
     merged = yaml.safe_load(_FLOW)
     merged["nodes"][-2]["decision"] = "pick"
@@ -222,7 +222,7 @@ def test_pick_gate_card_offers_one_button_per_branch(tmp_path, monkeypatch):
         if element.get("tag") == "column_set"
         for column in element["columns"]
     ]
-    assert [b["text"]["content"] for b in buttons] == ["采用「实现甲」", "采用「实现乙」", "都不采用"]
+    assert [b["text"]["content"] for b in buttons] == ["采用“实现甲”", "采用“实现乙”", "都不采用"]
     value = buttons[1]["behaviors"][0]["value"]
     assert value["branch_choice"] == "b2" and value["gate_decision"] == "approved"
     action = parse_card_action_trigger({"action": {"value": value}})

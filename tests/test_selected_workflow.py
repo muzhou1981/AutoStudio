@@ -84,9 +84,9 @@ def test_gate_rejection_after_escalation_continue_takes_effect(
     assert st.awaiting_human is not None and st.awaiting_human.kind == "escalation"
     assert calls == {"project_manager": 1, "developer": 1}
     st = svc.submit_hitl(st.thread_id, escalation_choice="continue")
-    # 继续即重做一次：回到回退目标「起草」，再执行「开发」。
+    # 继续即重做一次：回到回退目标“起草”，再执行“开发”。
     assert calls == {"project_manager": 2, "developer": 2}
-    assert "「开发」未通过" in prompts[-1]
+    assert "“开发”未通过" in prompts[-1]
     assert st.awaiting_human is not None and st.awaiting_human.gate_id == "n4"
     drafted = calls["project_manager"]
     svc._write_values(st.thread_id, {"gate_timeout_note": "超时未批复"})
@@ -110,7 +110,7 @@ def test_missing_decision_refuses_to_start(tmp_path: Path) -> None:
             {"id": "end", "kind": "end", "name": "结束", "role": "human", "returns_to": ""},
         ],
     }
-    with pytest.raises(ConfigError, match="决策点「确认」缺少决定类型"):
+    with pytest.raises(ConfigError, match="决策点“确认”缺少决定类型"):
         resolve_executable(workflow, root=tmp_path)
     (tmp_path / "roles" / "qa").mkdir(parents=True)
     (tmp_path / "roles" / "qa" / "role.md").write_text(
@@ -122,7 +122,7 @@ def test_missing_decision_refuses_to_start(tmp_path: Path) -> None:
         2,
         {"id": "n9", "kind": "activity", "name": "把关", "role": "qa", "returns_to": ""},
     )
-    with pytest.raises(ConfigError, match="活动「把关」缺少产出产物"):
+    with pytest.raises(ConfigError, match="活动“把关”缺少产出产物"):
         resolve_executable(workflow, root=tmp_path)
     drafted = {
         "workflow_id": "sample",
@@ -140,7 +140,7 @@ def test_missing_decision_refuses_to_start(tmp_path: Path) -> None:
             {"id": "end", "kind": "end", "name": "结束", "role": "human", "returns_to": ""},
         ],
     }
-    with pytest.raises(ConfigError, match="输出「requirement_spec」没有模板"):
+    with pytest.raises(ConfigError, match="输出“requirement_spec”没有模板"):
         resolve_executable(drafted, root=tmp_path)
 
 

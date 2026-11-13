@@ -11,7 +11,7 @@ _OPTION_LINE = re.compile(
 
 
 def option_letter(raw: str) -> str:
-    """这一行若是「A：…」式选项，返回字母，否则返回空串。"""
+    """这一行若是“A：…”式选项，返回字母，否则返回空串。"""
     match = _OPTION_LINE.match(plain_line(raw))
     return match.group(1) if match else ""
 
@@ -25,7 +25,7 @@ def plain_line(raw: str) -> str:
 
 
 def extract_choices(text: str) -> list[dict[str, Any]]:
-    """识别「A（推荐）：…」类行；至少两条才视为有效选项组。"""
+    """识别“A（推荐）：…”类行；至少两条才视为有效选项组。"""
     if not str(text or "").strip():
         return []
     found: list[dict[str, Any]] = []
@@ -164,7 +164,7 @@ def choice_groups_from_reading(sections: list[dict[str, str]]) -> list[dict[str,
 
 
 def choice_reply_line(choice: dict[str, Any]) -> str:
-    """与 Web「采用并填入附言」一致的附言正文。"""
+    """与 Web“采用并填入附言”一致的附言正文。"""
     letter = str(choice.get("id") or "").strip()
     label = str(choice.get("label") or "").strip()
     if not letter:
@@ -185,7 +185,7 @@ def choice_signature(group: dict[str, Any]) -> str:
 
 
 def answers_from_reply(groups: list[dict[str, Any]], reply: str) -> dict[str, str]:
-    """从人的答复里按题序认出所选字母，例如「选择 A（推荐）：…」「同意A」或单独一个「B」。"""
+    """从人的答复里按题序认出所选字母，例如“选择 A（推荐）：…”“同意A”或单独一个“B”。"""
     text = str(reply or "").strip()
     letters = _PICK.findall(text)
     if not letters and re.fullmatch(r"[A-Z]", text):

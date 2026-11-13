@@ -94,7 +94,7 @@ def apply_proposal(root: Path, proposal_id: str) -> Path:
         raise ProposalError("未经批准不得修改角色定义或流程")
     target = root / str(data["target"])
     if not target.is_file():
-        raise ProposalError(f"修改对象不存在: {target}")
+        raise ProposalError(f"修改对象不存在：{target}")
     text = target.read_text(encoding="utf-8")
     addition = str(data.get("body") or "").rstrip() + "\n"
     if addition.strip() not in text:

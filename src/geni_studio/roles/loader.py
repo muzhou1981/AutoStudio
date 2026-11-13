@@ -25,10 +25,10 @@ def load_role_system_prompt(role_name: str, root: Path | None = None) -> str:
             roles = get(frozen["_roles_ref"]) if "_roles_ref" in frozen else frozen["_roles"]
             return roles[role_name]
         except (KeyError, SnapshotMissing) as exc:
-            raise FileNotFoundError(f"Run 快照中缺少角色定义: {role_name}") from exc
+            raise FileNotFoundError(f"Run 快照中缺少角色定义：{role_name}") from exc
     path = role_md_path(role_name, root)
     if not path.is_file():
-        raise FileNotFoundError(f"缺少角色定义: {path}")
+        raise FileNotFoundError(f"缺少角色定义：{path}")
     return path.read_text(encoding="utf-8")
 
 

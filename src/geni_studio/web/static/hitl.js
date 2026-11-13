@@ -136,34 +136,241 @@
 
     let hitlSearch = location.pathname === "/config" || location.pathname === "/workflow" || location.pathname === "/help" ? "" : location.search;
 
-    const HELP_TOPICS = {
-      overview: "概览",
-      architecture: "架构",
-      guide: "入门指南",
-      project: "项目",
-      run: "运行",
-      workflow: "流程",
-      roles: "角色",
-      agent: "Agent",
-      workspace: "工作区",
-      feishu: "飞书",
-      env: "环境",
+    /** 手册各篇对应的功能页，右栏给出直达入口。 */
+    const HELP_PAGES = {
+      project: ["/project", "打开“项目”页"],
+      run: ["/", "打开“运行”页"],
+      workflow: ["/workflow", "打开“流程”页"],
+      roles: ["/role", "打开“角色”页"],
+      config: ["/config", "打开“配置”页"],
     };
+    let helpData = null;
+    let helpLoad = null;
+    let helpIndex = [];
+    let helpTopic = "";
 
-    function showHelp(hash) {
-      const raw = (hash || "").replace(/^#/, "");
-      const known = Object.prototype.hasOwnProperty.call(HELP_TOPICS, raw);
-      const topic = known ? raw : "overview";
+    function loadHelp() {
+      if (!helpLoad) {
+        helpLoad = fetch("/api/help")
+          .then(async (r) => {
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(data.detail || "读不到帮助正文。");
+            return data;
+          })
+          .then((data) => {
+            helpData = data;
+            renderHelpArticles();
+            return data;
+          })
+          .catch((err) => {
+            helpLoad = null;
+            throw err;
+          });
+      }
+      return helpLoad;
+    }
+
+    function renderHelpArticles() {
+      const box = $("helpArticles");
+      box.replaceChildren();
+      helpIndex = [];
+      helpData.topics.forEach((topic) => {
+        const article = document.createElement("article");
+        article.className = "help-copy";
+        article.dataset.helpArticle = topic.id;
+        article.hidden = true;
+        article.innerHTML = topic.html;
+        box.appendChild(article);
+        let entry = { topic: topic.id, topicTitle: topic.title, id: "", title: topic.title, text: "" };
+        helpIndex.push(entry);
+        Array.from(article.children).forEach((el) => {
+          if (el.tagName === "H2" || el.tagName === "H3") {
+            entry = { topic: topic.id, topicTitle: topic.title, id: el.id.slice(topic.id.length + 1), title: el.textContent, text: "" };
+            helpIndex.push(entry);
+          } else {
+            entry.text += " " + el.textContent.replace(/\s+/g, " ");
+          }
+        });
+      });
+    }
+
+    function parseHelpHash(hash) {
+      let raw = decodeURIComponent((hash || "").replace(/^#/, ""));
+      const aliases = (helpData && helpData.aliases) || {};
+      if (Object.prototype.hasOwnProperty.call(aliases, raw)) raw = aliases[raw];
+      const slash = raw.indexOf("/");
+      return { raw, topic: slash < 0 ? raw : raw.slice(0, slash), section: slash < 0 ? "" : raw.slice(slash + 1) };
+    }
+
+    const HELP_NAV_KEY = "geni_studio_help_nav_collapsed";
+
+    function setHelpGroupCollapsed(group, collapsed) {
+      group.classList.toggle("is-collapsed", collapsed);
+      group.querySelector(".help-nav-caption").setAttribute("aria-expanded", String(!collapsed));
+      group.querySelector(".help-nav-items").inert = collapsed;
+    }
+
+    function saveHelpNavState() {
+      const collapsed = [...document.querySelectorAll(".help-nav-group.is-collapsed")].map((el) => el.dataset.helpGroup);
+      try {
+        localStorage.setItem(HELP_NAV_KEY, JSON.stringify(collapsed));
+      } catch (_) {
+        // 浏览器禁用存储时折叠状态只在本次打开内有效。
+      }
+    }
+
+    async function showHelp(hash) {
+      $("helpLoading").hidden = Boolean(helpData);
+      try {
+        await loadHelp();
+      } catch (err) {
+        $("helpLoading").hidden = true;
+        showError($("helpError"), err.message || "读不到帮助正文。");
+        return;
+      }
+      $("helpLoading").hidden = true;
+      showError($("helpError"), "");
+      const parsed = parseHelpHash(hash);
+      const topics = helpData.topics;
+      const found = topics.find((item) => item.id === parsed.topic);
+      const topic = found || topics[0];
+      const canonical = "#" + (found ? parsed.raw : topic.id);
+      if (location.pathname === "/help" && location.hash !== canonical) history.replaceState({ route: "help" }, "", "/help" + canonical);
       document.querySelectorAll("[data-help-article]").forEach((el) => {
-        el.hidden = el.dataset.helpArticle !== topic;
+        el.hidden = el.dataset.helpArticle !== topic.id;
       });
-      const heading = $("helpHeading");
-      if (heading) heading.textContent = HELP_TOPICS[topic];
-      const missing = $("helpMissing");
-      if (missing) missing.hidden = known || raw === "";
+      $("helpHeading").textContent = topic.title;
+      $("helpMissing").hidden = Boolean(found) || parsed.raw === "";
       document.querySelectorAll("[data-help-topic]").forEach((el) => {
-        el.classList.toggle("is-active", el.dataset.helpTopic === topic);
+        el.classList.toggle("is-active", el.dataset.helpTopic === topic.id);
       });
+      if (helpTopic !== topic.id) {
+        helpTopic = topic.id;
+        const group = document.querySelector(`[data-help-topic="${topic.id}"]`)?.closest(".help-nav-group");
+        if (group && group.classList.contains("is-collapsed")) {
+          setHelpGroupCollapsed(group, false);
+          saveHelpNavState();
+        }
+        renderHelpToc(topic);
+        renderHelpPager(topic);
+        const page = HELP_PAGES[topic.id];
+        const open = $("helpOpenPage");
+        open.hidden = !page;
+        if (page) {
+          open.href = page[0];
+          open.textContent = page[1];
+        }
+      }
+      const target = found && parsed.section ? document.getElementById(topic.id + "/" + parsed.section) : null;
+      requestAnimationFrame(() => {
+        if (target) target.scrollIntoView({ block: "start", behavior: scrollBehavior({ smooth: true }) });
+        else $("helpArticles").closest(".workspace-main").scrollTop = 0;
+        syncHelpTocActive();
+      });
+    }
+
+    function renderHelpToc(topic) {
+      const list = $("helpTocList");
+      list.replaceChildren();
+      topic.sections.forEach((section) => {
+        const li = document.createElement("li");
+        li.className = section.level === 3 ? "is-sub" : "";
+        const link = document.createElement("a");
+        link.href = "/help#" + topic.id + "/" + section.id;
+        link.dataset.helpSection = section.id;
+        link.textContent = section.title;
+        li.appendChild(link);
+        list.appendChild(li);
+      });
+      $("helpToc").hidden = !topic.sections.length || Boolean(String($("helpSearch").value || "").trim());
+    }
+
+    function renderHelpPager(topic) {
+      const pager = $("helpPager");
+      pager.replaceChildren();
+      const topics = helpData.topics;
+      const at = topics.indexOf(topic);
+      [[topics[at - 1], "上一篇", "is-prev"], [topics[at + 1], "下一篇", "is-next"]].forEach(([item, label, cls]) => {
+        if (!item) return;
+        const link = document.createElement("a");
+        link.className = "help-pager-link " + cls;
+        link.href = "/help#" + item.id;
+        const caption = document.createElement("span");
+        caption.textContent = label;
+        const title = document.createElement("strong");
+        title.textContent = item.title;
+        link.append(caption, title);
+        pager.appendChild(link);
+      });
+    }
+
+    /** 本页目录里标出正在阅读的一节：取顶端已越过的最后一个标题。 */
+    function syncHelpTocActive() {
+      const article = document.querySelector("[data-help-article]:not([hidden])");
+      if (!article) return;
+      const main = article.closest(".workspace-main");
+      const top = main.getBoundingClientRect().top + 96;
+      let current = "";
+      article.querySelectorAll("h2, h3").forEach((el) => {
+        if (el.getBoundingClientRect().top <= top) current = el.id.slice(helpTopic.length + 1);
+      });
+      document.querySelectorAll("#helpTocList a").forEach((link) => {
+        link.classList.toggle("is-active", link.dataset.helpSection === current);
+      });
+    }
+
+    function helpSnippet(text, term) {
+      const at = text.toLowerCase().indexOf(term);
+      if (at < 0) return text.slice(0, 80).trim();
+      const start = Math.max(0, at - 30);
+      return (start > 0 ? "…" : "") + text.slice(start, at + term.length + 50).trim() + "…";
+    }
+
+    function renderHelpResults() {
+      const box = $("helpResults");
+      const query = String($("helpSearch").value || "").trim().toLowerCase();
+      $("helpToc").hidden = Boolean(query) || !$("helpTocList").children.length;
+      box.hidden = !query;
+      box.replaceChildren();
+      if (!query) return;
+      const terms = query.split(/\s+/).filter(Boolean);
+      const hits = helpIndex
+        .map((entry) => {
+          const title = entry.title.toLowerCase();
+          const text = entry.text.toLowerCase();
+          if (!terms.every((term) => title.includes(term) || text.includes(term) || entry.topicTitle.toLowerCase().includes(term))) return null;
+          return { entry, score: terms.filter((term) => title.includes(term)).length };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 20);
+      const head = document.createElement("p");
+      head.className = "section-title";
+      head.textContent = hits.length ? "找到 " + hits.length + " 处" : "没有找到相关内容";
+      box.appendChild(head);
+      const list = document.createElement("ol");
+      hits.forEach(({ entry }) => {
+        const li = document.createElement("li");
+        const link = document.createElement("a");
+        link.href = "/help#" + entry.topic + (entry.id ? "/" + entry.id : "");
+        const where = document.createElement("span");
+        where.className = "help-result-where";
+        where.textContent = entry.id ? entry.topicTitle + " › " + entry.title : entry.topicTitle;
+        const snippet = document.createElement("span");
+        snippet.className = "help-result-text";
+        const text = helpSnippet(entry.text, terms[0]);
+        const at = text.toLowerCase().indexOf(terms[0]);
+        if (at < 0) snippet.textContent = text;
+        else {
+          const mark = document.createElement("mark");
+          mark.textContent = text.slice(at, at + terms[0].length);
+          snippet.append(text.slice(0, at), mark, text.slice(at + terms[0].length));
+        }
+        link.append(where, snippet);
+        li.appendChild(link);
+        list.appendChild(li);
+      });
+      box.appendChild(list);
     }
 
     let draftId = "";
@@ -394,7 +601,7 @@
       showError(errorEl, "");
       for (const file of files) {
         if (items.some((item) => item.name === file.name)) {
-          showError(errorEl, "已经添加过「" + file.name + "」。");
+          showError(errorEl, "已经添加过“" + file.name + "”。");
           continue;
         }
         try {
@@ -625,7 +832,7 @@
     }
 
     /**
-     * 推理强度、Fast 与其它模型参数按「角色 × 后端:模型」记在服务端用户配置里，与 Cursor IDE 一样随模型保存：
+     * 推理强度、Fast 与其它模型参数按“角色 × 后端:模型”记在服务端用户配置里，与 Cursor IDE 一样随模型保存：
      * 显式改推理强度、Fast 或参数时记下当前模型的取值；换模型时换上新模型上次的取值，没记过的回到默认。
      * 换走时不记旧模型：Run 里沿用下来、没被改过的取值不能覆盖别处记下的选择。
      * 页面持有一份副本，改动逐项写回服务端；刷新角色设置时重新读取，以便看到其它机器或 CLI 的改动。
@@ -752,7 +959,7 @@
     }
 
     /**
-     * 右栏顶部的本步骤设置。模型与推理强度绑定角色，归入「角色属性」；Skill 只属于这一步，归入「步骤属性」。
+     * 右栏顶部的本步骤设置。模型与推理强度绑定角色，归入“角色属性”；Skill 只属于这一步，归入“步骤属性”。
      * MCP 是全局配置，在配置页只读列出，这里不选择。
      * 两组各带外框并排：角色属性是一枚模型摘要，点开在菜单里调整；步骤属性只有 Skill。说明统一写在下方。
      */
@@ -797,7 +1004,7 @@
         section.appendChild(p);
       };
       if (!s.backend) {
-        note(runRoleDefaultsError || "正在读取这个角色的模型设置…", runRoleDefaultsError ? "hint-block is-error" : "");
+        note(runRoleDefaultsError || "正在读取这个角色的模型设置……", runRoleDefaultsError ? "hint-block is-error" : "");
         return section;
       }
       if (s.backend === "stub") {
@@ -1552,7 +1759,7 @@
         }
         void applyRunStartTemplate(data);
         const from = item.run_name || id;
-        showRunSaved("已从「" + from + "」复制到新建表单，确认后启动。");
+        showRunSaved("已从“" + from + "”复制到新建表单，确认后启动。");
       } catch (_) {
         showError($("startError"), "复制没有返回。检查服务是否还在，然后重试。");
       }
@@ -1619,7 +1826,7 @@
       const panel = document.createElement("div");
       panel.className = "run-confirm";
       const text = document.createElement("p");
-      text.textContent = "删除「" + label + "」？这一轮记录不能恢复，目标仓库里的文件会保留。";
+      text.textContent = "删除“" + label + "”？这一轮记录不能恢复，目标仓库里的文件会保留。";
       const ok = document.createElement("button");
       ok.type = "button";
       ok.className = "run-delete-confirm";
@@ -1738,7 +1945,7 @@
           del.type = "button";
           del.className = "run-delete";
           del.setAttribute("aria-label", "删除");
-          del.title = "删除「" + label + "」";
+          del.title = "删除“" + label + "”";
           del.innerHTML = TRASH_ICON;
           const copy = document.createElement("button");
           copy.type = "button";
@@ -2427,7 +2634,7 @@
       return !!(data && data.phase === "running" && rail && cellId === rail.current);
     }
 
-    /** 两处渲染共用：只有正在执行的那一步、且最后一次调用还没有结果时，按进行中展开并显示「思考中…」。 */
+    /** 两处渲染共用：只有正在执行的那一步、且最后一次调用还没有结果时，按进行中展开并显示“思考中……”。 */
     function conversationLive(data, cellId, payload) {
       if (!cellRunning(data, cellId)) return false;
       const turns = (payload && payload.turns) || [];
@@ -2640,7 +2847,7 @@
         remove.type = "button";
         remove.className = "tool-remove";
         remove.setAttribute("aria-label", "删除");
-        remove.title = "删除「" + runToolLabel(item) + "」";
+        remove.title = "删除“" + runToolLabel(item) + "”";
         remove.innerHTML = TRASH_ICON;
         remove.addEventListener("click", () => {
           const next = chosenNodeTools(cell, data);
@@ -3078,7 +3285,7 @@
       const processes = payload ? payload.processes : undefined;
       if (!turns.length) {
         return live
-          ? "<p class=\"conv-live-status\"><span class=\"conv-live-dot\" aria-hidden=\"true\"></span>思考中…</p>"
+          ? "<p class=\"conv-live-status\"><span class=\"conv-live-dot\" aria-hidden=\"true\"></span>思考中……</p>"
           : "";
       }
       return processPanel(processes) + turns.map((turn, turnIndex) => {
@@ -3178,7 +3385,7 @@
         }
         flushWork(true);
         if (turnLive) {
-          html += "<p class=\"conv-live-status\"><span class=\"conv-live-dot\" aria-hidden=\"true\"></span>思考中…</p>";
+          html += "<p class=\"conv-live-status\"><span class=\"conv-live-dot\" aria-hidden=\"true\"></span>思考中……</p>";
         }
         return html + "</details>";
       }).join("");
@@ -3432,7 +3639,7 @@
       return "选择 " + id + "：" + label;
     }
 
-    /** 每组选项在附言里只占一行「选择 X：…」，改选时原位替换。 */
+    /** 每组选项在附言里只占一行“选择 X：…”，改选时原位替换。 */
     function writeChoiceReply(group, choice) {
       const area = $("reply");
       if (!area) return;
@@ -3603,7 +3810,7 @@
         name.textContent = item.title || item.key;
         if (linked) {
           name.type = "button";
-          name.title = "查看「" + (item.node_label || item.node) + "」的输出";
+          name.title = "查看“" + (item.node_label || item.node) + "”的输出";
           name.addEventListener("click", () => {
             const cell = railCellButton(item.node);
             if (cell) cell.click();
@@ -3648,8 +3855,8 @@
     function decisionLabel(entry) {
       if (entry.kind === "pm_clarification") return "已答复";
       if (entry.kind === "escalation") return (ESCALATION_CHOICES[entry.decision] || [entry.decision])[0];
-      if (entry.decision === "approved") return entry.picked ? "采用「" + entry.picked + "」" : "批准";
-      return entry.reject_label ? "不通过 — 退回「" + entry.reject_label + "」" : "驳回 — 结束本轮";
+      if (entry.decision === "approved") return entry.picked ? "采用“" + entry.picked + "”" : "批准";
+      return entry.reject_label ? "不通过——退回“" + entry.reject_label + "”" : "驳回——结束本轮";
     }
 
     function decisionTone(entry) {
@@ -3734,7 +3941,7 @@
           judged.forEach((item) => {
             const row = document.createElement("li");
             row.dataset.decision = item.decision;
-            row.textContent = (item.decision === "rejected" ? "不通过「" : "通过「") + item.title + "」" + (item.note ? "：" + item.note : "");
+            row.textContent = (item.decision === "rejected" ? "不通过“" : "通过“") + item.title + "”" + (item.note ? "：" + item.note : "");
             ul.appendChild(row);
           });
           li.append(label, ul);
@@ -3766,9 +3973,9 @@
       if (!approve || !reject) return;
       const options = (ah && ah.kind === "gate" && ah.pick_options) || [];
       const target = ah && ah.kind === "gate" ? ah.reject_label : "";
-      approve.textContent = options.length ? "采用所选一路 — 合并后继续" : "批准 — 继续流程";
-      if (options.length) reject.textContent = target ? "都不采用 — 前往「" + target + "」" : "都不采用 — 结束本轮";
-      else reject.textContent = target ? "不通过 — 退回「" + target + "」" : "驳回 — 结束本轮";
+      approve.textContent = options.length ? "采用所选一路——合并后继续" : "批准——继续流程";
+      if (options.length) reject.textContent = target ? "都不采用——前往“" + target + "”" : "都不采用——结束本轮";
+      else reject.textContent = target ? "不通过——退回“" + target + "”" : "驳回——结束本轮";
       syncBranchChoice(options);
     }
 
@@ -3818,9 +4025,9 @@
       if (missing.length) {
         submit.textContent = "还差 " + missing.length + " 个必答项";
       } else if (rejected.length) {
-        submit.textContent = gateRejectLabel ? "不通过 — 退回「" + gateRejectLabel + "」" : "不通过 — 结束本轮";
+        submit.textContent = gateRejectLabel ? "不通过——退回“" + gateRejectLabel + "”" : "不通过——结束本轮";
       } else {
-        submit.textContent = "全部通过 — 继续";
+        submit.textContent = "全部通过——继续";
       }
     }
 
@@ -3938,7 +4145,7 @@
         const cell = currentCell(data.rail);
         el.hidden = false;
         el.className = "hitl-agent-live is-busy";
-        el.textContent = cell && cell.label ? "正在执行：" + cell.label + "…" : "流程推进中…";
+        el.textContent = cell && cell.label ? "正在执行：" + cell.label + "……" : "流程推进中……";
         return;
       }
       el.hidden = true;
@@ -3958,21 +4165,21 @@
       if (ah && ah.kind === "pm_clarification") {
         $("reply").label = "澄清答复";
         $("reply").hint = "必填";
-        $("reply").placeholder = "逐条回答待澄清问题…";
+        $("reply").placeholder = "逐条回答待澄清问题……";
         qList.hidden = true;
         qList.replaceChildren();
         renderClarifyActions(ah.questions || []);
       } else if (ah && ah.kind === "escalation") {
         $("reply").label = "说明";
         $("reply").hint = "可空";
-        $("reply").placeholder = "补充决策理由…";
+        $("reply").placeholder = "补充决策理由……";
         qList.hidden = true;
         qList.replaceChildren();
         renderClarifyActions([]);
       } else {
         $("reply").label = "附言";
         $("reply").hint = "可空";
-        $("reply").placeholder = "补充范围说明或驳回原因…";
+        $("reply").placeholder = "补充范围说明或驳回原因……";
         qList.hidden = true;
         qList.replaceChildren();
         renderClarifyActions([]);
@@ -4099,7 +4306,7 @@
         box.hidden = true;
         return;
       }
-      $("pendingAlertText").textContent = (stepLabel ? "「" + stepLabel + "」" : "本轮") + "等待你处理，表单在右侧「人工待办」。";
+      $("pendingAlertText").textContent = (stepLabel ? "“" + stepLabel + "”" : "本轮") + "等待你处理，表单在右侧“人工待办”。";
       box.hidden = false;
     }
 
@@ -4546,12 +4753,12 @@
         if (awaitingKind === "gate" && gateItems.length) {
           const { missing, rejected } = itemStats();
           if (gatePassRule === "all" && missing.length) {
-            showError($("hitlError"), "还有必答项没有结论：" + missing.map((item) => "「" + item.title + "」").join("、") + "。");
+            showError($("hitlError"), "还有必答项没有结论：" + missing.map((item) => "“" + item.title + "”").join("、") + "。");
             return;
           }
           const blank = rejected.find((item) => !String(itemAnswers[item.id].note || "").trim());
           if (blank) {
-            showError($("hitlError"), "「" + blank.title + "」不通过，要写明原因。");
+            showError($("hitlError"), "“" + blank.title + "”不通过，要写明原因。");
             return;
           }
           payload.item_decisions = gateItems
@@ -5113,7 +5320,7 @@
         if (link) link.classList.toggle("is-active", on);
       });
       let helpHash = hash || "";
-      if (route === "help" && !(helpHash.replace(/^#/, ""))) helpHash = "#overview";
+      if (route === "help" && !(helpHash.replace(/^#/, ""))) helpHash = "#quickstart";
       if (historyMode === "push" || historyMode === "replace") {
         let base = "/" + hitlSearch;
         if (route === "config") base = "/config";
@@ -5197,6 +5404,45 @@
       }
       applyRoute(url.pathname, url.hash, { historyMode: "push", smooth: true });
     });
+
+    /** 帮助页内的链接只换篇或滚到小节；“打开某页”在本页切换，不整页刷新。 */
+    document.querySelector('.app-view[data-route="help"]').addEventListener("click", (event) => {
+      const link = event.target.closest("a[href]");
+      if (!link || link.target === "_blank" || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      let url;
+      try {
+        url = new URL(link.getAttribute("href"), location.origin);
+      } catch (err) {
+        return;
+      }
+      if (url.origin !== location.origin) return;
+      const known = ["/", "/project", "/workflow", "/role", "/config", "/help"];
+      if (!known.includes(url.pathname)) return;
+      event.preventDefault();
+      applyRoute(url.pathname, url.hash, { historyMode: "push", smooth: true });
+    });
+
+    (function initHelpNav() {
+      let collapsed = [];
+      try {
+        collapsed = JSON.parse(localStorage.getItem(HELP_NAV_KEY) || "[]") || [];
+      } catch (_) {
+        collapsed = [];
+      }
+      document.querySelectorAll(".help-nav-group").forEach((group) => {
+        if (collapsed.includes(group.dataset.helpGroup)) setHelpGroupCollapsed(group, true);
+        group.querySelector(".help-nav-caption").addEventListener("click", () => {
+          setHelpGroupCollapsed(group, !group.classList.contains("is-collapsed"));
+          saveHelpNavState();
+        });
+      });
+    })();
+
+    $("helpSearch").addEventListener("input", renderHelpResults);
+    $("helpSearch").addEventListener("wa-clear", renderHelpResults);
+    document.querySelector('.app-view[data-route="help"] .workspace-main').addEventListener("scroll", () => {
+      requestAnimationFrame(syncHelpTocActive);
+    }, { passive: true });
 
     window.addEventListener("popstate", () => {
       if (location.pathname !== "/config" && location.pathname !== "/workflow" && location.pathname !== "/role" && location.pathname !== "/help") hitlSearch = location.search;

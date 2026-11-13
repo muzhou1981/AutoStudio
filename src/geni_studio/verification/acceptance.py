@@ -2,7 +2,7 @@
 
 一个验收编号视为通过，须满足其一：判定类活动的结论块中该编号为 pass；
 或验证命令退出码为 0 且其输出含该编号。仅在正文中出现不算覆盖。
-Stub 后端的模拟运行没有真实证据，退回到「出现即覆盖」，并在对照表中注明。
+Stub 后端的模拟运行没有真实证据，退回到“出现即覆盖”，并在对照表中注明。
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ def extract_acceptance_ids(text: str) -> list[str]:
 
 
 def missing_acceptance_ids(*, requirement_spec: str, evidence: str) -> list[str]:
-    """按「出现即覆盖」计算缺口；仅用于模拟运行与复盘统计。"""
+    """按“出现即覆盖”计算缺口；仅用于模拟运行与复盘统计。"""
     seen = set(extract_acceptance_ids(evidence))
     return [ac for ac in extract_acceptance_ids(requirement_spec) if ac not in seen]
 

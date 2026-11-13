@@ -32,8 +32,8 @@ def apply_gate_node(gate_id: str, state: "FactoryState") -> dict:
         "gate_timeout_note": "",
     }
     if decision == "rejected":
-        # 不通过时把人的意见交给要前往的活动，它在「需要修复的问题」里读到；该活动通过后清空。
-        cleared["return_feedback"] = f"「{_gate_label(state, gate_id)}」不通过：\n{note or '（未写原因）'}"
+        # 不通过时把人的意见交给要前往的活动，它在“需要修复的问题”里读到；该活动通过后清空。
+        cleared["return_feedback"] = f"“{_gate_label(state, gate_id)}”不通过：\n{note or '（未写原因）'}"
     impact = str(state.get("change_impact") or "")
     resolves = (gate_id == "gate_requirement_confirm" and impact == "scope") or (
         gate_id == "gate_architecture_review" and impact == "architecture"

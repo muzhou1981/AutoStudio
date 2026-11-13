@@ -48,7 +48,7 @@ def build_gate_interactive_card(
     if pick_options:
         body_md += "\n请从下面各路中采用一路；都不采用时，未合并的改动留作补丁。"
     elif reject_label.strip():
-        body_md += f"\n不通过将前往「{reject_label.strip()}」，然后继续。"
+        body_md += f"\n不通过将前往“{reject_label.strip()}”，然后继续。"
     else:
         body_md += "\n不通过将结束本轮。"
     if summary:
@@ -138,7 +138,7 @@ def build_gate_interactive_card(
 
 
 def _items_elements(*, thread_id: str, web_url: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """逐项审批的决策点：卡片只列条目，提供「全部通过」与去网页逐项处理，见 ADR 0032。"""
+    """逐项审批的决策点：卡片只列条目，提供“全部通过”与去网页逐项处理，见 ADR 0032。"""
     required = sum(1 for item in items if item.get("required", True))
     lines = [f"共 {len(items)} 项待逐项审批，其中 {required} 项必答；有不通过的项请在网页逐项处理。"]
     lines += [f"- {_short(str(item.get('title') or ''))}" for item in items[:8]]
@@ -206,7 +206,7 @@ def _pick_elements(*, thread_id: str, options: list[dict[str, str]]) -> list[dic
 
     columns = [
         button(
-            f"采用「{_short(item['name'] or item['id'])}」",
+            f"采用“{_short(item['name'] or item['id'])}”",
             "primary_filled",
             {**gate_card_action_value(thread_id=thread_id, gate_decision="approved"), "branch_choice": item["id"]},
         )

@@ -11,8 +11,8 @@ const label = (entry) => vm.runInContext(`decisionLabel(${JSON.stringify(entry)}
 
 // 决定按批复时下拉框的文字回显：退回某节点与结束本轮要分开。
 assert.equal(label({ decision: 'approved', reject_label: '改代码' }), '批准');
-assert.equal(label({ decision: 'rejected', reject_label: '改代码' }), '不通过 — 退回「改代码」');
-assert.equal(label({ decision: 'rejected', reject_label: '' }), '驳回 — 结束本轮');
+assert.equal(label({ decision: 'rejected', reject_label: '改代码' }), '不通过——退回“改代码”');
+assert.equal(label({ decision: 'rejected', reject_label: '' }), '驳回——结束本轮');
 const tone = (entry) => vm.runInContext(`decisionTone(${JSON.stringify(entry)})`, context);
 assert.equal(label({ kind: 'pm_clarification', decision: 'replied' }), '已答复');
 assert.equal(label({ kind: 'escalation', decision: 'continue' }), '继续重试');

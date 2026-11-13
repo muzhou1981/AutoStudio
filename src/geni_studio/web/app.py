@@ -30,6 +30,7 @@ from geni_studio.web.config_routes import router as config_router
 from geni_studio.web.errors import http_error, install_handlers
 from geni_studio.web.feishu_routes import bind_run_service
 from geni_studio.web.feishu_routes import router as feishu_router
+from geni_studio.web.help_routes import router as help_router
 from geni_studio.web.role_routes import router as role_router
 from geni_studio.web.workflow_routes import router as workflow_router
 from geni_studio.workspace.layout import WorkspaceError
@@ -76,6 +77,7 @@ app.include_router(config_router)
 app.include_router(workflow_router)
 app.include_router(role_router)
 app.include_router(feishu_router)
+app.include_router(help_router)
 _static_dir = Path(__file__).with_name("static")
 app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 

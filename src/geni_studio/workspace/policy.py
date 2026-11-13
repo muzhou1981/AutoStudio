@@ -58,7 +58,7 @@ def _raise_write_busy(target_root: Path, lock_path: Path) -> None:
         if not _pid_alive(pid):
             hint += "，登记进程已不在；请重启 geni-studio-web 后重试"
         hint += "）"
-    raise WriteBusy(f"目标项目已有写入进行中: {target_root}{hint}")
+    raise WriteBusy(f"目标项目已有写入进行中：{target_root}{hint}")
 
 
 def _lock_path(target_root: Path, lock_file: Path | None = None) -> Path:

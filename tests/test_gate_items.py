@@ -60,11 +60,11 @@ def test_all_rule_derives_the_overall_decision():
         "approved",
     )
     assert decision == "rejected"
-    assert items_section(judged) == "逐项结论：\n- 通过「接口兼容」\n- 不通过「性能」：慢了一倍"
+    assert items_section(judged) == "逐项结论：\n- 通过“接口兼容”\n- 不通过“性能”：慢了一倍"
 
 
 def test_items_need_required_answers_and_reasons():
-    with pytest.raises(ItemsError, match="1 个必答项没有结论：「接口兼容」"):
+    with pytest.raises(ItemsError, match="1 个必答项没有结论：“接口兼容”"):
         judge_items(_CHECKLIST, [{"id": "perf", "decision": "approved"}], None)
     with pytest.raises(ItemsError, match="要写明原因"):
         judge_items(_CHECKLIST, [{"id": "api", "decision": "rejected"}], None)
@@ -100,7 +100,7 @@ def test_gate_with_items_rejects_back_with_item_reasons(tmp_path, monkeypatch):
         item_decisions=[{"id": "api", "decision": "rejected", "note": "删了旧字段"}],
     )
     assert back.awaiting_human is not None and back.awaiting_human.gate_id == "review"
-    assert len(calls) == 2 and "不通过「接口兼容」：删了旧字段" in calls[-1]
+    assert len(calls) == 2 and "不通过“接口兼容”：删了旧字段" in calls[-1]
     done = svc.submit_hitl(st.thread_id, gate_decision="approved")
     assert done.phase == "completed"
     log = conversation_dir(st.thread_id, str(done.values.get("workspace_path") or "")).parent / "decisions.jsonl"

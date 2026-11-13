@@ -429,8 +429,8 @@ def delete_workflow(workflow_id: str, root: Path | None = None) -> None:
     if current.get("builtin"):
         raise ConfigError("这是内置流程，不能删除。")
     usage = workflow_usage(workflow_id, root)
-    used = [f"项目「{item['title']}」" for item in usage["projects"]]
-    used += [f"流程「{item['title']}」" for item in usage["workflows"]]
+    used = [f"项目“{item['title']}”" for item in usage["projects"]]
+    used += [f"流程“{item['title']}”" for item in usage["workflows"]]
     if used:
         raise ConfigError(f"这个流程还在使用：{'、'.join(used)}。先改用别的流程或去掉子图。")
     folder = path.parent.resolve()
@@ -472,19 +472,19 @@ def _require_subgraph(subgraph_id: str, owner: str, root: Path | None, seen_grap
 
 
 def _check_pick_pairs(cleaned: list[dict[str, Any]]) -> None:
-    """对照择一的并行之后、下一个并行或结束之前，须有且只有一个「择一」决策点，见 ADR 0031。"""
+    """对照择一的并行之后、下一个并行或结束之前，须有且只有一个“择一”决策点，见 ADR 0031。"""
     pending: dict[str, Any] | None = None
     for item in cleaned:
         if item["kind"] == "parallel" and pending is not None:
-            raise ConfigError(f"并行「{pending['name']}」选了对照择一，要先放一个「择一」决策点，再开下一个并行。")
+            raise ConfigError(f"并行“{pending['name']}”选了对照择一，要先放一个“择一”决策点，再开下一个并行。")
         if item["kind"] == "parallel" and item.get("join") == "compare":
             pending = item
         elif item["kind"] == "gate" and item.get("decision") == "pick":
             if pending is None:
-                raise ConfigError(f"「{item['name']}」是择一决策点，但前面没有选了对照择一的并行。")
+                raise ConfigError(f"“{item['name']}”是择一决策点，但前面没有选了对照择一的并行。")
             pending = None
     if pending is not None:
-        raise ConfigError(f"并行「{pending['name']}」选了对照择一，后面要有一个「择一」决策点。")
+        raise ConfigError(f"并行“{pending['name']}”选了对照择一，后面要有一个“择一”决策点。")
 
 
 _MAX_GATE_ITEMS = 30
@@ -496,25 +496,25 @@ def _gate_items(raw: dict[str, Any], name: str, decision: str) -> dict[str, Any]
     rule = str(raw.get("pass_rule") or "").strip()
     if entries in (None, "", []):
         if rule and rule != "all":
-            raise ConfigError(f"决策点「{name}」没有决策项，不需要汇总规则。")
+            raise ConfigError(f"决策点“{name}”没有决策项，不需要汇总规则。")
         return {}
     if decision == "pick":
-        raise ConfigError(f"「{name}」是择一决策点，不能带决策项。")
+        raise ConfigError(f"“{name}”是择一决策点，不能带决策项。")
     if not isinstance(entries, list):
-        raise ConfigError(f"决策点「{name}」的决策项要写成列表。")
+        raise ConfigError(f"决策点“{name}”的决策项要写成列表。")
     if len(entries) > _MAX_GATE_ITEMS:
-        raise ConfigError(f"决策点「{name}」的决策项最多 {_MAX_GATE_ITEMS} 项。")
+        raise ConfigError(f"决策点“{name}”的决策项最多 {_MAX_GATE_ITEMS} 项。")
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
     for entry in entries:
         if not isinstance(entry, dict):
-            raise ConfigError(f"决策点「{name}」的每个决策项要有标识与名称。")
+            raise ConfigError(f"决策点“{name}”的每个决策项要有标识与名称。")
         item_id = str(entry.get("id") or "").strip()
         title = str(entry.get("title") or "").strip()
         if not item_id or item_id in seen:
-            raise ConfigError(f"决策点「{name}」的决策项标识不能空，也不能重复。")
+            raise ConfigError(f"决策点“{name}”的决策项标识不能空，也不能重复。")
         if not title:
-            raise ConfigError(f"决策点「{name}」有决策项没写名称。")
+            raise ConfigError(f"决策点“{name}”有决策项没写名称。")
         seen.add(item_id)
         item: dict[str, Any] = {"id": item_id, "title": title}
         hint = str(entry.get("hint") or "").strip()
@@ -524,19 +524,19 @@ def _gate_items(raw: dict[str, Any], name: str, decision: str) -> dict[str, Any]
             item["required"] = False
         items.append(item)
     if rule not in {"", "all", "manual"}:
-        raise ConfigError(f"决策点「{name}」的汇总规则只能是全部通过才放行，或由人决定。")
+        raise ConfigError(f"决策点“{name}”的汇总规则只能是全部通过才放行，或由人决定。")
     return {"items": items, "pass_rule": rule or "all"}
 
 
 def _loop_count(raw_loops: object, name: str) -> int:
     if raw_loops in (None, ""):
-        raise ConfigError(f"「{name}」先写最大循环次数。")
+        raise ConfigError(f"“{name}”先写最大循环次数。")
     try:
         count = int(raw_loops)  # type: ignore[arg-type]
     except (TypeError, ValueError) as exc:
-        raise ConfigError(f"「{name}」的最大循环次数要是整数。") from exc
+        raise ConfigError(f"“{name}”的最大循环次数要是整数。") from exc
     if isinstance(raw_loops, bool) or count < 1:
-        raise ConfigError(f"「{name}」的最大循环次数至少为 1。")
+        raise ConfigError(f"“{name}”的最大循环次数至少为 1。")
     return count
 
 
@@ -563,11 +563,11 @@ def _clean_branches(
             raise ConfigError("支路要写名称。")
         children = item.get("nodes")
         if not isinstance(children, list) or not children:
-            raise ConfigError(f"「{name}」还没有活动。")
+            raise ConfigError(f"“{name}”还没有活动。")
         cleaned_children: list[dict[str, Any]] = []
         for child in children:
             if not isinstance(child, dict):
-                raise ConfigError(f"「{name}」里的步骤须为 mapping。")
+                raise ConfigError(f"“{name}”里的步骤须为 mapping。")
             child_id = str(child.get("id") or "").strip()
             kind = str(child.get("kind") or "").strip()
             child_name = str(child.get("name") or "").strip()
@@ -594,11 +594,11 @@ def _clean_branches(
                 if not child_name:
                     raise ConfigError("活动要写名称。")
                 if role not in roles:
-                    raise ConfigError(f"活动「{child_name}」要选择已有角色。")
+                    raise ConfigError(f"活动“{child_name}”要选择已有角色。")
                 returns_to = str(child.get("returns_to") or "").strip()
                 earlier = [item["id"] for item in cleaned_children if item["kind"] == "activity"]
                 if returns_to and returns_to not in earlier:
-                    raise ConfigError(f"「{child_name}」只能回退到支路「{name}」里更早的活动。")
+                    raise ConfigError(f"“{child_name}”只能回退到支路“{name}”里更早的活动。")
                 step: dict[str, Any] = {
                     "id": child_id,
                     "kind": "activity",
@@ -614,7 +614,7 @@ def _clean_branches(
                     step["outputs"] = _output_items(child.get("outputs"))
                 cleaned_children.append(step)
             else:
-                raise ConfigError(f"「{name}」里只能放活动或子图。")
+                raise ConfigError(f"“{name}”里只能放活动或子图。")
         branches.append({"id": branch_id, "name": name, "nodes": cleaned_children})
     return branches
 
@@ -706,7 +706,7 @@ def validate_workflow(
             if not name:
                 raise ConfigError("系统节点要写名称。")
             if returns_to:
-                raise ConfigError(f"系统节点「{name}」用 routes 声明去向，不能写回退。")
+                raise ConfigError(f"系统节点“{name}”用 routes 声明去向，不能写回退。")
             decision = ""
         elif kind == "gate" or role == "human":
             if not name:
@@ -716,10 +716,10 @@ def validate_workflow(
             if not name:
                 raise ConfigError("活动要写名称。")
             if role not in roles:
-                raise ConfigError(f"活动「{name}」要选择已有角色。")
+                raise ConfigError(f"活动“{name}”要选择已有角色。")
             decision = ""
         if raw.get("commits_on_branch") and role != "developer":
-            raise ConfigError(f"活动「{name}」只有程序员可以提交入库。")
+            raise ConfigError(f"活动“{name}”只有程序员可以提交入库。")
         item = {"id": node_id, "kind": kind, "name": name, "role": role, "returns_to": returns_to}
         if kind == "activity" and raw.get("commits_on_branch"):
             item["commits_on_branch"] = True
@@ -754,7 +754,7 @@ def validate_workflow(
             item["branches"] = _clean_branches(raw.get("branches"), seen, roles, expected, root)
             join = str(raw.get("join") or "merge").strip()
             if join not in {"merge", "compare"}:
-                raise ConfigError(f"并行「{name}」的汇合方式只能是合并或对照择一。")
+                raise ConfigError(f"并行“{name}”的汇合方式只能是合并或对照择一。")
             if join == "compare":
                 item["join"] = "compare"
         cleaned.append(item)
@@ -771,7 +771,7 @@ def validate_workflow(
         if item["kind"] not in {"activity", "gate"}:
             raise ConfigError("只有活动和关卡可以回退。")
         if target not in index or index[target] >= pos or cleaned[index[target]]["kind"] == "end":
-            raise ConfigError(f"「{item['name']}」的回退只能指向更早的节点。")
+            raise ConfigError(f"“{item['name']}”的回退只能指向更早的节点。")
         item["max_loops"] = _loop_count(item.pop("_max_loops", None), item["name"])
     for item in cleaned:
         targets = [str(route["to"]) for route in item.get("routes") or []]
@@ -779,13 +779,13 @@ def validate_workflow(
             targets.append(str(item["next"]))
         for target in targets:
             if target not in index or cleaned[index[target]]["kind"] == "start" or target == item["id"]:
-                raise ConfigError(f"「{item['name']}」的去向「{target}」不是已有节点。")
+                raise ConfigError(f"“{item['name']}”的去向“{target}”不是已有节点。")
     for item in cleaned:
         reject = str(item.get("reject_to") or "")
         if not reject:
             continue
         if reject not in index or reject == item["id"]:
-            raise ConfigError(f"「{item['name']}」的不通过去向要选已有节点。")
+            raise ConfigError(f"“{item['name']}”的不通过去向要选已有节点。")
     result = {
         "workflow_id": expected,
         "title": str(payload.get("title") or expected).strip() or expected,
@@ -815,7 +815,7 @@ def _condition(raw: Any, name: str) -> Any:
     cond = [str(item).strip() for item in raw] if isinstance(raw, list) else str(raw).strip()
     problem = condition_problem(cond)
     if problem:
-        raise ConfigError(f"「{name}」的条件不合法：{problem}")
+        raise ConfigError(f"“{name}”的条件不合法：{problem}")
     return cond
 
 
@@ -824,7 +824,7 @@ def _system_fields(raw: dict[str, Any], name: str) -> dict[str, Any]:
 
     handler = str(raw.get("handler") or "").strip()
     if handler not in HANDLERS:
-        raise ConfigError(f"系统节点「{name}」的实现「{handler}」不存在。")
+        raise ConfigError(f"系统节点“{name}”的实现“{handler}”不存在。")
     out: dict[str, Any] = {"handler": handler}
     if raw.get("when") not in (None, ""):
         out["when"] = _condition(raw.get("when"), name)
@@ -843,11 +843,11 @@ def _activity_fields(raw: dict[str, Any], name: str, returns_to: str) -> dict[st
     effect = str(raw.get("effect") or "").strip()
     if effect:
         if effect not in EFFECTS:
-            raise ConfigError(f"活动「{name}」的内置后处理「{effect}」不存在。")
+            raise ConfigError(f"活动“{name}”的内置后处理“{effect}”不存在。")
         out["effect"] = effect
     routing = _route_fields(raw, name)
     if routing and returns_to:
-        raise ConfigError(f"活动「{name}」已写回退，不能再用 routes 或 next 声明去向。")
+        raise ConfigError(f"活动“{name}”已写回退，不能再用 routes 或 next 声明去向。")
     out.update(routing)
     return out
 
@@ -857,11 +857,11 @@ def _route_fields(raw: dict[str, Any], name: str) -> dict[str, Any]:
     routes = raw.get("routes")
     if routes not in (None, []):
         if not isinstance(routes, list):
-            raise ConfigError(f"「{name}」的 routes 须为列表。")
+            raise ConfigError(f"“{name}”的 routes 须为列表。")
         cleaned: list[dict[str, Any]] = []
         for route in routes:
             if not isinstance(route, dict) or not str(route.get("to") or "").strip() or not route.get("when"):
-                raise ConfigError(f"「{name}」的每条路由都要写 when 和 to。")
+                raise ConfigError(f"“{name}”的每条路由都要写 when 和 to。")
             cleaned.append({"when": _condition(route["when"], name), "to": str(route["to"]).strip()})
         out["routes"] = cleaned
     nxt = str(raw.get("next") or "").strip()

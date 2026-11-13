@@ -76,7 +76,7 @@ def _validate_skip_nodes(skip_nodes: list[str]) -> None:
     unknown = [n for n in skip_nodes if n not in DEFAULT_GRAPH_NODES]
     if unknown:
         raise ConfigError(
-            f"workflow.skip_nodes 含未知节点: {unknown}；"
+            f"workflow.skip_nodes 含未知节点：{unknown}；"
             f"合法集合见 DEFAULT_GRAPH_NODES"
         )
 
@@ -220,7 +220,7 @@ def build_run_context(
         target = str(scenario_cfg.get("migrate_to") or "").strip()
         hint = f"，对应的流程是 {target}" if target else ""
         notices.append(
-            f"项目仍引用场景「{scenario_key.strip()}」{hint}。场景已降为兼容层："
+            f"项目仍引用场景“{scenario_key.strip()}”{hint}。场景已降为兼容层："
             "请在项目的 workflow.profile_id 中选择流程，把 features、limits、gates 移到流程的 profile "
             "或项目的 workflow 中，然后删除 scenario_key。"
         )
@@ -266,7 +266,7 @@ def resolve_template(artifact_name: str, ctx: RunContext) -> ResolvedTemplate:
         if not path.is_absolute():
             path = ctx.root / path
         if not path.is_file():
-            raise ConfigError(f"artifacts.{name}.template_path 不存在: {path}")
+            raise ConfigError(f"artifacts.{name}.template_path 不存在：{path}")
         return ResolvedTemplate(name, path, omit, required)
 
     scenario_tpl = (
@@ -279,7 +279,7 @@ def resolve_template(artifact_name: str, ctx: RunContext) -> ResolvedTemplate:
     if default_tpl.is_file():
         return ResolvedTemplate(name, default_tpl, omit, required)
 
-    raise ConfigError(f"未找到产物 {name!r} 的模板（L0–L2 均无）")
+    raise ConfigError(f"未找到产物 {name!r} 的模板（L0 到 L2 均无）")
 
 
 def apply_omit_sections(markdown: str, omit_sections: list[str]) -> str:

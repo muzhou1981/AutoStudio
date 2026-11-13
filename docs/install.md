@@ -1,12 +1,12 @@
 # GeniStudio 安装手册
 
-这份手册同时给人读，也给 Agent 执行。说明性段落解释目的和取舍。标题为「执行契约」的一节是唯一的操作依据：命令、成功标准和停止条件都写在那里。Agent 遇到契约里没有授权的步骤时停下来，不要自行扩展。
+这份手册同时给人读，也给 Agent 执行。说明性段落解释目的和取舍。标题为“执行契约”的一节是唯一的操作依据：命令、成功标准和停止条件都写在那里。Agent 遇到契约里没有授权的步骤时停下来，不要自行扩展。
 
 仓库根目录是包含 `pyproject.toml` 的那一层。检出目录名可以仍是 `auto_studio`，不必改名。
 
 ## 装好之后应看到什么
 
-本机有一个只服务于这个仓库的 Python 虚拟环境，包 `geni-studio` 以可编辑方式装在里面。仓库根目录有一份不进入版本库的 `.env`。浏览器打开 `http://127.0.0.1:8765/`，页面标题是「GeniStudio · 运行」。此时不必填写 Cursor 密钥，后端选 stub 就可以熟悉界面。
+本机有一个只服务于这个仓库的 Python 虚拟环境，包 `geni-studio` 以可编辑方式装在里面。仓库根目录有一份不进入版本库的 `.env`。浏览器打开 `http://127.0.0.1:8765/`，页面标题是“GeniStudio · 运行”。此时不必填写 Cursor 密钥，后端选 stub 就可以熟悉界面。
 
 ## 前提
 
@@ -110,9 +110,9 @@ curl -fsS http://127.0.0.1:8765/ | grep -o 'GeniStudio · 运行' | head -n 1
 
 ## 只熟悉界面
 
-在「配置」的 Agent 里把后端选为 stub，然后写入 `.env`。stub 不调用 Cursor，密钥可以留空。模型留空时使用 Auto。工作区可以先空着。
+在“配置”的 Agent 里把后端选为 stub，然后写入 `.env`。stub 不调用 Cursor，密钥可以留空。模型留空时使用 Auto。工作区可以先空着。
 
-页面上的使用顺序是：先在「流程」里选用或新建一份流程，再在「项目」里选定该流程，然后到「运行」里选定项目并启动。这些动作不属于安装。
+页面上的使用顺序是：先在“流程”里选用或新建一份流程，再在“项目”里选定该流程，然后到“运行”里选定项目并启动。这些动作不属于安装。
 
 ## 运行期排障
 
@@ -175,24 +175,24 @@ curl -sS -i -X POST http://127.0.0.1:8765/api/runs \
 
 应返回 `200` 或 `400` 且 `Content-Type: application/json`。若长时间无响应，多半是服务端仍在执行图节点；重启 Web 后重试，并查看终端里 `geni-studio-web` 的报错栈。
 
-3. **「启动没有返回」或纯英文 `Internal Server Error`**：多半是旧进程未加载新 API，或响应不是 JSON。先重启 Web 并强刷页面。
+3. **“启动没有返回”或纯英文 `Internal Server Error`**：多半是旧进程未加载新 API，或响应不是 JSON。先重启 Web 并强刷页面。
 4. **侧栏 Run 列表或泳道不动**：启动后应很快出现 `thread_id` 与轨道更新。若仍停在启动前，确认未阻塞在旧版同步启动（当前默认在后台 invoke，POST 应快速返回）。仍异常时打开开发者工具 Network，看 `POST /api/runs` 与 `GET /api/runs/<id>` 是否成功。
 
 ### 工作区与写入锁
 
 - **自我改进**（`self_improve`、工作区指向工厂或目标仓库当前分支）允许开工时已有未提交改动；确认入库时由程序员节点在同一分支提交。
 - **分离头指针**（`git` 处于 detached HEAD）仍不能启动，需先切回命名分支。
-- 提示 **「目标项目已有写入进行中」**：同一可写目录上一次启动未正常结束，锁仍被占用。独立工作树的锁在 `.geni_studio/locks/<运行标识>.lock`，各轮互不阻塞；当前分支模式的锁在 `.geni_studio/write.lock`，同一仓库同时只有一轮。锁文件记录了持有者（`pid=… thread=… since=…`）。执行器遇到写锁占用时，该轮显示「等待写锁」并自动重试；若持有进程已不存在，结束卡住的 `geni-studio-web` 或执行进程后重启。
+- 提示 **“目标项目已有写入进行中”**：同一可写目录上一次启动未正常结束，锁仍被占用。独立工作树的锁在 `.geni_studio/locks/<运行标识>.lock`，各轮互不阻塞；当前分支模式的锁在 `.geni_studio/write.lock`，同一仓库同时只有一轮。锁文件记录了持有者（`pid=… thread=… since=…`）。执行器遇到写锁占用时，该轮显示“等待写锁”并自动重试；若持有进程已不存在，结束卡住的 `geni-studio-web` 或执行进程后重启。
 - **推送防护**：每个运行工作区在 `config.worktree` 中把远端的 `pushurl` 设为不可用地址，并把 `core.hooksPath` 指向拒绝推送的钩子目录（其余钩子链接回原钩子）。当前分支模式下防护作用于仓库本身，本轮结束（完成、驳回或停止）后自动撤销；运行期间如需人工推送，请等本轮结束。
 - **回收**：删除运行时会移除其工作树与运行目录，未合入的 `geni-studio/<thread_id>` 分支保留。`geni-studio gc --dry-run` 列出孤立的工作树、运行目录与已合入分支，去掉 `--dry-run` 执行回收。
 
 ### 本地项目与流程不进 git
 
-Web 里新建的项目目录与「另存为」流程默认在 `.gitignore` 中忽略（见仓库根 `.gitignore`）。若启动后找不到项目，确认 `projects/<id>/project.yaml` 与 `workflows/<id>/workflow.yaml` 在本机存在即可，不必提交到远端。
+Web 里新建的项目目录与“另存为”流程默认在 `.gitignore` 中忽略（见仓库根 `.gitignore`）。若启动后找不到项目，确认 `projects/<id>/project.yaml` 与 `workflows/<id>/workflow.yaml` 在本机存在即可，不必提交到远端。
 
 ### 测试与生产启动行为
 
-持续集成与本地 `pytest` 默认设置 `GENI_STUDIO_SYNC_START=1`，推进任务在请求线程内执行（执行器 `inline` 模式），`POST /api/runs` 会等图跑到关卡再返回。日常手工启动的 `geni-studio-web` **不**设置该项：启动、批复、继续与续跑请求只写入决定并入队，立即返回「运行中」，由 Web 进程内的执行器推进（`GENI_STUDIO_EXECUTOR_WORKERS` 控制并发，默认 4）。设置 `GENI_STUDIO_EXECUTOR=external` 时 Web 只入队，另起 `.venv/bin/geni-studio-worker` 执行；两者须使用同一检查点目录。设计见 [ADR 0011](decisions/0011-run-executor-and-runtime-store.md)。
+持续集成与本地 `pytest` 默认设置 `GENI_STUDIO_SYNC_START=1`，推进任务在请求线程内执行（执行器 `inline` 模式），`POST /api/runs` 会等图跑到关卡再返回。日常手工启动的 `geni-studio-web` **不**设置该项：启动、批复、继续与续跑请求只写入决定并入队，立即返回“运行中”，由 Web 进程内的执行器推进（`GENI_STUDIO_EXECUTOR_WORKERS` 控制并发，默认 4）。设置 `GENI_STUDIO_EXECUTOR=external` 时 Web 只入队，另起 `.venv/bin/geni-studio-worker` 执行；两者须使用同一检查点目录。设计见 [ADR 0011](decisions/0011-run-executor-and-runtime-store.md)。
 
 ### 访问控制
 
@@ -263,17 +263,17 @@ verification:
 
 `model` 是各角色可选字段；运行页临时选择优先于项目配置。沙箱只接受 `read-only` 和 `workspace-write`，需要写入的角色不能选择只读。`timeout_seconds` 为 SDK 客户端启动完成后的调用时限，必须是有限正数。验证命令在本轮工作树中执行；真实测试角色缺少验证命令时，工厂不会自动认定测试通过。
 
-推理强度可在「配置 → Agent」选择 Codex 后设置，或在工厂 `.env` 中填写 `GENI_STUDIO_CODEX_REASONING_EFFORT=high`。也可在运行页点选活动节点后，在右栏为该角色选择本轮的推理强度。优先级是本轮角色选择、项目 YAML 中该角色的 `reasoning_effort`、工厂环境配置、Codex 默认；省略项目角色字段表示继承工厂设置，填写 `default`、`auto` 或空字符串表示跳过工厂设置并沿用 Codex 默认。运行页右栏还可为本轮选择 Fast，开时以 `service_tier="fast"` 调用，关时传 `default`，留空沿用 Codex 自身配置。
+推理强度可在“配置 → Agent”选择 Codex 后设置，或在工厂 `.env` 中填写 `GENI_STUDIO_CODEX_REASONING_EFFORT=high`。也可在运行页点选活动节点后，在右栏为该角色选择本轮的推理强度。优先级是本轮角色选择、项目 YAML 中该角色的 `reasoning_effort`、工厂环境配置、Codex 默认；省略项目角色字段表示继承工厂设置，填写 `default`、`auto` 或空字符串表示跳过工厂设置并沿用 Codex 默认。运行页右栏还可为本轮选择 Fast，开时以 `service_tier="fast"` 调用，关时传 `default`，留空沿用 Codex 自身配置。
 
-运行页选择「沿用项目 / 工厂设置」表示不覆盖原配置；选择「沿用 Codex 默认」则跳过项目和工厂推理设置。可用级别随该角色选中的模型刷新；继承的默认模型已明确时，也会直接显示其支持的级别。本轮选择随「保存 Run 配置」、重新打开、复制与 Run 续跑保留，不修改 `.env` 或项目 YAML；已启动 Run 的控件与模型控件一样只读。
+运行页选择“沿用项目 / 工厂设置”表示不覆盖原配置；选择“沿用 Codex 默认”则跳过项目和工厂推理设置。可用级别随该角色选中的模型刷新；继承的默认模型已明确时，也会直接显示其支持的级别。本轮选择随“保存 Run 配置”、重新打开、复制与 Run 续跑保留，不修改 `.env` 或项目 YAML；已启动 Run 的控件与模型控件一样只读。
 
-模型列表通过 SDK `models()` 动态获取；推理选项来自该模型的 `supported_reasoning_efforts`，并将 `default_reasoning_effort` 标为「模型建议」。页面不再枚举固定的推理选项。模型切换后，若已有推理设置不在新模型能力列表中，会保留原值并提示重新选择，保存时拒绝明确不支持的组合。
+模型列表通过 SDK `models()` 动态获取；推理选项来自该模型的 `supported_reasoning_efforts`，并将 `default_reasoning_effort` 标为“模型建议”。页面不再枚举固定的推理选项。模型切换后，若已有推理设置不在新模型能力列表中，会保留原值并提示重新选择，保存时拒绝明确不支持的组合。
 
-模型留在「Codex 默认」时，SDK 模型目录的 `is_default` 不保证等于本机配置或目标工作区最终使用的模型，页面不据此猜测推理能力；要选择具体推理级别，请先明确选择模型。请求失败或已保存模型不在目录中时，保留已有配置并显示未确认支持的提示，可刷新配置页重试，不自动清空配置。
+模型留在“Codex 默认”时，SDK 模型目录的 `is_default` 不保证等于本机配置或目标工作区最终使用的模型，页面不据此猜测推理能力；要选择具体推理级别，请先明确选择模型。请求失败或已保存模型不在目录中时，保留已有配置并显示未确认支持的提示，可刷新配置页重试，不自动清空配置。
 
 当前 SDK 协议接受 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`、`ultra`，配置写入仍作协议枚举校验；这不等于各模型都支持全部级别。未设置时不传 SDK 的 `effort` 参数，由 Codex 配置及模型默认决定，不保证是 medium。参考 [Codex 配置说明](https://developers.openai.com/codex/config-reference/)。
 
-工厂推理设置和角色配置在 Run 启动时保存，后续修改供新 Run 使用；旧 Run 续跑仍使用其快照。选择「沿用 Codex 默认」时，工厂不冻结外部 Codex 配置文件的内容。显式推理级别不同的调用使用不同会话，不复用可能带有旧推理设置的线程。
+工厂推理设置和角色配置在 Run 启动时保存，后续修改供新 Run 使用；旧 Run 续跑仍使用其快照。选择“沿用 Codex 默认”时，工厂不冻结外部 Codex 配置文件的内容。显式推理级别不同的调用使用不同会话，不复用可能带有旧推理设置的线程。
 
 `verification` 还支持以下字段：
 

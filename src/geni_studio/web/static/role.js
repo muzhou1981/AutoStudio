@@ -115,7 +115,7 @@
       row.className = "io-line";
       const select = document.createElement("wa-select");
       select.label = host.id === "roleOutputList" ? "输出" : "输入";
-      select.appendChild(option("", "— 选择 —"));
+      select.appendChild(option("", "请选择"));
       artifacts.forEach((item) => select.appendChild(option(item.id, item.label)));
       select.value = value || "";
       select.addEventListener("change", () => {
@@ -157,7 +157,7 @@
     artifacts = data.artifacts || [];
     const pick = $("rolePick");
     const selected = pick.value;
-    pick.replaceChildren(option("", "— 选择 —"));
+    pick.replaceChildren(option("", "请选择"));
     roles.forEach((item) => pick.appendChild(option(item.id, item.title)));
     if (selected) pick.value = selected;
     const none = !roles.length;
@@ -337,7 +337,7 @@
   $("btnDeleteRole").onclick = async () => {
     if (!loadedId) return;
     const title = ($("roleTitle").value || "").trim() || loadedId;
-    if (!window.confirm("删除「" + title + "」？")) return;
+    if (!window.confirm("删除“" + title + "”？")) return;
     showError("");
     showSaved("");
     const response = await fetch("/api/roles/" + encodeURIComponent(loadedId), { method: "DELETE" });

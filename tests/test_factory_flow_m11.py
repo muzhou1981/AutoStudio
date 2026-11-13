@@ -190,5 +190,5 @@ def test_project_page_requires_a_workflow_and_role_model_selects():
     assert 'id="flowNameEdit"' in page and 'id="btnNameSave" variant="brand" hidden>保存</wa-button>' in page
     flow_script = TestClient(app).get("/static/workflow.js").text
     assert 'rows.push({ title: "复制为新流程", onPick: () => openNameEdit("copy") });' in flow_script
-    assert 'if (!builtin) rows.push({ title: "重命名…", onPick: () => openNameEdit("rename") });' in flow_script
+    assert 'if (!builtin) rows.push({ title: "重命名……", onPick: () => openNameEdit("rename") });' in flow_script
     assert "body: JSON.stringify(wire({ ...savedGraph, title }))," in flow_script

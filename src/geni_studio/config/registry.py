@@ -179,7 +179,7 @@ def save_project_yaml(
     proj_dir = _project_dir(root, pid)
     pf = proj_dir / "project.yaml"
     if not pf.is_file() and not create:
-        raise ConfigError(f"项目不存在: {pid!r}（需 create=true）")
+        raise ConfigError(f"项目不存在：{pid!r}（需 create=true）")
     if create and proj_dir.exists() and not pf.is_file():
         raise ConfigError(f"目录 projects/{pid}/ 已存在但无 project.yaml")
 

@@ -26,7 +26,7 @@ def _blank() -> dict[str, Any]:
 
 
 def top_level_node(flat_id: str, node_ids: Iterable[str]) -> str:
-    """子图与并行展开后的标识形如「顶层标识__…」，归到最长匹配的顶层节点。"""
+    """子图与并行展开后的标识形如“顶层标识__…”，归到最长匹配的顶层节点。"""
     best = ""
     for node_id in node_ids:
         if (flat_id == node_id or flat_id.startswith(node_id + "__")) and len(node_id) > len(best):

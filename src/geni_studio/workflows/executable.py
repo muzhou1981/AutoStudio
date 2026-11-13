@@ -41,7 +41,7 @@ def resolve_executable(workflow: dict[str, Any], *, root: Any = None) -> dict[st
             errors.extend(problems)
             errors.extend(_name_problems(name, [*inputs, *outputs]))
             if not outputs and "outputs" not in node:
-                errors.append(f"活动「{name}」缺少产出产物。")
+                errors.append(f"活动“{name}”缺少产出产物。")
             node["inputs"] = inputs
             node["outputs"] = outputs
             if on_branch:
@@ -49,7 +49,7 @@ def resolve_executable(workflow: dict[str, Any], *, root: Any = None) -> dict[st
         elif kind == "gate":
             decision = str(node.get("decision") or "").strip()
             if decision not in DECISIONS:
-                errors.append(f"决策点「{name}」缺少决定类型。")
+                errors.append(f"决策点“{name}”缺少决定类型。")
             node["decision"] = decision
         if node.get("id") == _ESCALATE:
             errors.append("节点标识 workflow_escalate 已留给回退升级。")
@@ -181,10 +181,10 @@ def _validate_parallel(nodes):
                 else:
                     earlier.add(str(step["id"]))
                     continue
-                where = f"「{node.get('name') or node['id']}」的支路「{branch.get('name') or branch['id']}」"
+                where = f"“{node.get('name') or node['id']}”的支路“{branch.get('name') or branch['id']}”"
                 step_name = step.get("name") or step["id"]
                 raise ConfigError(
-                    f"并行{where}里有{reason}「{step_name}」。"
+                    f"并行{where}里有{reason}“{step_name}”。"
                     "并行支路暂不支持人工关卡、越出支路的回退、条件去向、内置后处理或嵌套并行，请拆为顺序流程"
                 )
 
@@ -333,7 +333,7 @@ def _explicit_outputs(value: object) -> list[dict[str, str]]:
 def _template_problem(activity: str, item: dict[str, str]) -> list[str]:
     from geni_studio.config.registry import template_file_error
 
-    label = f"活动「{activity}」的输出「{item['name']}」"
+    label = f"活动“{activity}”的输出“{item['name']}”"
     template = item.get("template") or ""
     if not template:
         return [f"{label}没有模板。"]
@@ -352,12 +352,12 @@ def _activity_contract(node: dict[str, Any], root: Any) -> tuple[list[str], list
     name = str(node.get("name") or role)
     if node.get("commits_on_branch"):
         if role != "developer":
-            return [], [], [f"活动「{name}」只有程序员可以提交入库。"]
+            return [], [], [f"活动“{name}”只有程序员可以提交入库。"]
         return ["code_change", "delivery_report"], ["land_record"], []
     try:
         defaults_in, defaults_out = role_contract(role, root)
     except FileNotFoundError as exc:
-        raise ConfigError(f"活动「{name}」的角色不存在。") from exc
+        raise ConfigError(f"活动“{name}”的角色不存在。") from exc
     if "inputs" in node:
         inputs = [str(item).strip() for item in (node.get("inputs") or []) if str(item).strip()]
     else:
@@ -366,25 +366,25 @@ def _activity_contract(node: dict[str, Any], root: Any) -> tuple[list[str], list
     seen_inputs: set[str] = set()
     for item in inputs:
         if item in seen_inputs:
-            problems.append(f"活动「{name}」的产物名「{item}」重复。")
+            problems.append(f"活动“{name}”的产物名“{item}”重复。")
         seen_inputs.add(item)
     primary = str(node.get("primary_output") or "").strip()
     if primary:
         if primary in seen_inputs:
-            problems.append(f"活动「{name}」的产物名「{primary}」重复。")
+            problems.append(f"活动“{name}”的产物名“{primary}”重复。")
         return inputs, [primary], problems
     if "outputs" in node:
         raw_outputs = node.get("outputs")
         plain = {item.strip() for item in raw_outputs if isinstance(item, str)} if isinstance(raw_outputs, list) else set()
         items = _explicit_outputs(raw_outputs)
         if not items:
-            problems.append(f"活动「{name}」还没有输出。")
+            problems.append(f"活动“{name}”还没有输出。")
         seen_in = set(inputs)
         seen_out: set[str] = set()
         for item in items:
             output_name = item["name"]
             if output_name in seen_out or output_name in seen_in:
-                problems.append(f"活动「{name}」的产物名「{output_name}」重复。")
+                problems.append(f"活动“{name}”的产物名“{output_name}”重复。")
             seen_out.add(output_name)
             # 只写名称且取自角色契约的产物，与不写 outputs 时一样不要求模板。
             if not (output_name in plain and output_name in defaults_out):
@@ -576,7 +576,7 @@ def _activity_update(
             origin = node["id"]
         else:
             target = str(node.get("graph_return") or node["returns_to"])
-        message = f"「{node.get('label') or node['name']}」未通过：\n{body}"
+        message = f"“{node.get('label') or node['name']}”未通过：\n{body}"
         if parallel:
             update["branch_artifacts"][f"{node['parallel_id']}:{node['branch_id']}:{_BRANCH_FEEDBACK}"] = message
         else:
@@ -635,9 +635,9 @@ def _template_section(spec: dict[str, str]) -> str:
     name = spec.get("name") or "输出"
     template = spec.get("template") or ""
     if spec.get("source") == "link":
-        return f"输出「{name}」请按这个模板链接的结构来写：{template}"
+        return f"输出“{name}”请按这个模板链接的结构来写：{template}"
     if "content" in spec:
-        return f"输出「{name}」请按下面的模板写：\n{spec['content']}"
+        return f"输出“{name}”请按下面的模板写：\n{spec['content']}"
     from pathlib import Path
 
     try:
@@ -645,8 +645,8 @@ def _template_section(spec: dict[str, str]) -> str:
     except OSError:
         text = ""
     if not text:
-        return f"输出「{name}」的模板在：{template}"
-    return f"输出「{name}」请按下面的模板写：\n{text}"
+        return f"输出“{name}”的模板在：{template}"
+    return f"输出“{name}”请按下面的模板写：\n{text}"
 
 
 def _gate(node: dict[str, Any]):
@@ -789,7 +789,7 @@ def _flatten_node(
             )
         real = [item for item in inner if item.get("kind") not in {"start", "end"}]
         if not real:
-            raise ConfigError(f"子图「{node.get('name') or subgraph_id}」里没有可执行的步骤。")
+            raise ConfigError(f"子图“{node.get('name') or subgraph_id}”里没有可执行的步骤。")
         id_map[f"{prefix}{node['id']}"] = _entry(real[0])
         return real
     if kind == "parallel":
@@ -807,7 +807,7 @@ def _flatten_node(
                 steps.extend(_flatten_node(child, branch_prefix, root, stack, id_map, info))
             steps = [step for step in steps if step.get("kind") not in {"start", "end"}]
             if not steps:
-                raise ConfigError(f"「{raw['name']}」还没有活动。")
+                raise ConfigError(f"“{raw['name']}”还没有活动。")
             branches.append({"id": raw["id"], "name": raw["name"], "steps": steps})
         folded = {
             "id": parallel_id,
@@ -841,26 +841,26 @@ def _name_problems(activity: str, names: list[str]) -> list[str]:
     bad = [item for item in names if artifacts.is_custom(item) and not artifacts.valid_name(item)]
     if not bad:
         return []
-    return [f"活动「{activity}」的产物名不合法：{'、'.join(bad)}。自定义产物名只能用小写字母、数字和下划线，并以字母开头。"]
+    return [f"活动“{activity}”的产物名不合法：{'、'.join(bad)}。自定义产物名只能用小写字母、数字和下划线，并以字母开头。"]
 
 
 def _bind_picks(nodes: list[dict[str, Any]]) -> None:
-    """展开后，把每个「择一」决策点绑定到它前面最近的对照并行，见 ADR 0031。"""
+    """展开后，把每个“择一”决策点绑定到它前面最近的对照并行，见 ADR 0031。"""
     pending: dict[str, Any] | None = None
     for node in nodes:
         if node.get("kind") == "parallel":
             if pending is not None:
-                raise ConfigError(f"并行「{pending['name']}」选了对照择一，要先放一个「择一」决策点，再开下一个并行。")
+                raise ConfigError(f"并行“{pending['name']}”选了对照择一，要先放一个“择一”决策点，再开下一个并行。")
             if node.get("join") == "compare":
                 pending = node
         elif node.get("kind") == "gate" and node.get("decision") == "pick":
             if pending is None:
-                raise ConfigError(f"「{node.get('name') or node['id']}」是择一决策点，但前面没有选了对照择一的并行。")
+                raise ConfigError(f"“{node.get('name') or node['id']}”是择一决策点，但前面没有选了对照择一的并行。")
             node["pick_from"] = pending["id"]
             node["pick_branches"] = [{"id": str(b["id"]), "name": str(b["name"])} for b in pending["branches"]]
             pending = None
     if pending is not None:
-        raise ConfigError(f"并行「{pending['name']}」选了对照择一，后面要有一个「择一」决策点。")
+        raise ConfigError(f"并行“{pending['name']}”选了对照择一，后面要有一个“择一”决策点。")
 
 
 def _check_artifact_flow(nodes: list[dict[str, Any]]) -> None:
@@ -878,7 +878,7 @@ def _check_artifact_flow(nodes: list[dict[str, Any]]) -> None:
         missing = artifacts.unknown_names([str(item) for item in node.get("inputs") or []], produced)
         if missing:
             name = str(node.get("name") or node.get("id") or "")
-            errors.append(f"活动「{name}」读取的产物没有活动产出：{'、'.join(missing)}。")
+            errors.append(f"活动“{name}”读取的产物没有活动产出：{'、'.join(missing)}。")
     if errors:
         raise ConfigError("\n".join(errors))
 
@@ -898,7 +898,7 @@ def _bind_contracts(nodes: list[dict[str, Any]], root: Any) -> None:
         name = str(node.get("name") or node.get("id") or "")
         errors.extend(_name_problems(name, [*inputs, *outputs]))
         if not outputs and "outputs" not in node:
-            errors.append(f"活动「{name}」缺少产出产物。")
+            errors.append(f"活动“{name}”缺少产出产物。")
         node["inputs"] = inputs
         node["outputs"] = outputs
     if errors:
@@ -1029,7 +1029,7 @@ def _merge_branches(node: dict[str, Any], state: FactoryState, order: list[str],
             continue
         found = merge_back(workspace, Path(path), base)
         if found:
-            conflicts.append(f"「{names[branch_id]}」：{'、'.join(found)}")
+            conflicts.append(f"“{names[branch_id]}”：{'、'.join(found)}")
         if repo is not None:
             remove_branch_worktree(repo, Path(path))
     update: dict[str, Any] = {
@@ -1037,7 +1037,7 @@ def _merge_branches(node: dict[str, Any], state: FactoryState, order: list[str],
     }
     if conflicts:
         summary = (
-            f"并行「{node['name']}」汇合时有改动冲突，已在本轮工作区写入冲突标记："
+            f"并行“{node['name']}”汇合时有改动冲突，已在本轮工作区写入冲突标记："
             + "；".join(conflicts)
             + "。请处理冲突后选择继续，或暂停、终止。"
         )
@@ -1153,7 +1153,7 @@ def _settle_branches(
         if branch_id == adopt:
             found = merge_back(workspace, Path(path), base)
             if found:
-                conflicts.append(f"「{name}」：{'、'.join(found)}")
+                conflicts.append(f"“{name}”：{'、'.join(found)}")
         else:
             try:
                 patch, _stats = branch_changes(Path(path), base)

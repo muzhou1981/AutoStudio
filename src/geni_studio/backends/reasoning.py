@@ -103,7 +103,7 @@ _role_params: ContextVar[dict[str, dict[str, str]] | None] = ContextVar("geni_ro
 
 
 def clean_role_model_params(raw: dict[str, dict[str, str]] | None) -> dict[str, dict[str, str]]:
-    """角色到「参数名 → 取值」；空值表示沿用模型默认，不写入。"""
+    """角色到“参数名 → 取值”；空值表示沿用模型默认，不写入。"""
     result: dict[str, dict[str, str]] = {}
     for role, params in (raw or {}).items():
         role = role.strip()

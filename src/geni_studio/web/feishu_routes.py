@@ -212,9 +212,9 @@ def _handle_event(body: dict) -> dict[str, Any]:
             if pick is not None:
                 names = {item["id"]: item["name"] for item in pick["branches"]}
                 chosen = names.get(action.get("branch_choice") or "")
-                line = f"已记录：采用「{chosen}」。" if chosen else "已记录：都不采用。"
+                line = f"已记录：采用“{chosen}”。" if chosen else "已记录：都不采用。"
             elif action.get("gate_decision") == "rejected" and reject_label:
-                line = f"已记录：不通过，前往「{reject_label}」。"
+                line = f"已记录：不通过，前往“{reject_label}”。"
             elif action.get("gate_decision") == "rejected":
                 line = "已记录：不通过，本轮结束。"
             elif gate_items(before.values, before.awaiting_human.gate_id or "") is not None:

@@ -287,7 +287,7 @@ def _ensure_git_repo(path: Path) -> None:
             _initial_commit(path)
         return
     if any(path.iterdir()):
-        raise WorkspaceError(f"目标目录不是 git 仓库，拒绝自动初始化: {path}")
+        raise WorkspaceError(f"目标目录不是 git 仓库，拒绝自动初始化：{path}")
     subprocess.run(["git", "-C", os.fspath(path), "init", "-q"], check=True)
     _initial_commit(path)
 

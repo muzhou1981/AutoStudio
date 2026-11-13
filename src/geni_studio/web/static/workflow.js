@@ -25,7 +25,7 @@
   const DECISIONS = [{ id: "approve", label: "批准或驳回" }, { id: "pick", label: "择一（两路对照）" }];
   const JOINS = [{ id: "merge", label: "合并各路" }, { id: "compare", label: "对照择一" }];
   const PASS_RULES = [
-    { id: "all", label: "全部通过才放行", hint: "任一项不通过，即按「不通过时」的去向退回，并把该项原因交给那个活动。" },
+    { id: "all", label: "全部通过才放行", hint: "任一项不通过，即按“不通过时”的去向退回，并把该项原因交给那个活动。" },
     { id: "manual", label: "只作核对清单", hint: "逐项结论只作记录，最后仍由人选择批准或不通过。" },
   ];
 
@@ -574,7 +574,7 @@
     $("flowDescription").disabled = builtin;
     $("flowMetaHint").hidden = mode === "new";
     $("flowMetaHint").textContent = builtin
-      ? "这是内置流程，只能查看。要修改，从「更多」复制为新流程。点节点或虚线可以查看设置。"
+      ? "这是内置流程，只能查看。要修改，从“更多”复制为新流程。点节点或虚线可以查看设置。"
       : "点空白处回到这里。点一个节点或一条虚线，在右侧修改它。";
     if ($("flowIdHint")) $("flowIdHint").hidden = mode !== "new";
     $("flowIdLine").hidden = mode !== "open" || !loadedId;
@@ -640,7 +640,7 @@
   function problemNames() {
     const names = new Set();
     (problems || []).forEach((text) => {
-      for (const match of text.matchAll(/「([^」]+)」/g)) names.add(match[1]);
+      for (const match of text.matchAll(/“([^”]+)”/g)) names.add(match[1]);
     });
     return names;
   }
@@ -651,7 +651,7 @@
       const hit = names.has(node.name);
       $("flowBoard").querySelectorAll('.flow-node[data-node-id="' + CSS.escape(node.id) + '"]').forEach((el) => {
         el.classList.toggle("has-problem", hit);
-        if (hit) el.title = (problems || []).filter((text) => text.includes("「" + node.name + "」")).join("\n");
+        if (hit) el.title = (problems || []).filter((text) => text.includes("“" + node.name + "”")).join("\n");
         else el.removeAttribute("title");
       });
     });
@@ -931,7 +931,7 @@
       label.textContent = edgeLabelText(edge);
       const fromName = edge.a.node.name;
       const toName = edge.b.node.name;
-      label.setAttribute("aria-label", label.textContent + "：从「" + fromName + "」到「" + toName + "」");
+      label.setAttribute("aria-label", label.textContent + "：从“" + fromName + "”到“" + toName + "”");
       const ends = loopEnds(edge.a, edge.b);
       const left = Math.min(ends.xo, ends.xi);
       const right = Math.max(ends.xo, ends.xi);
@@ -1051,7 +1051,7 @@
     return path;
   }
 
-  /** 两个相邻节点之间连线中点的「+」：在这里插入新节点。 */
+  /** 两个相邻节点之间连线中点的“+”：在这里插入新节点。 */
   function insertButton(a, b, index) {
     const x1 = a.left + a.width;
     const y1 = a.top + a.height / 2;
@@ -1061,7 +1061,7 @@
     button.type = "button";
     button.className = "flow-insert";
     button.textContent = "+";
-    button.setAttribute("aria-label", "在「" + a.node.name + "」和「" + b.node.name + "」之间添加节点");
+    button.setAttribute("aria-label", "在“" + a.node.name + "”和“" + b.node.name + "”之间添加节点");
     button.title = "在这里添加节点";
     button.setAttribute("aria-haspopup", "menu");
     button.setAttribute("aria-expanded", "false");
@@ -1358,7 +1358,7 @@
 
   function deleteNode(node) {
     if (!node || node.kind === "start" || node.kind === "end" || locked()) return;
-    if (!window.confirm("删除「" + node.name + "」？删除后前后节点会重新连上。")) return;
+    if (!window.confirm("删除“" + node.name + "”？删除后前后节点会重新连上。")) return;
     graph.nodes = graph.nodes.filter((item) => item.id !== node.id);
     graph.nodes.forEach((item) => {
       if (item.returns_to === node.id) setReturn(item, "");
@@ -1406,7 +1406,7 @@
     }
   }
 
-  /** 「添加节点」插在选中节点之后；没有选中、或选中的是结束时，插在结束之前。 */
+  /** “添加节点”插在选中节点之后；没有选中、或选中的是结束时，插在结束之前。 */
   function toolbarInsertIndex() {
     const at = selectedId ? indexOf(selectedId) : -1;
     if (at < 0 || at >= graph.nodes.length - 1) return graph.nodes.length - 1;
@@ -1417,7 +1417,7 @@
     const before = graph.nodes[index - 1];
     const after = graph.nodes[index];
     const rows = [];
-    if (before && after) rows.push({ caption: "插在「" + before.name + "」与「" + after.name + "」之间" });
+    if (before && after) rows.push({ caption: "插在“" + before.name + "”与“" + after.name + "”之间" });
     const activityRoles = roles.filter((item) => item.id !== "human");
     rows.push({
       title: "活动",
@@ -1436,7 +1436,7 @@
           text: (item.builtin ? "内置 · " : "") + item.title,
           onPick: () => insertNode(index, "subgraph", { subgraph_id: item.workflow_id }),
         })),
-        empty: "还没有子图。可以从「更多」把一份流程存为子图。",
+        empty: "还没有子图。可以从“更多”把一份流程存为子图。",
       });
     }
     return rows;
@@ -1445,10 +1445,10 @@
   function moreRows() {
     const rows = [];
     const builtin = locked();
-    if (!builtin) rows.push({ title: "重命名…", onPick: () => openNameEdit("rename") });
+    if (!builtin) rows.push({ title: "重命名……", onPick: () => openNameEdit("rename") });
     rows.push({ title: "复制为新流程", onPick: () => openNameEdit("copy") });
     if (!builtin && !graph.subgraph) {
-      rows.push({ title: "存为子图…", onPick: openSubgraphForm });
+      rows.push({ title: "存为子图……", onPick: openSubgraphForm });
     }
     rows.push({ title: showStats ? "隐藏运行数据" : "显示运行数据", onPick: toggleStats });
     rows.push({
@@ -1460,7 +1460,7 @@
     if (!builtin) {
       const inUse = usageCount() > 0;
       rows.push("divider");
-      rows.push({ title: "删除流程…", danger: true, onPick: openDeleteConfirm, disabled: inUse, value: inUse ? "使用中" : "" });
+      rows.push({ title: "删除流程……", danger: true, onPick: openDeleteConfirm, disabled: inUse, value: inUse ? "使用中" : "" });
     }
     return rows;
   }
@@ -1570,7 +1570,7 @@
       refreshDirty();
       await loadLists();
       closeNameEdit();
-      showSaved("已重命名为「" + saved + "」。");
+      showSaved("已重命名为“" + saved + "”。");
       loadVersions(loadedId);
     } catch (err) {
       showError(err.message || "没能重命名流程。");
@@ -1635,7 +1635,7 @@
 
   function versionChanges(changes) {
     if (!changes) return "最早的记录。";
-    const quote = (names) => names.map((name) => "「" + name + "」").join("");
+    const quote = (names) => names.map((name) => "“" + name + "”").join("");
     const parts = [];
     if (changes.title) parts.push("改了标题");
     if (changes.description) parts.push("改了说明");
@@ -1735,7 +1735,7 @@
   function openDeleteConfirm() {
     $("flowSubgraphForm").hidden = true;
     const title = ($("flowTitle").value || "").trim() || graph.title || loadedId;
-    $("flowDeleteText").textContent = "删除流程「" + title + "」（" + loadedId + "）？删除后不能恢复。";
+    $("flowDeleteText").textContent = "删除流程“" + title + "”（" + loadedId + "）？删除后不能恢复。";
     $("flowDeleteConfirm").hidden = false;
     requestAnimationFrame(() => $("btnDeleteCancel").focus());
   }
@@ -2209,12 +2209,12 @@
   function routeHint(node) {
     const lines = [];
     if (node.returns_to) {
-      lines.push("未通过时回到「" + nameOf(node.returns_to) + "」重做，" + loopsText(node) + "；到达上限后停下来等人处理。");
+      lines.push("未通过时回到“" + nameOf(node.returns_to) + "”重做，" + loopsText(node) + "；到达上限后停下来等人处理。");
     }
     if (node.kind === "gate") {
       const when = node.decision === "pick" ? "都不采用时" : "不批准时";
       if (node.decision === "pick") lines.push("人从前面并行的各路中采用一路，合并它的改动；其余各路留作补丁。");
-      lines.push(node.reject_to ? when + "前往「" + nameOf(node.reject_to) + "」。" : when + "结束本轮。");
+      lines.push(node.reject_to ? when + "前往“" + nameOf(node.reject_to) + "”。" : when + "结束本轮。");
     }
     return lines.join("");
   }
@@ -2301,8 +2301,8 @@
     const target = edge.kind === "return" ? node.returns_to : node.reject_to;
     setInspectHead(edge.kind === "return" ? "回退" : "不通过", "连线");
     $("flowEdgeText").textContent = edge.kind === "return"
-      ? "「" + node.name + "」未通过时回到「" + nameOf(target) + "」重做，" + loopsText(node) + "；到达上限后停下来等人处理。"
-      : "决策点「" + node.name + "」不批准时前往「" + nameOf(target) + "」。删除这条连线后，不批准即结束本轮。";
+      ? "“" + node.name + "”未通过时回到“" + nameOf(target) + "”重做，" + loopsText(node) + "；到达上限后停下来等人处理。"
+      : "决策点“" + node.name + "”不批准时前往“" + nameOf(target) + "”。删除这条连线后，不批准即结束本轮。";
     const parts = edge.kind === "return"
       ? [{ text: "回到 " + nameOf(target) }, { text: loopsText(node) }]
       : [{ text: "前往 " + nameOf(target) }];
@@ -2352,19 +2352,19 @@
     row.className = "branch-return";
     const target = earlier.find((other) => other.id === step.returns_to);
     if (locked) {
-      row.textContent = target ? "未通过时回到「" + target.name + "」，最多 " + (step.max_loops || DEFAULT_LOOPS) + " 轮" : "";
+      row.textContent = target ? "未通过时回到“" + target.name + "”，最多 " + (step.max_loops || DEFAULT_LOOPS) + " 轮" : "";
       row.hidden = !target;
       return row;
     }
     const label = document.createElement("label");
     label.textContent = "未通过时回到";
     const select = document.createElement("select");
-    select.setAttribute("aria-label", "「" + step.name + "」未通过时回到");
+    select.setAttribute("aria-label", "“" + step.name + "”未通过时回到");
     select.appendChild(new Option("不回退", ""));
     earlier.forEach((other) => select.appendChild(new Option(other.name, other.id)));
     select.value = target ? target.id : "";
     const loops = document.createElement("select");
-    loops.setAttribute("aria-label", "「" + step.name + "」最多循环轮数");
+    loops.setAttribute("aria-label", "“" + step.name + "”最多循环轮数");
     LOOP_CHOICES.forEach((count) => loops.appendChild(new Option("最多 " + count + " 轮", String(count))));
     loops.value = String(step.max_loops || DEFAULT_LOOPS);
     loops.hidden = !target;
@@ -2517,7 +2517,7 @@
     const hint = document.createElement("span");
     hint.className = "branch-join-hint";
     hint.textContent = current === "compare"
-      ? "各路改动先不合并，汇合处生成两路对照；后面的「择一」决策点由人选定采用哪一路。"
+      ? "各路改动先不合并，汇合处生成两路对照；后面的“择一”决策点由人选定采用哪一路。"
       : "各路完成后合并改动，冲突时升级。";
     row.append(label, hint);
     return row;
@@ -2670,7 +2670,7 @@
     const pick = $("flowPick");
     const selected = pick.value || loadedId;
     ignorePick = true;
-    pick.replaceChildren(option("", "— 选择 —"));
+    pick.replaceChildren(option("", "请选择"));
     workflows.forEach((item) => {
       const prefix = item.builtin ? "内置 · " : "";
       pick.appendChild(option(item.workflow_id, prefix + item.title));

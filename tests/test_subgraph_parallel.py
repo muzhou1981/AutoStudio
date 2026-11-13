@@ -125,7 +125,7 @@ def test_branch_return_redoes_inside_the_branch(tmp_path: Path, monkeypatch: pyt
     _svc, st, calls = _branch_return_run(tmp_path, monkeypatch, loops=3, fails=1)
     assert st.awaiting_human is not None and st.awaiting_human.gate_id == "gate"
     assert [len(calls[key]) for key in ("甲", "审甲", "乙")] == [2, 2, 1]
-    assert "「实现甲 · 审甲」未通过" in calls["甲"][1] and "需要修复的问题" not in calls["甲"][0]
+    assert "“实现甲 · 审甲”未通过" in calls["甲"][1] and "需要修复的问题" not in calls["甲"][0]
     assert "需要修复的问题" not in calls["乙"][0]
     assert "[甲] 第2次" in st.values["code_change"] and "[乙] 第1次" in st.values["code_change"]
     assert "__return_feedback__" not in st.values.get("extra_artifacts", {})
@@ -138,7 +138,7 @@ def test_branch_escalation_continue_redoes_and_joins(tmp_path: Path, monkeypatch
     assert [len(calls[key]) for key in ("甲", "审甲", "乙")] == [1, 1, 1]
     st = svc.submit_hitl(st.thread_id, escalation_choice="continue")
     assert [len(calls[key]) for key in ("甲", "审甲", "乙")] == [2, 2, 1]
-    assert "「实现甲 · 审甲」未通过" in calls["甲"][1]
+    assert "“实现甲 · 审甲”未通过" in calls["甲"][1]
     assert st.awaiting_human is not None and st.awaiting_human.gate_id == "gate"
     assert "[甲] 第2次" in st.values["code_change"]
 
@@ -154,7 +154,7 @@ def test_branch_return_must_stay_inside_the_branch(tmp_path: Path, monkeypatch: 
     assert branch["nodes"][1]["returns_to"] == "a1" and branch["nodes"][1]["max_loops"] == 2
     outside = text.replace("returns_to: a1, max_loops: 2", "returns_to: a2, max_loops: 2")
     (tmp_path / "workflows" / "sample" / "workflow.yaml").write_text(outside, encoding="utf-8")
-    with pytest.raises(ConfigError, match="只能回退到支路「实现甲」里更早的活动"):
+    with pytest.raises(ConfigError, match="只能回退到支路“实现甲”里更早的活动"):
         get_workflow("sample", root=tmp_path)
 
 

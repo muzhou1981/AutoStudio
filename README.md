@@ -1,7 +1,7 @@
 # GeniStudio
 
 <p align="center">
-  <img src="src/geni_studio/web/static/help-overview.jpg" alt="GeniStudio：项目经理居中协调，架构、前端、后端、测试和运维各就各位。" width="1024" />
+  <img src="docs/help/images/overview.jpg" alt="GeniStudio：项目经理居中协调，架构、前端、后端、测试和运维各就各位。" width="1024" />
 </p>
 
 AI 软件工厂：接收人类需求，由项目经理、架构师、程序员、测试工程师、QA、财务 等角色 Agent 在工作流程约束下协作，在给定的预算范围内产出经过验证的软件；每轮任务结束后复盘并提出改进提案。
@@ -61,7 +61,7 @@ uv pip install -e ".[dev]"
 geni-studio-web
 ```
 
-浏览器打开 `http://127.0.0.1:8765/`：启动 Run、在 `gate_*` 关卡批准/驳回并续跑；支持 PM 澄清与升级待办。REST 见 [`docs/architecture.md`](docs/architecture.md)「Web HITL API」。
+浏览器打开 `http://127.0.0.1:8765/`：启动 Run、在 `gate_*` 关卡批准/驳回并续跑；支持 PM 澄清与升级待办。REST 见 [`docs/architecture.md`](docs/architecture.md)“Web HITL API”。
 
 ### Cursor SDK 后端
 
@@ -90,11 +90,11 @@ export GENI_STUDIO_WORKSPACE=1
 
 使用启动服务的同一系统用户登录 Codex，即可复用本机登录状态，无需另填 API Key；也可在配置页保存 `OPENAI_API_KEY`。环境中有该 Key 时优先使用 Key 登录。打开 `http://127.0.0.1:8765/`，为项目选择流程和目标 Git 工作区，在运行页启动任务。Codex 必须有有效工作区，不能把关闭工作区的模拟运行当作真实开发。
 
-配置页选择 Codex 后，可设置「Codex 推理强度」并写入 `.env`，从新运行生效。留空或选择默认时沿用 Codex 配置，不固定为 medium；项目 YAML 的 `backends.<角色>.reasoning_effort` 可覆盖工厂设置，填写 `default` 表示该角色直接沿用 Codex 默认。
+配置页选择 Codex 后，可设置“Codex 推理强度”并写入 `.env`，从新运行生效。留空或选择默认时沿用 Codex 配置，不固定为 medium；项目 YAML 的 `backends.<角色>.reasoning_effort` 可覆盖工厂设置，填写 `default` 表示该角色直接沿用 Codex 默认。
 
-运行页点选活动节点后，右栏可分别选择该角色本轮的模型与推理强度，Cursor 与 Codex 后端均适用；推理级别来自所选模型在 SDK 目录中声明的能力，Cursor 的 Auto 模型不能指定推理强度。选择具体模型或继承已明确的默认模型后，会显示该模型支持的级别；「沿用项目 / 工厂设置」继承原配置，「沿用 Codex 默认」则跳过项目和工厂的推理设置。本轮选择随「保存 Run 配置」、复制及 Run 续跑保留。
+运行页点选活动节点后，右栏可分别选择该角色本轮的模型与推理强度，Cursor 与 Codex 后端均适用；推理级别来自所选模型在 SDK 目录中声明的能力，Cursor 的 Auto 模型不能指定推理强度。选择具体模型或继承已明确的默认模型后，会显示该模型支持的级别；“沿用项目 / 工厂设置”继承原配置，“沿用 Codex 默认”则跳过项目和工厂的推理设置。本轮选择随“保存 Run 配置”、复制及 Run 续跑保留。
 
-模型列表与各模型支持的推理级别均从 Codex SDK 动态读取。明确选择模型后，推理选项随之更新；「模型建议」是 SDK 模型目录给出的建议，不代表本机配置当前生效值。列表加载失败时保留已有设置，刷新配置页可重试。
+模型列表与各模型支持的推理级别均从 Codex SDK 动态读取。明确选择模型后，推理选项随之更新；“模型建议”是 SDK 模型目录给出的建议，不代表本机配置当前生效值。列表加载失败时保留已有设置，刷新配置页可重试。
 
 需要工厂自动判定测试是否通过时，在项目 YAML 中配置验证命令，例如：
 
@@ -107,7 +107,7 @@ verification:
 
 ### 飞书 HITL（lark-cli）
 
-出站/入站见 [`tools/lark_cli/README.md`](tools/lark_cli/README.md) 与 ADR 0004，以及 [`docs/install.md`](docs/install.md)「接上飞书」。`geni-studio-web` 在本机有 `lark-cli` 时会默认拉起事件桥（`GENI_STUDIO_FEISHU_BRIDGE=1`），将卡片回调与 IM 文本转发到 `/api/webhooks/feishu`。若需关掉内嵌桥接，设 `GENI_STUDIO_FEISHU_BRIDGE=0` 后单独运行：
+出站/入站见 [`tools/lark_cli/README.md`](tools/lark_cli/README.md) 与 ADR 0004，以及 [`docs/install.md`](docs/install.md)“接上飞书”。`geni-studio-web` 在本机有 `lark-cli` 时会默认拉起事件桥（`GENI_STUDIO_FEISHU_BRIDGE=1`），将卡片回调与 IM 文本转发到 `/api/webhooks/feishu`。若需关掉内嵌桥接，设 `GENI_STUDIO_FEISHU_BRIDGE=0` 后单独运行：
 
 ```bash
 geni-studio-feishu-bridge --webhook http://127.0.0.1:8765/api/webhooks/feishu

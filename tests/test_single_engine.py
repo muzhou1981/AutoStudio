@@ -85,9 +85,9 @@ def test_plain_outputs_from_the_role_contract_need_no_template():
         ]
 
     _compile(flow(["architecture_design", "task_plan"]))
-    with pytest.raises(ConfigError, match="输出「ux_spec」没有模板"):
+    with pytest.raises(ConfigError, match="输出“ux_spec”没有模板"):
         _compile(flow(["ux_spec"]))
-    with pytest.raises(ConfigError, match="输出「task_plan」没有模板"):
+    with pytest.raises(ConfigError, match="输出“task_plan”没有模板"):
         _compile(flow([{"name": "task_plan", "source": "file", "template": ""}]))
 
 
@@ -139,11 +139,11 @@ def test_system_node_validation():
     base = _builtin_nodes()
     bad_handler = copy.deepcopy(base)
     next(node for node in bad_handler if node["id"] == "pm_clarification_check")["handler"] = "nope"
-    with pytest.raises(ConfigError, match="实现「nope」不存在"):
+    with pytest.raises(ConfigError, match="实现“nope”不存在"):
         validate_workflow({"workflow_id": "x", "nodes": bad_handler}, root=_BUILTIN_ROOT)
     bad_effect = copy.deepcopy(base)
     next(node for node in bad_effect if node["id"] == "qa")["effect"] = "nope"
-    with pytest.raises(ConfigError, match="内置后处理「nope」不存在"):
+    with pytest.raises(ConfigError, match="内置后处理“nope”不存在"):
         validate_workflow({"workflow_id": "x", "nodes": bad_effect}, root=_BUILTIN_ROOT)
     both = copy.deepcopy(base)
     reviewer = next(node for node in both if node["id"] == "code_reviewer")
@@ -152,7 +152,7 @@ def test_system_node_validation():
         validate_workflow({"workflow_id": "x", "nodes": both}, root=_BUILTIN_ROOT)
     bad_route = copy.deepcopy(base)
     next(node for node in bad_route if node["id"] == "change_control")["routes"][0]["to"] = "nowhere"
-    with pytest.raises(ConfigError, match="去向「nowhere」"):
+    with pytest.raises(ConfigError, match="去向“nowhere”"):
         validate_workflow({"workflow_id": "x", "nodes": bad_route}, root=_BUILTIN_ROOT)
     bad_cond = copy.deepcopy(base)
     next(node for node in bad_cond if node["id"] == "ux_designer")["when"] = "feature:unknown"

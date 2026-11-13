@@ -66,14 +66,14 @@ def test_gate_card_names_the_reject_target():
     )
     body = str(card)
     assert "确认 CCA" in body
-    assert "不通过将前往「确认 AOM」" in body
+    assert "不通过将前往“确认 AOM”" in body
     assert "算子合同" in body
 
 
 def test_settled_gate_card_has_no_decision_buttons():
     from geni_studio.hitl.feishu_cards import build_settled_gate_card
 
-    card = build_settled_gate_card(node_label="确认 CCA", decision_line="已记录：不通过，前往「确认 AOM」。")
+    card = build_settled_gate_card(node_label="确认 CCA", decision_line="已记录：不通过，前往“确认 AOM”。")
     blob = str(card)
     assert "已记录：不通过" in blob
     assert "gate_decision" not in blob

@@ -33,7 +33,7 @@
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/themes/default.css" />
   <link rel="stylesheet" href="/static/vendor/webawesome/styles/utilities.css" />
   <link rel="stylesheet" href="/static/shared.css?v=20261112-run-ux" />
-  <link rel="stylesheet" href="/static/hitl.css?v=20261113-gate-items2" />
+  <link rel="stylesheet" href="/static/hitl.css?v=20261113-punct" />
   <script type="module" src="/static/vendor/webawesome/webawesome.loader.js"></script>
 </head>
 <body>
@@ -155,23 +155,36 @@
             </div>
           </div>
           <div class="side-group" data-route="help">
-            <a class="sidebar-link" href="/help#overview">
+            <a class="sidebar-link" href="/help#quickstart">
               <svg class="sidebar-svg" viewBox="0 0 512 512" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.9 4.9-17 12.7-21.2l46.3-24.9c4.2-2.3 6.9-6.6 6.9-11.4c0-7.1-5.7-12.8-12.8-12.8l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
               <span>帮助</span>
             </a>
             <div class="side-sub">
               <div class="side-sub-inner">
-              <a class="sidebar-link sidebar-sub" data-help-topic="overview" href="/help#overview"><span>概览</span></a>
-              <a class="sidebar-link sidebar-sub" data-help-topic="architecture" href="/help#architecture"><span>架构</span></a>
-              <a class="sidebar-link sidebar-sub" data-help-topic="guide" href="/help#guide"><span>入门指南</span></a>
-              <a class="sidebar-link sidebar-sub" data-help-topic="project" href="/help#project"><span>项目</span></a>
-              <a class="sidebar-link sidebar-sub" data-help-topic="run" href="/help#run"><span>运行</span></a>
-              <a class="sidebar-link sidebar-sub" data-help-topic="workflow" href="/help#workflow"><span>流程</span></a>
-              <a class="sidebar-link sidebar-sub" data-help-topic="roles" href="/help#roles"><span>角色</span></a>
-              <a class="sidebar-link sidebar-sub" data-help-topic="agent" href="/help#agent"><span>Agent</span></a>
-              <a class="sidebar-link sidebar-sub" data-help-topic="workspace" href="/help#workspace"><span>工作区</span></a>
-              <a class="sidebar-link sidebar-sub" data-help-topic="feishu" href="/help#feishu"><span>飞书</span></a>
-              <a class="sidebar-link sidebar-sub" data-help-topic="env" href="/help#env"><span>环境</span></a>
+              <div class="help-nav-group" data-help-group="start">
+                <button type="button" class="help-nav-caption" aria-expanded="true" aria-controls="helpNavStart"><svg class="help-nav-chevron" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" d="M6 4l4 4-4 4"/></svg><span>入门</span></button>
+                <div class="help-nav-items" id="helpNavStart"><div class="help-nav-items-inner">
+                  <a class="sidebar-link sidebar-sub" data-help-topic="quickstart" href="/help#quickstart"><span>快速入门</span></a>
+                  <a class="sidebar-link sidebar-sub" data-help-topic="concepts" href="/help#concepts"><span>核心概念</span></a>
+                </div></div>
+              </div>
+              <div class="help-nav-group" data-help-group="manual">
+                <button type="button" class="help-nav-caption" aria-expanded="true" aria-controls="helpNavManual"><svg class="help-nav-chevron" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" d="M6 4l4 4-4 4"/></svg><span>使用手册</span></button>
+                <div class="help-nav-items" id="helpNavManual"><div class="help-nav-items-inner">
+                  <a class="sidebar-link sidebar-sub" data-help-topic="project" href="/help#project"><span>项目</span></a>
+                  <a class="sidebar-link sidebar-sub" data-help-topic="run" href="/help#run"><span>运行</span></a>
+                  <a class="sidebar-link sidebar-sub" data-help-topic="workflow" href="/help#workflow"><span>流程</span></a>
+                  <a class="sidebar-link sidebar-sub" data-help-topic="roles" href="/help#roles"><span>角色</span></a>
+                  <a class="sidebar-link sidebar-sub" data-help-topic="config" href="/help#config"><span>配置</span></a>
+                </div></div>
+              </div>
+              <div class="help-nav-group" data-help-group="reference">
+                <button type="button" class="help-nav-caption" aria-expanded="true" aria-controls="helpNavReference"><svg class="help-nav-chevron" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" d="M6 4l4 4-4 4"/></svg><span>参考</span></button>
+                <div class="help-nav-items" id="helpNavReference"><div class="help-nav-items-inner">
+                  <a class="sidebar-link sidebar-sub" data-help-topic="faq" href="/help#faq"><span>常见问题</span></a>
+                  <a class="sidebar-link sidebar-sub" data-help-topic="architecture" href="/help#architecture"><span>架构</span></a>
+                </div></div>
+              </div>
               </div>
             </div>
           </div>
@@ -208,7 +221,7 @@
             <span id="pendingAlertText"></span>
             <wa-button id="btnGoPending" size="s" variant="brand">去处理</wa-button>
           </div>
-          <p class="section-title" id="railHeading">运行状态</p>
+          <p class="section-title" id="railHeading">运行状态<a class="help-tip" href="/help#run/rail" target="_blank" rel="noopener" title="在新标签页查看帮助" aria-label="帮助：读懂泳道">?</a></p>
           <p id="railCount" class="rail-count" hidden></p>
           <p id="railEmpty" class="hint-block rail-empty">选择项目后，这里显示本轮要走的流程。</p>
           <div id="swimRail" class="swim-rail" aria-label="运行泳道"></div>
@@ -280,7 +293,7 @@
               <p class="save-note" id="runSaved" hidden aria-live="polite"></p>
             </div>
             <div class="dock-todo" id="dockTodo">
-            <p class="section-title" id="hitlSectionTitle">人工待办</p>
+            <p class="section-title" id="hitlSectionTitle">人工待办<a class="help-tip" href="/help#run/todo" target="_blank" rel="noopener" title="在新标签页查看帮助" aria-label="帮助：处理人工待办">?</a></p>
             <p id="hitlAgentStatus" class="hitl-agent-live" hidden aria-live="polite"></p>
             <div id="hitlClarifyActions" class="hitl-clarify-actions" hidden></div>
             <div id="hitlChoiceActions" class="hitl-choice-actions" hidden></div>
@@ -291,22 +304,22 @@
               <ul id="questionList" hidden class="question-list"></ul>
               <div id="fieldGateDecision">
                 <div id="gateItems" class="gate-items" hidden></div>
-                <wa-select id="decision" label="关卡决定" value="approved">
-                  <wa-option value="approved">批准 — 继续流程</wa-option>
-                  <wa-option value="rejected">驳回 — 结束本轮</wa-option>
+                <wa-select id="decision" label="决定" value="approved">
+                  <wa-option value="approved">批准——继续流程</wa-option>
+                  <wa-option value="rejected">驳回——结束本轮</wa-option>
                 </wa-select>
                 <wa-select id="branchChoice" label="采用哪一路" hint="对照写在上方；未采用的各路改动留作补丁" hidden></wa-select>
               </div>
               <div id="fieldEscalation" hidden>
                 <wa-select id="escalationChoice" label="升级决策" value="continue">
-                  <wa-option value="continue">继续 — 再跑开发</wa-option>
-                  <wa-option value="pause">暂停 — 保留现场</wa-option>
-                  <wa-option value="abort">终止 — 结束本轮</wa-option>
+                  <wa-option value="continue">继续——再跑开发</wa-option>
+                  <wa-option value="pause">暂停——保留现场</wa-option>
+                  <wa-option value="abort">终止——结束本轮</wa-option>
                 </wa-select>
               </div>
               <div class="prompt-box reply-box" id="replyBox">
                 <div id="replyAttachList" class="attach-list" hidden></div>
-                <wa-textarea id="reply" label="附言" hint="可空" rows="3" placeholder="补充范围说明或驳回原因…"></wa-textarea>
+                <wa-textarea id="reply" label="附言" hint="可空" rows="3" placeholder="补充范围说明或驳回原因……"></wa-textarea>
                 <div class="prompt-toolbar">
                   <button type="button" id="btnReplyAttach" class="prompt-attach" aria-label="上传附件">
                     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></svg>
@@ -330,7 +343,7 @@
 
       <div class="app-view" data-route="workflow">
         <main class="workspace-main" aria-label="流程">
-          <p class="section-title" id="flowHeading">编排</p>
+          <p class="section-title" id="flowHeading">编排<a class="help-tip" href="/help#workflow" target="_blank" rel="noopener" title="在新标签页查看帮助" aria-label="帮助：流程">?</a></p>
           <input id="flowImport" type="file" accept=".yaml,.yml,text/yaml,text/x-yaml" hidden />
           <div id="flowOpen" hidden>
             <nav class="flow-trail" id="flowTrail" aria-label="子图所在的上层流程" hidden></nav>
@@ -407,7 +420,7 @@
             <p class="hint-block" id="flowIdHint">标识按标题自动生成。中文标题会译成英文。创建后不再改变。</p>
             <p class="hint-block" id="flowIdLine" hidden></p>
             <div class="flow-problems" id="flowProblems" hidden>
-              <p class="flow-problems-title">运行前待补</p>
+              <p class="flow-problems-title">运行前待补<a class="help-tip" href="/help#workflow/check" target="_blank" rel="noopener" title="在新标签页查看帮助" aria-label="帮助：运行前检查">?</a></p>
               <ul id="flowProblemList"></ul>
             </div>
             <div class="hint-block flow-usage" id="flowUsage" hidden></div>
@@ -426,7 +439,7 @@
               <p class="hint-block" id="flowNodeRouteHint" hidden></p>
             </div>
             <div id="flowGateItemsBox" hidden>
-              <p class="section-title">决策项 <span class="flow-io-count" id="flowGateItemsCount"></span></p>
+              <p class="section-title">决策项 <span class="flow-io-count" id="flowGateItemsCount"></span><a class="help-tip" href="/help#workflow/gate-items" target="_blank" rel="noopener" title="在新标签页查看帮助" aria-label="帮助：决策项">?</a></p>
               <p class="hint-block" id="flowGateItemsEmpty">没有决策项时，人对整个决策点批准或不通过。需要逐项核对时，在这里列出条目。</p>
               <ol id="flowGateItemsList" class="gate-item-edit-list"></ol>
               <p class="branch-join" id="flowGateRule" hidden></p>
@@ -487,7 +500,7 @@
 
       <div class="app-view" data-route="role">
         <main class="workspace-main" aria-label="角色">
-          <p class="section-title" id="roleHeading">角色</p>
+          <p class="section-title" id="roleHeading">角色<a class="help-tip" href="/help#roles" target="_blank" rel="noopener" title="在新标签页查看帮助" aria-label="帮助：角色">?</a></p>
           <wa-select id="rolePick" label="选择角色" placeholder="选择角色" hidden></wa-select>
           <div id="roleOpen" hidden>
             <p class="hint-block" id="roleHint">从列表中选择角色即可编辑。</p>
@@ -557,7 +570,7 @@
         <div class="composer-block">
           <section class="config-pane-project config-form-half" aria-labelledby="projectHeading">
             <div class="func-region" id="region-project">
-            <p class="section-title" id="projectHeading">项目</p>
+            <p class="section-title" id="projectHeading">项目<a class="help-tip" href="/help#project" target="_blank" rel="noopener" title="在新标签页查看帮助" aria-label="帮助：项目">?</a></p>
             <div id="openPicker">
               <wa-select id="projectPick" label="选择项目" placeholder="选择项目"></wa-select>
               <p class="hint-block" id="openHint">从列表中选择项目即可打开。</p>
@@ -649,7 +662,7 @@
 
           <section class="config-pane-runtime config-form-half" aria-labelledby="agentHeading">
             <div class="func-region" id="region-agent">
-            <p class="section-title" id="agentHeading">Agent</p>
+            <p class="section-title" id="agentHeading">Agent<a class="help-tip" href="/help#config/agent" target="_blank" rel="noopener" title="在新标签页查看帮助" aria-label="帮助：Agent 设置">?</a></p>
             <wa-select id="backendPick" label="后端" value="stub">
               <wa-option value="stub">stub</wa-option>
               <wa-option value="cursor">Cursor SDK</wa-option>
@@ -677,7 +690,7 @@
             </div>
 
             <div class="func-region" id="region-feishu">
-            <p class="section-title" id="feishuHeading">飞书</p>
+            <p class="section-title" id="feishuHeading">飞书<a class="help-tip" href="/help#config/feishu" target="_blank" rel="noopener" title="在新标签页查看帮助" aria-label="帮助：飞书设置">?</a></p>
             <wa-select id="larkBackend" label="飞书后端" value="lark_cli">
               <wa-option value="lark_cli">lark-cli</wa-option>
               <wa-option value="env_bot">应用凭据</wa-option>
@@ -718,12 +731,12 @@
           </div>
         </div>
         <div class="inspect-head config-pane-env">
-          <h2 id="envHeading">环境</h2>
+          <h2 id="envHeading">环境<a class="help-tip" href="/help#config/env" target="_blank" rel="noopener" title="在新标签页查看帮助" aria-label="帮助：环境">?</a></h2>
         </div>
         <div class="inspect-body config-pane-env">
           <p class="panel-lead">只显示是否已配置。密钥的原文不会出现在这张表里。</p>
           <div id="settingsList">
-            <p class="settings-pending">正在读取 .env…</p>
+            <p class="settings-pending">正在读取 .env……</p>
           </div>
           <div id="larkStatusBlock" hidden>
             <p class="section-title">飞书命令行</p>
@@ -735,211 +748,27 @@
       </div>
 
       <div class="app-view" data-route="help">
-        <main class="workspace-main" aria-label="帮助">
-          <p class="section-title" id="helpHeading">概览</p>
-          <p class="hint-block" id="helpMissing" hidden>没有这一节，改看概览。</p>
-          <article class="help-copy" data-help-article="overview">
-            <figure class="help-hero">
-              <img src="/static/help-overview.jpg?v=20261109" alt="GeniStudio 概览：项目经理居中协调，架构、前端、后端、测试和运维各就各位。" />
-            </figure>
-            <ul>
-              <li>GeniStudio 是一个流程驱动的自动化软件生产工场。</li>
-              <li>适合有成熟流程和交付件模板的规模化开发，不适合单次或不确定性、探索性软件开发。</li>
-              <li>可定制化程度高，包括但不限于角色、流程编排、运行时 Skill/MCP 配置、Agent 后端配置等。</li>
-            </ul>
-          </article>
-          <article class="help-copy" data-help-article="architecture" hidden>
-            <ul>
-              <li>GeniStudio 把人的交付目标交给项目所绑定的流程。</li>
-              <li>流程由活动和决策点组成。活动按角色写出文档或代码，决策点停下来等人批复。</li>
-              <li>工厂仓库和待开发项目分开。项目只选定流程、模型和通知，不在页面上另设一套场景。</li>
-              <li>它适合已经有明确流程和模板、需要 Agent 长时间运行的工作。不适合单次、小型任务。</li>
-            </ul>
-            <figure class="arch-map">
-              <figcaption class="visually-hidden">GeniStudio 架构。蓝框是 GeniTech，灰框是第三方。</figcaption>
-              <section class="arch-layer" aria-label="UI">
-                <p class="arch-title">UI</p>
-                <div class="arch-row">
-                  <span class="arch-own">WebUI</span>
-                  <span class="arch-own">飞书卡片</span>
-                  <span class="arch-own">CLI</span>
-                </div>
-              </section>
-              <div class="arch-split">
-                <section class="arch-layer" aria-label="编排层">
-                  <p class="arch-title">编排层</p>
-                  <div class="arch-row">
-                    <span class="arch-own">角色编排</span>
-                    <span class="arch-own">流程编排</span>
-                    <span class="arch-own">项目编排</span>
-                  </div>
-                </section>
-                <section class="arch-layer" aria-label="运行层">
-                  <p class="arch-title">运行层</p>
-                  <div class="arch-row">
-                    <span class="arch-own">一次Run</span>
-                  </div>
-                </section>
-              </div>
-              <section class="arch-layer" aria-label="调度层">
-                <p class="arch-title">调度层</p>
-                <span class="arch-ext arch-wide">LangGraph</span>
-              </section>
-              <section class="arch-layer" aria-label="后端">
-                <p class="arch-title">后端</p>
-                <div class="arch-split arch-backends">
-                  <div class="arch-group">
-                    <span class="arch-own arch-wide">Agent Backend</span>
-                    <div class="arch-row">
-                      <span class="arch-ext">Cursor SDK</span>
-                      <span class="arch-ext">Codex SDK</span>
-                      <span class="arch-ext">DeepSeek Harness</span>
-                    </div>
-                  </div>
-                  <div class="arch-group">
-                    <span class="arch-own arch-wide">IM Backend</span>
-                    <div class="arch-row">
-                      <span class="arch-ext">lark-cli</span>
-                      <span class="arch-ext">微信?</span>
-                    </div>
-                  </div>
-                </div>
-              </section>
-              <div class="arch-foot">
-                <section class="arch-layer" aria-label="工具层">
-                  <p class="arch-title">工具层</p>
-                  <div class="arch-row">
-                    <span class="arch-own">Skills</span>
-                    <span class="arch-own">MCP</span>
-                    <span class="arch-own">知识库/RAG</span>
-                    <span class="arch-ext">SandBox</span>
-                  </div>
-                </section>
-                <section class="arch-layer arch-persist" aria-label="持久化">
-                  <p class="arch-title">持久化</p>
-                  <div class="arch-row">
-                    <span class="arch-ext">JSON</span>
-                    <span class="arch-ext">YAML</span>
-                    <span class="arch-ext arch-sqlite">Sqlite</span>
-                  </div>
-                </section>
-              </div>
-              <ul class="arch-legend">
-                <li><span class="arch-own">GeniTech</span></li>
-                <li><span class="arch-ext">Thirdparty</span></li>
-              </ul>
-            </figure>
-          </article>
-          <article class="help-copy" data-help-article="guide" hidden>
-            <ul>
-              <li>安装步骤写在仓库的 README，完整说明在 docs/install.md。装好后打开这个 Web 页面。</li>
-              <li>在「配置」的 Agent 里选择后端。想先熟悉界面，选 stub，它不调用外部模型。</li>
-              <li>要让角色真正工作时，后端选 cursor 并写入 Cursor API Key，或选 codex 并使用本机 Codex 登录。密钥只保存，页面不回显。</li>
-              <li>默认模型是每一轮里角色没有另选模型时使用的模型。留空则用该后端自己的默认模型。写完后按「写入 .env」。</li>
-              <li>工作区可以先空着。项目里填写了工作区时用项目的目录；都没填时，才用配置页的默认工作区。</li>
-              <li>飞书可以以后再配。需要通知和在飞书里批复时，再填写飞书后端、Web 地址，以及默认通知群或通知人。</li>
-              <li>先准备流程。可以选内置的通用软件开发或自我改进，也可以先在「流程」里新建或复制。</li>
-              <li>再新建项目并选定该流程。只写标题，标识会按标题生成。填写待开发项目的工作区。</li>
-              <li>然后到「运行」。选定项目，填写交付目标，确认名称后启动。</li>
-              <li>遇到决策点时，在待办里批准或驳回。批准后继续，驳回则这一轮结束。</li>
-            </ul>
-          </article>
-          <article class="help-copy" data-help-article="project" hidden>
-            <ul>
-              <li>可以新建、打开，或从本机的 git 目录创建。</li>
-              <li>新建只写标题。标识按标题生成，中文标题会译成英文。</li>
-              <li>打开之后标识只读，再改标题也不会改标识。</li>
-              <li>从目录打开时，标识按目录名生成，工作区就是这个目录。</li>
-              <li>项目里可以选择流程、通知对象、远程仓库和工作区。本地仓库的初始化与拉取由用户自行完成。</li>
-              <li>项目必须选定一份流程。没有流程时，先去创建。</li>
-            </ul>
-          </article>
-          <article class="help-copy" data-help-article="run" hidden>
-            <ul>
-              <li>先选择项目，再填写交付目标并启动。交付目标、附件与「启动」在右栏下方，点「启动」格子时出现；尚未启动时默认就是这一格。点其它格子时，右栏下方是人工待办。</li>
-              <li>人工待办的附言下方可以上传附件，随批复一并提交；附件放进本轮目录，之后的活动可以直接读取。</li>
-              <li>名称默认是项目标识加递增序号，启动前可以改。</li>
-              <li>未启动的 Run 改动后自动保存为草稿：交付目标、附件、各节点的 Skill、各角色的模型、推理强度、Fast 与上下文，停笔约 1 秒即存到服务端，切换 Run、新建或关闭页面前也会先存。「保存 Run 配置」立即保存一次。之后可从 Run 列表打开，修改后再启动。</li>
-              <li>中栏是这一轮的泳道，只列出当轮会走到的节点。</li>
-              <li>可以进行中暂停、继续或停止。</li>
-              <li>决策点、需求澄清和回退升级停在待办里，批复后继续。</li>
-              <li>点一个格子，右栏上方是这一步的模型、推理强度、Fast 和 Skill，下方是会话。MCP 是全局配置，所有角色可见，在「配置」的 Agent 里查看。</li>
-              <li>点已经批复过的决策点，右栏列出历次决定：当时待决的内容与待审阅产物、所选决定与附言。需求澄清与回退升级的答复记在当时待办所在的格子上。</li>
-            </ul>
-          </article>
-          <article class="help-copy" data-help-article="workflow" hidden>
-            <ul>
-              <li>可以新建、编辑或导入一份流程。新建只写标题，标识按标题生成。编辑时选中一份就载入，选择框保持可用。导入读取 workflow.yaml，内置标记不会带入。</li>
-              <li>载入非内置流程后，删除在选择框右侧的「更多」里，删除前要确认。内置流程只能查看和复制，不能删除。仍被项目选用或被别的流程当作子图时不能删除，右栏列出引用方。</li>
-              <li>↶、↷ 撤销与重做画布上的修改；Ctrl+Z、Ctrl+Shift+Z 与 Ctrl+S 分别对应撤销、重做与保存。</li>
-              <li>选择框右侧的标记写着「可以运行」或「N 处待补」：按启动时的规则检查当前画布，待补项列在右栏，相关节点带红点。</li>
-              <li>从上层流程打开子图后，标题下方的路径可以回到上层流程。</li>
-              <li>「更多」里的「显示运行数据」在各节点下方叠加历次运行的执行次数、耗时、回退、升级与驳回，悬停查看全部。</li>
-              <li>每次保存都会留下一版，右栏「版本记录」列出各版的改动。「载入到画布」把旧版放回画布，保存后才生效。</li>
-              <li>宽屏用泳道排列活动和决策点。右栏左缘可以拖动，改变右栏宽度。</li>
-              <li>「添加节点」或连线中点的「+」可以插入活动、决策点、并行或子图。回退和不通过画成虚线，点虚线可以改去向或删除。</li>
-              <li>活动要写出输入和输出。每项输出要有模板。</li>
-              <li>模板是服务进程能读取的本地文件，或一个 http、https 链接。</li>
-              <li>决策点可以列出几个决策项，运行时逐项给「通过」或「不通过」。默认全部通过才放行，任一项不通过即退回，并把原因交给退回的活动；也可以设成只作核对清单，最后由人决定。</li>
-              <li>决策点的决定类型有「批准或驳回」与「择一」。并行的汇合方式选「对照择一」时，各路改动先不合并，汇合处写出两路对照；紧随其后的「择一」决策点由人选定采用哪一路，未采用的改动留作补丁。</li>
-              <li>并行支路里的活动可以回退到同一支路里更早的活动。</li>
-              <li>把这份流程选进项目后，下一轮按这些节点执行。</li>
-              <li>活动没有输出，或某项输出没有模板时，不能启动。</li>
-            </ul>
-          </article>
-          <article class="help-copy" data-help-article="roles" hidden>
-            <ul>
-              <li>左栏「角色」放在「流程」下面、「配置」上面。可以新建、修改和删除；已有角色从列表选择即可编辑。</li>
-              <li>新建只写标题。标识按标题生成，中文标题会译成英文。打开之后标识只读。</li>
-              <li>打开后最上方仍是「选择角色」，可切换到其他角色；其下改标题、类别、职责、原则与价值观、输入、输出和能力。</li>
-              <li>输入和输出从工厂已有的产物名里选择。人类关卡不在这个列表里。</li>
-              <li>已被流程使用的角色不能删除。先从那些流程里去掉，再删角色。</li>
-              <li>泳道和流程里显示的是文件头里的标题。</li>
-              <li>合规管理负责隐私、网络安全和知识产权，不代替 QA 的交付结论。</li>
-              <li>新建活动时，用该角色文件中的输入和输出名字作为初值。</li>
-              <li>模板仍要在流程页补上。</li>
-            </ul>
-          </article>
-          <article class="help-copy" data-help-article="agent" hidden>
-            <ul>
-              <li>在「配置」的 Agent 中选择后端。</li>
-              <li>stub 不调用外部模型。</li>
-              <li>cursor 使用 Cursor SDK，并复用该工作区里已有的工具、规则和 Skill。</li>
-              <li>MCP 是全局配置，对所有角色可见。Agent 下方只读列出所选后端会加载的 MCP 服务器，增删在后端自己的配置里进行。</li>
-              <li>codex 使用 Codex SDK，在目标工作区里读写文件并执行命令。</li>
-              <li>默认模型是每一轮里角色没有另选模型时使用的模型。留空则用该后端自己的默认模型。</li>
-              <li>API Key 只有一个输入框，文字随后端变化。只写入本机配置，页面不回显。stub 不需要填写。</li>
-            </ul>
-          </article>
-          <article class="help-copy" data-help-article="workspace" hidden>
-            <ul>
-              <li>默认工作区在项目没有填写工作区时使用。</li>
-              <li>一轮任务在待开发项目自己的目录里进行，不改工厂仓库里的源码。</li>
-              <li>项目里填写的工作区优先于这里的默认值。</li>
-            </ul>
-          </article>
-          <article class="help-copy" data-help-article="feishu" hidden>
-            <ul>
-              <li>飞书用来通知和批复，和网页上的待办是同一套决定。</li>
-              <li>可以填写飞书后端、卡片里使用的 Web 地址、默认通知群和默认通知人。</li>
-              <li>项目里另外填写的通知群或通知人优先于这些默认值。</li>
-            </ul>
-          </article>
-          <article class="help-copy" data-help-article="env" hidden>
-            <ul>
-              <li>配置页右栏的环境按 Agent、工作区、飞书分组。每一项左侧是名称，右侧是是否已配置。</li>
-              <li>有具体取值时写在名称下面。密钥只显示已配置，不写出原文。</li>
-              <li>飞书命令行单独列出安装、配置和发消息，说明按条目写在下面。</li>
-            </ul>
-          </article>
+        <main class="workspace-main help-main" aria-label="帮助">
+          <h1 class="help-title" id="helpHeading">帮助</h1>
+          <p class="hint-block" id="helpMissing" hidden>没有这一节，改看快速入门。</p>
+          <p class="hint-block" id="helpLoading">正在读取帮助……</p>
+          <wa-callout id="helpError" variant="danger" hidden></wa-callout>
+          <div id="helpArticles"></div>
+          <nav class="help-pager" id="helpPager" aria-label="上一篇与下一篇"></nav>
         </main>
-        <aside class="workspace-inspect" aria-label="帮助说明">
+        <aside class="workspace-inspect" aria-label="帮助导航">
           <div class="inspect-resize" role="separator" aria-orientation="vertical" aria-label="拖动调整检视栏宽度" tabindex="0"></div>
           <div class="inspect-head">
             <h2>帮助</h2>
           </div>
-          <div class="inspect-body">
-            <p class="hint-block">帮助只读。</p>
+          <div class="inspect-body help-side">
+            <wa-input id="helpSearch" type="search" label="搜索帮助" placeholder="例如：决策项、续跑、飞书" with-clear autocomplete="off"></wa-input>
+            <div id="helpResults" class="help-results" hidden aria-live="polite"></div>
+            <nav id="helpToc" class="help-toc" aria-labelledby="helpTocTitle">
+              <p class="section-title" id="helpTocTitle">本页目录</p>
+              <ol id="helpTocList"></ol>
+            </nav>
+            <a class="help-open-page" id="helpOpenPage" href="/" hidden></a>
           </div>
         </aside>
       </div>
@@ -948,7 +777,7 @@
 
   <script src="/static/api-utils.js?v=20261110-web-ui"></script>
   <script src="/static/icons.js?v=20261113-gate-icon3"></script>
-  <script src="/static/hitl.js?v=20261113-gate-items1"></script>
+  <script src="/static/hitl.js?v=20261113-punct"></script>
   <div id="filePicker" class="dir-picker" hidden>
     <div class="dir-picker-card" role="dialog" aria-modal="true" aria-labelledby="filePickerTitle">
       <p class="section-title" id="filePickerTitle">选择模板文件</p>
@@ -987,8 +816,8 @@
       <wa-callout id="dirPickerError" variant="danger" hidden></wa-callout>
     </div>
   </div>
-  <script src="/static/config.js?v=20261112-project-form"></script>
-  <script src="/static/workflow.js?v=20261113-gate-items2"></script>
-  <script src="/static/role.js?v=20261112-role-pick-top"></script>
+  <script src="/static/config.js?v=20261113-punct"></script>
+  <script src="/static/workflow.js?v=20261113-punct"></script>
+  <script src="/static/role.js?v=20261113-punct"></script>
 </body>
 </html>

@@ -94,7 +94,7 @@ def resolve_test_command(state: dict) -> list[str] | None:
     executable = Path(argv[0]).name
     if executable not in allowed:
         raise TestCommandError(
-            f"测试命令必须以 {'、'.join(sorted(allowed))} 开头，拒绝: {executable}。"
+            f"测试命令必须以 {'、'.join(sorted(allowed))} 开头，拒绝：{executable}。"
             "需要其他可执行文件时，在项目 verification.allow 中声明。"
         )
     if any(token for token in argv if any(ch in token for ch in ";&|`$<>")):

@@ -191,7 +191,7 @@ def workflow_gate_summary(values: dict[str, Any], gate_id: str) -> str:
         return ""
     name, reject_name = found
     if reject_name:
-        return f"{name}：请批准，或不通过并前往「{reject_name}」。"
+        return f"{name}：请批准，或不通过并前往“{reject_name}”。"
     return f"{name}：请批准，或不通过以结束本轮。"
 
 
