@@ -36,6 +36,7 @@ vm.runInContext(extract('function defaultModelFromSettings(', 'let modelRequestV
 vm.runInContext(extract('async function saveRuntime()', 'function agentFieldCopy('), context);
 vm.runInContext(extract('let modelRequestVersion', 'for (const id of ["modelPick", "reasoningPick"])'), context);
 vm.runInContext(extract('function fillOneWorkflowSelect(', 'async function resolveEffectiveBackend('), context);
+vm.runInContext(extract('function updateProjectFlowSummary(', '$("fieldSkipMode").addEventListener'), context);
 vm.runInContext(extract('function fillScenarioOptions(', 'function renderSkipNodes('), context);
 (async () => {
   assert.equal(context.defaultModelFromSettings(context.runtimeSettingsCache, 'codex'), '');

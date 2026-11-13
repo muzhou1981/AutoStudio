@@ -69,6 +69,28 @@ def test_delete_project_removes_directory(tmp_path: Path, monkeypatch) -> None:
     assert client.get("/api/config/projects/api-del").status_code == 404
 
 
+def test_delete_project_refuses_while_runs_are_unfinished(monkeypatch) -> None:
+    class _Runs:
+        def list_runs(self, *, project_id: str = "", phase: str = "") -> list[dict]:
+            return [
+                {"thread_id": "t1", "run_name": "busy-1", "phase": "awaiting_human", "project_id": project_id},
+                {"thread_id": "t2", "run_name": "done-1", "phase": "completed", "project_id": project_id},
+            ]
+
+    client = TestClient(app)
+    assert client.post("/api/config/projects", json={"title": "api-busy", "project_id": "api-busy"}).status_code == 200
+    try:
+        monkeypatch.setattr("geni_studio.web.app.run_service", lambda: _Runs())
+        refused = client.delete("/api/config/projects/api-busy")
+        assert refused.status_code == 409
+        assert "busy-1" in refused.json()["detail"]
+        assert "done-1" not in refused.json()["detail"]
+        assert client.get("/api/config/projects/api-busy").status_code == 200
+    finally:
+        monkeypatch.undo()
+        assert client.delete("/api/config/projects/api-busy").status_code == 200
+
+
 def test_workspace_field_check_allows_factory_root(monkeypatch) -> None:
     from geni_studio.config.context import factory_root
     from geni_studio.workspace.layout import workspace_config_error

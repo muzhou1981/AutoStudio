@@ -131,6 +131,7 @@ def list_workflows(root: Path | None = None) -> list[dict[str, Any]]:
                 "builtin": bool(data.get("builtin")),
                 "subgraph": bool(data.get("subgraph")),
                 "hidden": bool(data.get("hidden")),
+                "workspace": "current_branch" if data.get("workspace") == "current_branch" else "",
             }
         )
     items.sort(key=lambda item: (not item["builtin"], item["title"]))

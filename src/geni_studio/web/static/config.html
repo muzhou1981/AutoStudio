@@ -112,8 +112,8 @@
               <wa-input id="fieldWorkspace" label="工作区" hint="待开发项目的 git 目录，可空" placeholder="/path/to/repo" spellcheck="false"></wa-input>
               <p class="hint-block" id="workspaceHint"></p>
               <wa-select id="fieldProfile" label="流程" hint="可空。未选择时不绑定流程。"></wa-select>
-              <wa-input id="fieldChat" label="飞书通知群" hint="chat_id，可空" placeholder="oc_…" spellcheck="false"></wa-input>
-              <wa-input id="fieldOpen" label="飞书通知人" hint="open_id，群为空时使用" placeholder="ou_…" spellcheck="false"></wa-input>
+              <wa-input id="fieldChat" label="飞书通知群" hint="群的 chat_id，可空。与通知人都留空时，使用配置页的默认值；填写任一项则不再使用默认值。" placeholder="oc_…" spellcheck="false"></wa-input>
+              <wa-input id="fieldOpen" label="飞书通知人" hint="用户的 open_id，可空。只在通知群为空时使用。" placeholder="ou_…" spellcheck="false"></wa-input>
             </div>
 
             <wa-details class="raw" summary="原文 project.yaml">
@@ -153,9 +153,9 @@
               <wa-option value="lark_cli">lark-cli</wa-option>
               <wa-option value="env_bot">应用凭据</wa-option>
             </wa-select>
-            <wa-input id="publicBase" label="Web 地址" hint="卡片里的打开链接" placeholder="http://127.0.0.1:8765" spellcheck="false"></wa-input>
-            <wa-input id="feishuChat" label="默认通知群" hint="项目未填 chat_id 时使用" placeholder="oc_…" spellcheck="false" autocomplete="off"></wa-input>
-            <wa-input id="feishuOpen" label="默认通知人" hint="飞书用户 open_id（ou_…），不是 Agent 后端名称" placeholder="ou_…" spellcheck="false" autocomplete="off"></wa-input>
+            <wa-input id="publicBase" label="Web 地址" hint="卡片里的打开链接。" placeholder="http://127.0.0.1:8765" spellcheck="false"></wa-input>
+            <wa-input id="feishuChat" label="默认通知群" hint="项目未填 chat_id 时使用。" placeholder="oc_…" spellcheck="false" autocomplete="off"></wa-input>
+            <wa-input id="feishuOpen" label="默认通知人" hint="飞书用户 open_id（ou_…），不是 Agent 后端名称。" placeholder="ou_…" spellcheck="false" autocomplete="off"></wa-input>
             <div class="row-actions">
               <wa-button id="btnSaveRuntime" variant="brand">写入 .env</wa-button>
             </div>

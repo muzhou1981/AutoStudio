@@ -125,7 +125,12 @@ def test_console_markup_has_list_inspect_and_resize_handles() -> None:
     role_js = TestClient(app).get("/static/role.js?v=20261112-role-pick-top").text
     assert 'rolePick").addEventListener("change"' in role_js
     assert 'aria-label="选择目录"' in text
-    assert 'id="btnSaveProject" appearance="outlined"' in text
+    assert 'id="btnSaveProject" variant="brand"' in text
+    form = text[text.index('class="config-pane-project'):text.index('id="projectActions"')]
+    groups = ['id="projectFields"', 'id="region-extra"', 'id="region-workspace"', 'id="region-notify"']
+    assert [form.index(g) for g in groups] == sorted(form.index(g) for g in groups)
+    assert 'id="fieldTitle" label="标题" required' in form and 'label="流程" hint="下一轮起按这份流程执行。" required' in form
+    assert 'id="fieldTitleError"' in form and 'id="fieldProfileError"' in form and 'id="fieldRetriesError"' in form
     assert ">项目配置</span>" not in text
     assert 'aria-label="运行泳道"' in text
     assert "renderSwim" in text

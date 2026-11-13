@@ -27,6 +27,8 @@ from geni_studio.web.errors import http_error
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
+_UNFINISHED_PHASES = frozenset({"running", "awaiting_human", "paused", "interrupted"})
+
 
 class SaveProjectBody(BaseModel):
     yaml: str = Field(min_length=1)
@@ -137,6 +139,66 @@ def api_project_form(project_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
+_OVERVIEW_RECENT = 5
+_OVERVIEW_SCAN = 50
+
+
+@router.get("/projects/{project_id}/overview")
+def api_project_overview(project_id: str) -> dict:
+    """项目右栏：选定的流程、实际工作区与落地方式、最近的 Run，以及代码尚未回到项目目录的 Run。"""
+    from pathlib import Path
+
+    from geni_studio.config.workflow_defs import list_workflows
+    from geni_studio.web.app import run_service
+    from geni_studio.workspace.pending import current_branch, run_leftover
+
+    try:
+        form = project_form_view(project_id)
+    except ConfigError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    profile_id = str(form.get("profile_id") or "")
+    flow = next((item for item in list_workflows() if item["workflow_id"] == profile_id), None)
+    repo = Path(str(form.get("workspace_resolved") or ""))
+    is_dir = bool(form.get("workspace_resolved")) and repo.is_dir()
+    runs = run_service().list_runs(project_id=project_id)
+    pending: list[dict] = []
+    for run in runs[:_OVERVIEW_SCAN]:
+        phase = str(run.get("phase") or "")
+        reason = "未结束" if phase in _UNFINISHED_PHASES else (run_leftover(repo, run["thread_id"]) if is_dir else "")
+        if reason:
+            pending.append({**_run_brief(run), "reason": reason})
+    return {
+        "project_id": project_id,
+        "flow": {
+            "workflow_id": profile_id,
+            "title": flow["title"] if flow else profile_id,
+            "exists": flow is not None,
+            "workspace": flow["workspace"] if flow else "",
+        }
+        if profile_id
+        else None,
+        "workspace": {
+            "configured": str(form.get("workspace") or ""),
+            "path": str(form.get("workspace_resolved") or ""),
+            "exists": is_dir,
+            "branch": current_branch(repo) if is_dir else "",
+        },
+        "runs": [_run_brief(run) for run in runs[:_OVERVIEW_RECENT]],
+        "run_count": len(runs),
+        "unfinished": sum(1 for run in runs if run.get("phase") in _UNFINISHED_PHASES),
+        "pending": pending,
+    }
+
+
+def _run_brief(run: dict) -> dict:
+    return {
+        "thread_id": run["thread_id"],
+        "run_name": run.get("run_name") or run["thread_id"],
+        "phase": run.get("phase") or "",
+        "updated_at": run.get("updated_at"),
+    }
+
+
 @router.put("/projects/{project_id}/form")
 def api_save_project_form(project_id: str, body: ProjectFormBody) -> dict:
     if body.design_track_mode not in {"inherit", "on", "off"}:
@@ -167,6 +229,18 @@ def api_save_project(project_id: str, body: SaveProjectBody) -> dict:
 
 @router.delete("/projects/{project_id}")
 def api_delete_project(project_id: str) -> dict:
+    from geni_studio.web.app import run_service
+
+    open_runs = [
+        str(run.get("run_name") or run.get("thread_id"))
+        for run in run_service().list_runs(project_id=project_id)
+        if run.get("phase") in _UNFINISHED_PHASES
+    ]
+    if open_runs:
+        raise HTTPException(
+            status_code=409,
+            detail="这个项目还有未结束的 Run：" + "、".join(open_runs) + "。先停止或等它们结束，再删除项目。",
+        )
     try:
         delete_project(project_id)
     except ConfigError as e:

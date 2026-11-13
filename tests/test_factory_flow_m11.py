@@ -210,7 +210,7 @@ def test_project_page_requires_a_workflow_and_role_model_selects():
     assert 'id="region-models"' not in page
     assert 'id="runRoleModels"' not in page
     assert 'id="fieldDirProfile"' in page
-    assert ">所选流程</h2>" in page
+    assert ">项目概览</h2>" in page and 'id="projectFlowSummary"' in page
     assert 'id="btnCopyFlow"' not in page and 'id="flowRenameForm"' not in page
     assert 'id="flowNameEdit"' in page and 'id="btnNameSave" variant="brand" hidden>保存</wa-button>' in page
     flow_script = TestClient(app).get("/static/workflow.js").text

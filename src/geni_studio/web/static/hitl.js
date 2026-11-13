@@ -5399,6 +5399,7 @@
       if (url.pathname !== "/" && url.pathname !== "/config" && url.pathname !== "/project" && url.pathname !== "/workflow" && url.pathname !== "/role" && url.pathname !== "/help") return;
       event.preventDefault();
       if (location.pathname === "/role" && url.pathname !== "/role" && window.confirmLeaveRole && !window.confirmLeaveRole()) return;
+      if (location.pathname === "/project" && url.pathname !== "/project" && window.confirmLeaveProject && !window.confirmLeaveProject()) return;
       if (link.dataset.roleMode && window.requestRoleMode) {
         if (location.pathname !== "/role" && window.confirmLeaveRole && !window.confirmLeaveRole()) return;
         applyRoute("/role", url.hash, { skipRole: true });

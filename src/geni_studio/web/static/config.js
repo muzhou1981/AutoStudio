@@ -43,6 +43,30 @@ function showFieldInline(id, msg) {
   el.textContent = msg;
 }
 
+const PROJECT_FIELD_ERRORS = {
+  fieldTitle: "fieldTitleError",
+  fieldProfile: "fieldProfileError",
+  fieldRetries: "fieldRetriesError",
+  dirPath: "dirPathError",
+  fieldDirProfile: "fieldDirProfileError",
+};
+
+function failProjectField(fieldId, msg) {
+  showFieldInline(PROJECT_FIELD_ERRORS[fieldId], msg);
+  const field = $(fieldId);
+  if (field) field.focus();
+}
+
+function clearProjectFieldErrors() {
+  for (const id of Object.values(PROJECT_FIELD_ERRORS)) showFieldInline(id, "");
+}
+
+for (const [fieldId, errorId] of Object.entries(PROJECT_FIELD_ERRORS)) {
+  const field = $(fieldId);
+  if (!field) continue;
+  for (const type of ["input", "change"]) field.addEventListener(type, () => showFieldInline(errorId, ""));
+}
+
 async function fetchWorkspaceFieldCheck(workspace) {
   const q = new URLSearchParams();
   if (workspace !== undefined) q.set("workspace", workspace);
@@ -64,6 +88,27 @@ async function validateWorkspaceField() {
   showFieldInline("fieldWorkspaceError", msg);
   syncWorkspaceClearButton();
   return !msg;
+}
+
+let workspaceResolved = "";
+
+function syncWorkspaceHint() {
+  const hint = $("workspaceHint");
+  if (!hint) return;
+  const value = ($("fieldWorkspace").value || "").trim();
+  const flowId = (($("fieldProfile") && $("fieldProfile").value) || "").trim();
+  const flow = (window.__workflows || []).find((item) => item.workflow_id === flowId);
+  const where = value
+    ? ""
+    : workspaceResolved && !savedWorkspace
+      ? "未填写时使用：" + workspaceResolved + "。"
+      : "未填写时使用运行配置里的默认工作区。";
+  const how = !flow
+    ? ""
+    : flow.workspace === "current_branch"
+      ? "所选流程直接修改这个目录当前检出的分支，不另建工作树。"
+      : "每一轮在这个目录下建立独立的工作树与分支。";
+  hint.textContent = where + how;
 }
 
 function syncWorkspaceClearButton() {
@@ -280,6 +325,7 @@ function fillWorkflowOptions(selected) {
   const none = !(window.__workflows || []).length;
   if ($("flowProfileEmpty")) $("flowProfileEmpty").hidden = !none;
   if ($("goCreateFlow")) $("goCreateFlow").hidden = !none;
+  updateProjectFlowSummary();
 }
 
 window.refreshWorkflowOptions = () => {
@@ -304,7 +350,8 @@ async function loadLists() {
   window.__projects = pr.projects || [];
   window.__nodes = pr.nodes || [];
   for (const p of window.__projects) {
-    pp.appendChild(waOption(p.project_id, `${p.title} (${p.project_id})`));
+    const title = (p.title || "").trim();
+    pp.appendChild(waOption(p.project_id, !title || title === p.project_id ? p.project_id : `${title} (${p.project_id})`));
   }
   const stillThere = selected && window.__projects.some((p) => p.project_id === selected);
   pp.value = stillThere ? selected : "";
@@ -357,7 +404,7 @@ function syncSkipWrap() {
 function setProjectFieldsEnabled(on) {
   document
     .querySelectorAll(
-      "#projectFields wa-input, #projectFields wa-select, #projectFields wa-textarea, #region-scenario wa-select, #region-notify wa-input, #region-extra wa-input, #region-extra wa-select",
+      "#projectFields wa-input, #projectFields wa-select, #projectFields wa-textarea, #region-workspace wa-input, #region-scenario wa-select, #region-notify wa-input, #region-extra wa-input, #region-extra wa-select",
     )
     .forEach((el) => {
       el.disabled = !on;
@@ -378,14 +425,9 @@ async function fillProjectForm(data) {
   syncWorkspaceClearButton();
   showFieldInline("fieldWorkspaceError", "");
   void validateWorkspaceField();
-  const hint = $("workspaceHint");
-  if (data.workspace) {
-    hint.textContent = "启动后在这个目录下建立本轮工作树。";
-  } else if (data.workspace_resolved) {
-    hint.textContent = "未填写时使用：" + data.workspace_resolved;
-  } else {
-    hint.textContent = "未填写时使用运行配置里的默认工作区。";
-  }
+  workspaceResolved = data.workspace_resolved || "";
+  savedWorkspace = data.workspace || "";
+  syncWorkspaceHint();
   renderSkipNodes(data.nodes, data.skip_nodes);
   syncSkipWrap();
   setProjectFieldsEnabled(true);
@@ -395,6 +437,8 @@ function clearProjectForm() {
   for (const id of ["fieldTitle", "fieldDescription", "fieldProfile", "fieldRetries", "fieldChat", "fieldOpen", "fieldWorkspace"]) {
     $(id).value = "";
   }
+  workspaceResolved = "";
+  savedWorkspace = "";
   $("workspaceHint").textContent = "";
   $("fieldDesign").value = "inherit";
   $("fieldSkipMode").value = "inherit";
@@ -858,7 +902,7 @@ function fillRuntime(data) {
       feishuOpenEl.hint = `当前 .env 中“${open.value_hint}”不是 open_id；应填 ou_… 或留空后由 lark-cli 自动填入`;
     } else if (savedOpen) {
       setWaControlValue(feishuOpenEl, rawHint);
-      feishuOpenEl.hint = "项目未填 open_id 时使用";
+      feishuOpenEl.hint = "项目未填 open_id 时使用。";
     } else if (suggestedOpen || (cliOpen && isFeishuOpenId(cliOpen))) {
       const ou = suggestedOpen ? rawHint : cliOpen;
       setWaControlValue(feishuOpenEl, ou);
@@ -871,7 +915,7 @@ function fillRuntime(data) {
       if (isAgentBackendToken(stale) || (stale && !isFeishuOpenId(stale))) {
         setWaControlValue(feishuOpenEl, "");
       }
-      feishuOpenEl.hint = "项目未填 open_id 时使用；需先在本机 lark-cli auth login";
+      feishuOpenEl.hint = "项目未填 open_id 时使用；需先在本机执行 lark-cli auth login。";
     }
   }
   syncRuntimeSaveButton();
@@ -1197,6 +1241,13 @@ function confirmLeave() {
   return window.confirm("放弃未保存的修改？");
 }
 
+window.confirmLeaveProject = confirmLeave;
+window.addEventListener("beforeunload", (event) => {
+  if (location.pathname !== "/project" || !formIsDirty()) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+
 function writeProjectUrl(mode, id, replace) {
   let url = "/project";
   if (mode === "open" && id) url += "?project=" + encodeURIComponent(id);
@@ -1221,6 +1272,8 @@ function showProjectPieces(mode) {
   $("dirPane").hidden = !isDir;
   if ($("newIdHint")) $("newIdHint").hidden = !isNew;
   $("projectFields").hidden = isDir;
+  $("region-workspace").hidden = isDir;
+  clearProjectFieldErrors();
   $("region-scenario").hidden = true;
   $("region-notify").hidden = isDir;
   if ($("region-models")) $("region-models").hidden = isDir;
@@ -1249,6 +1302,7 @@ async function enterOpen(id, replace) {
     setProjectFieldsEnabled(false);
     markFormClean();
     writeProjectUrl("open", "", replace);
+    void loadProjectOverview("");
     await refreshEffective();
     void refreshMcpList();
     return;
@@ -1264,6 +1318,7 @@ async function enterOpen(id, replace) {
   $("openHint").hidden = true;
   markFormClean();
   writeProjectUrl("open", id, replace);
+  void loadProjectOverview(id);
   await refreshEffective();
 }
 
@@ -1271,9 +1326,11 @@ function enterNew(replace) {
   projectMode = "new";
   showProjectPieces("new");
   clearProjectForm();
+  syncWorkspaceHint();
   setProjectFieldsEnabled(true);
   markFormClean();
   writeProjectUrl("new", "", replace);
+  void loadProjectOverview("");
 }
 
 function enterDirectory(replace) {
@@ -1283,6 +1340,7 @@ function enterDirectory(replace) {
   $("dirMatches").hidden = true;
   markFormClean();
   writeProjectUrl("from-directory", "", replace);
+  void loadProjectOverview("");
 }
 
 async function requestProjectMode(mode, options) {
@@ -1380,14 +1438,143 @@ function updateProjectFlowSummary() {
   if (!summary || !$("fieldProfile")) return;
   const id = ($("fieldProfile").value || "").trim();
   const item = (window.__workflows || []).find((workflow) => workflow.workflow_id === id);
-  summary.textContent = item ? item.title + "（" + item.workflow_id + "）。" : "还没有选定流程。";
+  const overview = window.__projectOverview;
+  const savedId = overview && overview.flow ? overview.flow.workflow_id : "";
+  if (!item) {
+    summary.textContent = id ? id + "（找不到这份流程）。" : "还没有选定流程。";
+  } else {
+    const link = document.createElement("a");
+    link.href = "/workflow?workflow=" + encodeURIComponent(item.workflow_id) + "#edit";
+    link.textContent = item.title;
+    const unsaved = overview && id !== savedId ? "，尚未保存。" : "。";
+    summary.replaceChildren(link, document.createTextNode("（" + item.workflow_id + "）" + unsaved));
+  }
+  const landing = $("overviewLanding");
+  if (!landing) return;
+  const branch = overview && overview.workspace ? overview.workspace.branch : "";
+  if (!item) landing.textContent = "";
+  else if (item.workspace === "current_branch") {
+    landing.textContent = "代码直接写在" + (branch ? "当前分支 " + branch + " " : "当前检出的分支") + "上。";
+  } else {
+    landing.textContent = "每一轮在独立的工作树与分支中修改，流程含“提交入库”时，最后合并回"
+      + (branch ? "分支 " + branch : "开工时检出的分支") + "。";
+  }
 }
 
 $("fieldSkipMode").addEventListener("change", syncSkipWrap);
 if ($("fieldProfile")) {
   $("fieldProfile").addEventListener("change", () => {
     updateProjectFlowSummary();
+    syncWorkspaceHint();
   });
+}
+
+const PROJECT_PHASE_LABELS = {
+  running: "运行中",
+  awaiting_human: "等待人工",
+  paused: "已暂停",
+  interrupted: "中断",
+  completed: "已完成",
+  rejected: "已驳回",
+  stopped: "已停止",
+};
+
+const PROJECT_UNFINISHED = new Set(["running", "awaiting_human", "paused", "interrupted"]);
+
+let savedWorkspace = "";
+let overviewRequest = 0;
+let overviewSettled = 0;
+
+function runLink(run) {
+  const link = document.createElement("a");
+  link.href = "/?thread_id=" + encodeURIComponent(run.thread_id);
+  link.textContent = run.run_name || run.thread_id;
+  return link;
+}
+
+function overviewItem(run, note) {
+  const li = document.createElement("li");
+  const phase = document.createElement("span");
+  phase.className = "overview-phase";
+  phase.textContent = note || PROJECT_PHASE_LABELS[run.phase] || run.phase;
+  li.append(runLink(run), phase);
+  return li;
+}
+
+function renderProjectOverview() {
+  const body = $("overviewBody");
+  const empty = $("overviewEmpty");
+  if (!body || !empty) return;
+  const overview = window.__projectOverview;
+  const shown = projectMode === "open" && Boolean(loadedProjectId) && Boolean(overview);
+  body.hidden = !shown;
+  empty.hidden = shown;
+  syncWorkspaceChangeWarning();
+  if (!shown) {
+    empty.textContent = projectMode !== "open"
+      ? "创建后，这里显示项目的流程、工作区与最近的 Run。"
+      : loadedProjectId && overviewRequest > overviewSettled
+        ? "正在读取项目概览……"
+        : "选择项目后，这里显示它的流程、工作区与最近的 Run。";
+    return;
+  }
+  updateProjectFlowSummary();
+  const ws = overview.workspace || {};
+  $("overviewWorkspace").textContent = ws.path || "未设定";
+  if (ws.path && !ws.exists) {
+    $("overviewWorkspace").textContent += "（目录还不存在，第一轮启动时创建。）";
+  }
+  const count = overview.run_count || 0;
+  $("overviewRunCount").textContent = count
+    ? "共 " + count + " 轮" + (overview.unfinished ? "，其中 " + overview.unfinished + " 轮未结束。" : "，都已结束。")
+    : "还没有 Run。";
+  $("overviewRuns").replaceChildren(...(overview.runs || []).map((run) => overviewItem(run)));
+  const pending = (overview.pending || []).filter((run) => !PROJECT_UNFINISHED.has(run.phase));
+  $("overviewPendingBlock").hidden = !pending.length;
+  $("overviewPending").replaceChildren(...pending.map((run) => overviewItem(run, run.reason)));
+}
+
+async function loadProjectOverview(id) {
+  const ticket = ++overviewRequest;
+  window.__projectOverview = null;
+  if (!id) overviewSettled = ticket;
+  renderProjectOverview();
+  if (!id) return;
+  let data = null;
+  try {
+    const r = await fetch("/api/config/projects/" + encodeURIComponent(id) + "/overview");
+    data = r.ok ? await r.json() : null;
+  } catch (_) {
+    data = null;
+  }
+  if (ticket !== overviewRequest) return;
+  overviewSettled = ticket;
+  window.__projectOverview = data;
+  renderProjectOverview();
+  if (!data) $("overviewEmpty").textContent = "读不到项目概览。检查服务是否还在，然后刷新。";
+}
+
+function pendingRunsAfterWorkspaceChange() {
+  const overview = window.__projectOverview;
+  if (projectMode !== "open" || !loadedProjectId || !overview) return [];
+  const next = ($("fieldWorkspace").value || "").trim();
+  if (next === savedWorkspace) return [];
+  return overview.pending || [];
+}
+
+function syncWorkspaceChangeWarning() {
+  const box = $("workspaceChangeWarning");
+  if (!box) return;
+  const pending = pendingRunsAfterWorkspaceChange();
+  box.hidden = !pending.length;
+  if (!pending.length) {
+    box.textContent = "";
+    return;
+  }
+  const from = (window.__projectOverview.workspace || {}).path || savedWorkspace;
+  const names = pending.map((run) => "“" + (run.run_name || run.thread_id) + "”（" + run.reason + "）").join("、");
+  box.textContent = "原工作区 " + from + " 里还有 " + pending.length + " 轮 Run 的代码没有回到项目目录：" + names
+    + "。更换后，这些 Run 的改动仍留在原目录，未结束的也在原目录继续；新的 Run 在新目录开始。";
 }
 
 $("btnSaveProject").onclick = async () => {
@@ -1399,23 +1586,17 @@ $("btnSaveProject").onclick = async () => {
     $("projectPick").focus();
     return;
   }
+  clearProjectFieldErrors();
   const payload = projectFormPayload();
-  if (!(window.__workflows || []).length) {
-    showError($("projectError"), "还没有流程。先创建一份。");
-    return;
-  }
-  if (!payload.profile_id) {
-    showError($("projectError"), "先选择流程。");
-    $("fieldProfile").focus();
-    return;
-  }
-  if (payload.max_dev_retries != null && !Number.isInteger(payload.max_dev_retries)) {
-    showError($("projectError"), "开发重试上限要填整数，或留空沿用项目类型。");
-    $("fieldRetries").focus();
-    return;
-  }
+  if (!validateProjectPayload(payload)) return;
   const workspaceOk = await validateWorkspaceField();
   if (!workspaceOk) return;
+  const pending = pendingRunsAfterWorkspaceChange();
+  if (pending.length && !window.confirm(
+    "还有 " + pending.length + " 轮 Run 的代码没有回到原工作区，更换后它们仍留在原目录。确认更换工作区并保存？",
+  )) {
+    return;
+  }
   const r = await fetch("/api/config/projects/" + encodeURIComponent(id) + "/form", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -1427,7 +1608,9 @@ $("btnSaveProject").onclick = async () => {
     return;
   }
   showSaved($("projectSaved"), "已写入 " + id + " 的项目字段。");
+  savedWorkspace = payload.workspace;
   markFormClean();
+  void loadProjectOverview(id);
   refreshEffective();
 };
 
@@ -1443,7 +1626,8 @@ if ($("btnDeleteProject")) {
     const title = ($("fieldTitle").value || "").trim() || id;
     if (
       !window.confirm(
-        "确定删除项目“" + title + "”（" + id + "）？将永久删除 projects/" + id + "/，无法恢复。",
+        "确定删除项目“" + title + "”（" + id + "）？将永久删除 projects/" + id + "/，无法恢复。"
+          + "已结束的 Run 记录与工作区中的代码不受影响。",
       )
     ) {
       return;
@@ -1467,6 +1651,20 @@ if ($("btnDeleteProject")) {
       button.disabled = false;
     }
   };
+}
+
+function validateProjectPayload(payload) {
+  const problems = [];
+  if (!payload.title) problems.push(["fieldTitle", "先写标题。"]);
+  if (!(window.__workflows || []).length) problems.push(["fieldProfile", "还没有流程。先创建一份。"]);
+  else if (!payload.profile_id) problems.push(["fieldProfile", "先选择流程。"]);
+  const retries = ($("fieldRetries").value || "").trim();
+  if (retries && !(Number.isInteger(Number(retries)) && Number(retries) >= 0)) {
+    problems.push(["fieldRetries", "填不小于 0 的整数，或留空沿用流程的设定。"]);
+  }
+  for (const [fieldId, msg] of problems) showFieldInline(PROJECT_FIELD_ERRORS[fieldId], msg);
+  if (problems.length) $(problems[0][0]).focus();
+  return !problems.length;
 }
 
 async function createProjectRecord(title) {
@@ -1495,26 +1693,9 @@ $("btnCreateProject").onclick = async () => {
   const title = ($("fieldTitle").value || "").trim();
   showError($("projectError"), "");
   showSaved($("projectSaved"), "");
-  if (!title) {
-    showError($("projectError"), "先写标题。");
-    $("fieldTitle").focus();
-    return;
-  }
+  clearProjectFieldErrors();
   const payload = projectFormPayload();
-  if (!(window.__workflows || []).length) {
-    showError($("projectError"), "还没有流程。先创建一份。");
-    return;
-  }
-  if (!payload.profile_id) {
-    showError($("projectError"), "先选择流程。");
-    $("fieldProfile").focus();
-    return;
-  }
-  if (payload.max_dev_retries != null && !Number.isInteger(payload.max_dev_retries)) {
-    showError($("projectError"), "开发重试上限要填整数，或留空沿用项目类型。");
-    $("fieldRetries").focus();
-    return;
-  }
+  if (!validateProjectPayload(payload)) return;
   const workspaceOk = await validateWorkspaceField();
   if (!workspaceOk) return;
   const button = $("btnCreateProject");
@@ -1612,6 +1793,8 @@ if ($("btnPickWorkspace")) {
     openDirPicker(($("fieldWorkspace").value || "").trim(), async (path) => {
       $("fieldWorkspace").value = path;
       syncWorkspaceClearButton();
+      syncWorkspaceHint();
+      syncWorkspaceChangeWarning();
       await validateWorkspaceField();
     });
 }
@@ -1619,6 +1802,8 @@ if ($("btnClearWorkspace")) {
   $("btnClearWorkspace").onclick = async () => {
     $("fieldWorkspace").value = "";
     syncWorkspaceClearButton();
+    syncWorkspaceHint();
+    syncWorkspaceChangeWarning();
     await validateWorkspaceField();
   };
 }
@@ -1650,12 +1835,17 @@ if ($("dirPicker")) {
 async function openChosenDirectory(path) {
   showError($("projectError"), "");
   showSaved($("projectSaved"), "");
+  clearProjectFieldErrors();
   $("dirCreate").hidden = true;
   $("dirMatches").hidden = true;
-  const r = await fetch("/api/config/projects/by-workspace?path=" + encodeURIComponent(path || ""));
+  if (!path) {
+    failProjectField("dirPath", "先填写目录。");
+    return;
+  }
+  const r = await fetch("/api/config/projects/by-workspace?path=" + encodeURIComponent(path));
   const data = await r.json();
   if (!r.ok) {
-    showError($("projectError"), data.detail || "打不开这个目录。");
+    failProjectField("dirPath", apiErrorMessage(data, "打不开这个目录。"));
     return;
   }
   $("dirPane").dataset.path = data.path || path;
@@ -1689,12 +1879,13 @@ $("btnCreateFromDir").onclick = async () => {
   const folder = $("dirPane").dataset.folderName || "";
   const profile = ($("fieldDirProfile").value || "").trim();
   showError($("projectError"), "");
+  clearProjectFieldErrors();
   if (!folder) {
-    showError($("projectError"), "先填写目录。");
+    failProjectField("dirPath", "先填写目录。");
     return;
   }
   if (!profile) {
-    showError($("projectError"), "先选择流程。");
+    failProjectField("fieldDirProfile", "先选择流程。");
     return;
   }
   const button = $("btnCreateFromDir");
