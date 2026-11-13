@@ -442,7 +442,10 @@ def _activity_run(node: dict[str, Any]):
         from geni_studio.hitl.attachments import prompt_section
 
         if node.get("commits_on_branch"):
-            from geni_studio.workspace.layout import commit_current_branch
+            from geni_studio.workspace.layout import (
+                commit_current_branch,
+                land_worktree,
+            )
 
             summary = str(
                 state.get("delivery_report")
@@ -450,11 +453,11 @@ def _activity_run(node: dict[str, Any]):
                 or state.get("human_request")
                 or ""
             )
-            body = commit_current_branch(
-                str(state.get("workspace_path") or ""),
-                str(state.get("base_branch") or ""),
-                summary,
-            )
+            workspace = str(state.get("workspace_path") or "")
+            if state.get("base_branch"):
+                body = commit_current_branch(workspace, str(state["base_branch"]), summary)
+            else:
+                body = land_worktree(workspace, summary)
             return _activity_update(node, state, outputs, body)
 
         effect = _effect(node)
@@ -614,6 +617,8 @@ def _output_section(node: dict[str, Any], outputs: list[str]) -> list[str]:
         parts.append("请产出：" + "、".join(f"`{key}`" for key in plain) + "。")
     if len(required) > 1:
         parts.append(f"每个产物写在以产物名为标题的二级标题下，例如 `## {required[-1]}`。")
+    if required:
+        parts.append("产物直接写在本次回复的正文中，工厂会保存到运行目录并交给后续环节；不要在目标仓库中另建产物文件。")
     return parts
 
 

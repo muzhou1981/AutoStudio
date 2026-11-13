@@ -14,6 +14,9 @@ class WorkspaceError(RuntimeError):
     """无法准备目标项目工作区。"""
 
 
+LAND_BRANCH_FILE = "land_branch.txt"
+
+
 def workspace_enabled() -> bool:
     raw = os.environ.get("GENI_STUDIO_WORKSPACE", "1").strip().lower()
     return raw not in ("0", "false", "no")
@@ -98,6 +101,12 @@ def prepare_run_layout(
         )
     worktree = dot / "worktrees" / thread_id
     if not worktree.exists():
+        try:
+            land = _branch_name(target_root)
+        except WorkspaceError:
+            land = ""
+        if land:
+            (run_dir / LAND_BRANCH_FILE).write_text(land + "\n", encoding="utf-8")
         branch = f"geni-studio/{thread_id}"
         proc = subprocess.run(
             ["git", "-C", os.fspath(target_root), "worktree", "add", "-b", branch, os.fspath(worktree)],
@@ -210,6 +219,74 @@ def commit_current_branch(workspace_path: str, base_branch: str, summary: str) -
     )
     short = sha.stdout.strip() or "HEAD"
     return f"已由程序员在分支 {current} 提交 {short}。"
+
+
+def land_worktree(workspace_path: str, summary: str) -> str:
+    """在本轮工作树的分支上提交，再合并回开工时所选目录检出的分支。不推送远端。"""
+    worktree = Path(workspace_path)
+    repo = workspace_lock_root(workspace_path)
+    if repo is None or repo.resolve() == worktree.resolve() or not _is_git_repo(worktree):
+        raise WorkspaceError("这一轮不在独立工作树中，不能合入。")
+    marker = repo / ".geni_studio" / "runs" / worktree.name / LAND_BRANCH_FILE
+    target = marker.read_text(encoding="utf-8").strip() if marker.is_file() else ""
+    if not target:
+        raise WorkspaceError("这一轮没有记录开工时的分支，不能合入。请在工作树中手动合并。")
+    run_branch = _branch_name(worktree)
+    message = f"入库：{_commit_subject(summary)}\n\n人类已确认入库。程序员在本轮分支提交改动。\n"
+    committed = _commit_all(worktree, message)
+
+    current = _branch_name(repo)
+    if current != target:
+        raise WorkspaceError(f"所选目录当前分支是 {current}，开工时是 {target}。拒绝合入，改动保留在分支 {run_branch}。")
+    if (repo / ".git" / "MERGE_HEAD").is_file():
+        raise WorkspaceError(f"所选目录已有未完成的合并。改动保留在分支 {run_branch}。")
+    if _user_status(repo):
+        raise WorkspaceError(f"所选目录有未提交的改动，先提交或暂存后再合入。改动保留在分支 {run_branch}。")
+    ahead = _git(repo, "rev-list", "--count", f"{target}..{run_branch}")
+    if ahead == "0":
+        return f"分支 {run_branch} 相对 {target} 没有新的提交，未合入。"
+    proc = subprocess.run(
+        ["git", "-C", os.fspath(repo), "merge", "--no-edit", run_branch],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_commit_env(repo),
+    )
+    if proc.returncode != 0:
+        conflicts = _git(repo, "diff", "--name-only", "--diff-filter=U")
+        subprocess.run(["git", "-C", os.fspath(repo), "merge", "--abort"], capture_output=True, check=False)
+        files = "、".join(conflicts.split()) or (proc.stderr or proc.stdout or "").strip()
+        raise WorkspaceError(f"合并到 {target} 有冲突，已撤销合并：{files}。改动保留在分支 {run_branch}。")
+    head = _git(repo, "rev-parse", "--short", "HEAD")
+    first = f"已在分支 {run_branch} 提交 {committed}，" if committed else f"分支 {run_branch} 没有未提交的改动，"
+    return f"{first}并合并到 {target}（{head}）。"
+
+
+def _commit_all(path: Path, message: str) -> str:
+    """提交工作区内除工厂运行目录外的全部改动，返回短提交号；没有改动时返回空字符串。"""
+    if not _user_status(path):
+        return ""
+    _git(path, "add", "-A")
+    _git(path, "reset", "-q", "--", ".geni_studio")
+    if not _git(path, "diff", "--cached", "--name-only"):
+        return ""
+    proc = subprocess.run(
+        ["git", "-C", os.fspath(path), "commit", "-m", message],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_commit_env(path),
+    )
+    if proc.returncode != 0:
+        raise WorkspaceError((proc.stderr or proc.stdout or "git commit 失败").strip())
+    return _git(path, "rev-parse", "--short", "HEAD")
+
+
+def _git(path: Path, *args: str) -> str:
+    proc = subprocess.run(["git", "-C", os.fspath(path), *args], capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise WorkspaceError((proc.stderr or proc.stdout or f"git {args[0]} 失败").strip())
+    return proc.stdout.strip()
 
 
 def _branch_name(path: Path) -> str:

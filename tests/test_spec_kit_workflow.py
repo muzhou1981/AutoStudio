@@ -25,7 +25,7 @@ def test_spec_kit_is_builtin_and_runnable():
     loaded = get_workflow(FLOW)["workflow"]
     assert check_workflow(loaded, FLOW) == []
     names = [node["name"] for node in loaded["nodes"]]
-    assert names == ["启动", "起草规格", "审规格", "制定方案", "拆分任务", "一致性分析", "审方案", "实现", "核对实现", "验收", "结束"]
+    assert names == ["启动", "起草规格", "审规格", "制定方案", "拆分任务", "一致性分析", "审方案", "实现", "核对实现", "验收", "提交入库", "结束"]
     nodes = {node["id"]: node for node in loaded["nodes"]}
     assert nodes["review_spec"]["reject_to"] == "specify"
     assert nodes["analyze"]["returns_to"] == "plan"
@@ -33,7 +33,8 @@ def test_spec_kit_is_builtin_and_runnable():
     assert nodes["review_plan"]["reject_to"] == "plan"
     assert nodes["converge"]["returns_to"] == "implement"
     assert nodes["accept"]["reject_to"] == "implement"
-    assert all(node.get("instruction") for node in loaded["nodes"] if node["kind"] == "activity")
+    assert nodes["land"]["commits_on_branch"] is True
+    assert all(node.get("instruction") for node in loaded["nodes"] if node["kind"] == "activity" and not node.get("commits_on_branch"))
 
     with pytest.raises(ConfigError, match="先复制"):
         save_workflow(FLOW, loaded)

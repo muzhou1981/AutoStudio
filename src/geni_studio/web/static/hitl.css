@@ -980,19 +980,22 @@ button.hitl-review-name {
   font-weight: 400;
 }
 .gate-item-hint { margin: 0; color: var(--text-secondary); font-size: 0.8125rem; }
-.gate-item-seg { display: inline-flex; align-self: flex-start; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.gate-item-seg { display: flex; flex-wrap: wrap; gap: 0.5rem; align-self: flex-start; }
 .gate-item-seg button {
+  min-width: 4.5rem;
+  min-height: 1.875rem;
   padding: 0.2rem 0.85rem;
-  border: 0;
-  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
   color: var(--text-primary);
   font: inherit;
   font-size: 0.8125rem;
   cursor: pointer;
 }
-.gate-item-seg button + button { border-left: 1px solid var(--border); }
-.gate-item-seg button[data-value="approved"][aria-pressed="true"] { background: var(--success); color: #fff; }
-.gate-item-seg button[data-value="rejected"][aria-pressed="true"] { background: var(--danger); color: #fff; }
+.gate-item-seg button:hover { border-color: var(--text-muted); }
+.gate-item-seg button[data-value="approved"][aria-pressed="true"] { border-color: var(--success); background: var(--success); color: #fff; }
+.gate-item-seg button[data-value="rejected"][aria-pressed="true"] { border-color: var(--danger); background: var(--danger); color: #fff; }
 .gate-item-seg button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 
 .decision-entry-questions {

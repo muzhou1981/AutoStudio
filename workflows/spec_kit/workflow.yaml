@@ -128,6 +128,12 @@ nodes:
   returns_to: ''
   decision: approve
   reject_to: implement
+- id: land
+  kind: activity
+  name: 提交入库
+  role: developer
+  returns_to: ''
+  commits_on_branch: true
 - id: end
   kind: end
   name: 结束

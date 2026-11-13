@@ -93,6 +93,87 @@ def test_current_branch_allows_dirty_start_but_refuses_commit_on_wrong_branch(tm
         commit_current_branch(os.fspath(tmp_path), layout.base_branch, "不该提交")
 
 
+def _show(repo, ref, name):
+    return subprocess.check_output(["git", "-C", os.fspath(repo), "show", f"{ref}:{name}"], text=True)
+
+
+def test_worktree_lands_on_the_starting_branch(tmp_path):
+    from geni_studio.workspace.layout import land_worktree, prepare_run_layout
+
+    layout = prepare_run_layout(tmp_path, "run1")
+    start = subprocess.check_output(["git", "-C", os.fspath(tmp_path), "rev-parse", "--abbrev-ref", "HEAD"], text=True)
+    marker = tmp_path / ".geni_studio" / "runs" / "run1" / "land_branch.txt"
+    assert marker.read_text(encoding="utf-8").strip() == start.strip()
+    (layout.worktree / "feature.txt").write_text("新功能\n", encoding="utf-8")
+    record = land_worktree(os.fspath(layout.worktree), "加上新功能")
+    assert "geni-studio/run1" in record and f"并合并到 {start.strip()}" in record
+    assert _show(tmp_path, "HEAD", "feature.txt") == "新功能\n"
+    assert (tmp_path / "feature.txt").read_text(encoding="utf-8") == "新功能\n"
+    assert "没有新的提交" in land_worktree(os.fspath(layout.worktree), "")
+
+
+def test_worktree_landing_refuses_dirty_target_and_keeps_branch(tmp_path):
+    from geni_studio.workspace.layout import (
+        WorkspaceError,
+        land_worktree,
+        prepare_run_layout,
+    )
+
+    layout = prepare_run_layout(tmp_path, "run1")
+    (layout.worktree / "feature.txt").write_text("新功能\n", encoding="utf-8")
+    (tmp_path / "local.txt").write_text("人正在改\n", encoding="utf-8")
+    with pytest.raises(WorkspaceError, match="未提交的改动"):
+        land_worktree(os.fspath(layout.worktree), "加上新功能")
+    assert _show(tmp_path, "geni-studio/run1", "feature.txt") == "新功能\n"
+    assert not (tmp_path / "feature.txt").exists()
+
+
+def test_worktree_landing_aborts_on_conflict(tmp_path):
+    from geni_studio.workspace.layout import (
+        WorkspaceError,
+        land_worktree,
+        prepare_run_layout,
+    )
+
+    layout = prepare_run_layout(tmp_path, "run1")
+    (layout.worktree / "same.txt").write_text("工作树\n", encoding="utf-8")
+    (tmp_path / "same.txt").write_text("主分支\n", encoding="utf-8")
+    subprocess.check_call(["git", "-C", os.fspath(tmp_path), "add", "same.txt"])
+    subprocess.check_call(
+        ["git", "-C", os.fspath(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "main"]
+    )
+    with pytest.raises(WorkspaceError, match="有冲突，已撤销合并：same.txt"):
+        land_worktree(os.fspath(layout.worktree), "冲突")
+    assert not (tmp_path / ".git" / "MERGE_HEAD").exists()
+    assert (tmp_path / "same.txt").read_text(encoding="utf-8") == "主分支\n"
+
+
+def test_spec_kit_run_lands_worktree_changes_after_acceptance(tmp_path, monkeypatch):
+    monkeypatch.setenv("GENI_STUDIO_WORKSPACE", "1")
+    monkeypatch.setenv("GENI_STUDIO_TARGET_ROOT", str(tmp_path))
+    monkeypatch.setenv("GENI_STUDIO_BACKEND", "stub")
+    from geni_studio.config.context import build_run_context
+
+    def wrapped(*args, **kwargs):
+        ctx = build_run_context(*args, **kwargs)
+        ctx.merged["workflow"] = {**(ctx.merged.get("workflow") or {}), "profile_id": "spec_kit"}
+        return ctx
+
+    monkeypatch.setattr("geni_studio.config.context.build_run_context", wrapped)
+    service = GraphRunService(graph)
+    st = service.start(human_request="加一个问候功能")
+    worktree = Path(st.values["workspace_path"])
+    assert worktree != tmp_path.resolve()
+    (worktree / "hello.txt").write_text("你好\n", encoding="utf-8")
+    for _ in range(10):
+        if st.phase != "awaiting_human":
+            break
+        st = service.submit_hitl(st.thread_id, gate_decision="approved")
+    assert st.phase == "completed"
+    assert (tmp_path / "hello.txt").read_text(encoding="utf-8") == "你好\n"
+    assert "并合并到" in str(st.values.get("land_record") or "")
+
+
 def test_current_branch_activity_does_not_commit_early(monkeypatch):
     from geni_studio.workflows.executable import _activity
 

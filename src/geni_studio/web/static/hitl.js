@@ -1787,7 +1787,7 @@
         ignoreProjectChange = false;
         runNameTouched = true;
         $("runName").value = data.run_name || "";
-        $("runName").disabled = false;
+        applyBoundRunName(null);
         $("req").value = data.human_request || "";
         reqFromRun = false;
         runAttachments = (data.attachments || []).map((item) => ({
@@ -4946,7 +4946,7 @@
       syncThreadChrome("");
       stopPoll();
       runNameTouched = false;
-      if ($("runName")) $("runName").disabled = false;
+      applyBoundRunName(null);
       fillRunNameSuggestion();
       loadIdleRail();
       syncStartButton("idle");

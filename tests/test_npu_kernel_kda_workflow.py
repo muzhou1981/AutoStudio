@@ -29,7 +29,7 @@ def test_npu_kernel_kda_is_builtin_and_runnable():
     names = [node["name"] for node in loaded["nodes"]]
     assert names == [
         "启动", "算子合同", "确认合同", "方案草案", "审方案", "实现候选", "分层验证",
-        "诊断与取舍", "接入算子库", "集成核对", "算子报告", "晋升评审", "结束",
+        "诊断与取舍", "接入算子库", "集成核对", "算子报告", "晋升评审", "提交入库", "结束",
     ]
     nodes = {node["id"]: node for node in loaded["nodes"]}
     assert nodes["confirm_contract"]["reject_to"] == "contract"
@@ -38,7 +38,8 @@ def test_npu_kernel_kda_is_builtin_and_runnable():
     assert (nodes["measure"]["returns_to"], nodes["measure"]["max_loops"]) == ("implement", 4)
     assert (nodes["integration_check"]["returns_to"], nodes["integration_check"]["max_loops"]) == ("integrate", 2)
     assert nodes["promote"]["reject_to"] == "implement"
-    assert all(node.get("instruction") for node in loaded["nodes"] if node["kind"] == "activity")
+    assert nodes["land"]["commits_on_branch"] is True
+    assert all(node.get("instruction") for node in loaded["nodes"] if node["kind"] == "activity" and not node.get("commits_on_branch"))
     assert "SVB" in nodes["measure"]["instruction"]
 
     with pytest.raises(ConfigError, match="先复制"):
